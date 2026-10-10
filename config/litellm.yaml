@@ -1,0 +1,16 @@
+model_list:
+  - model_name: gpt-6.1
+    litellm_params: { model: openai/gpt-6.1, api_base: os.environ/AGENTLAB_LLM_BASE_URL, api_key: os.environ/AGENTLAB_LLM_API_KEY }
+  - model_name: gpt-5.5
+    litellm_params: { model: openai/gpt-5.5, api_base: os.environ/AGENTLAB_LLM_BASE_URL, api_key: os.environ/AGENTLAB_LLM_API_KEY }
+  - model_name: gpt-5-mini
+    litellm_params: { model: openai/gpt-5-mini, api_base: os.environ/AGENTLAB_LLM_BASE_URL, api_key: os.environ/AGENTLAB_LLM_API_KEY }
+
+litellm_settings:
+  num_retries: 3
+  request_timeout: 180
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

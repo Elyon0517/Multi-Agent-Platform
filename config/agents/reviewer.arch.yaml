@@ -1,0 +1,5 @@
+role: arch-reviewer
+output: review
+prompt: prompts/reviewer.arch.md
+tool_grants: [workspace_read]
+kind: reviewer

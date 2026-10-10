@@ -1,0 +1,9 @@
+language: cpp
+image: agentlab/gate-cpp:latest
+markers: [CMakeLists.txt]
+steps:
+  - { name: build, argv: ["sh", "-c", "cmake -G Ninja -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && ninja -C build"], timeout_s: 600, modes: [fast, full] }
+  - { name: typecheck, argv: ["run-clang-tidy", "-p", "build"], timeout_s: 300, modes: [fast, full] }
+  - { name: format, argv: ["clang-format", "--dry-run", "--Werror", "-i", "src"], timeout_s: 120, modes: [full] }
+  - { name: test, argv: ["ctest", "--test-dir", "build", "--output-on-failure"], timeout_s: 300, modes: [fast, full] }
+  - { name: security, argv: ["cppcheck", "--error-exitcode=1", "src"], timeout_s: 300, modes: [full] }

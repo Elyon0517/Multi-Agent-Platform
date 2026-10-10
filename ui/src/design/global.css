@@ -1,0 +1,371 @@
+@import './fonts.css';
+@import './tokens.css';
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The app is a fixed cream/light design. Without declaring it, Chromium on a
+   dark-mode OS styles form controls with the DARK UA scheme — most visibly a
+   white (invisible) text caret on our cream textareas. */
+:root { color-scheme: light; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: var(--cth-cream-100);
+  color: var(--cth-ink-900);
+  font-family: var(--cth-font-ui);
+  font-size: var(--cth-text-body-md);
+  line-height: var(--cth-lh-body-md);
+  overflow: hidden;
+}
+
+body {
+  /* tiny diagonal cream noise — pure CSS, no images */
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(232, 217, 160, 0.20) 0 1px,
+      transparent 1px 6px
+    );
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Belt + suspenders for the caret: follow the ink, never the UA scheme. */
+input, textarea { caret-color: var(--cth-ink-900); }
+
+/* The MOUSE text-select pointer (the I-beam) is a different beast from the
+   caret: it comes from the OS cursor scheme, which `color-scheme` can't touch.
+   On Windows several schemes (and HiDPI variants) draw it white with a hairline
+   outline — invisible hovering over our cream inputs. Replace it with our own
+   inked I-beam wearing a cream halo, so it reads on cream AND on the dark
+   terminal. Falls back to the UA `text` cursor if SVG cursors are unavailable. */
+input, textarea, [contenteditable='true'] {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='17' height='18'><g fill='none' stroke='%23fdf6e3' stroke-width='4' stroke-linecap='round'><path d='M5 2.5h7M8.5 3v12M5 15.5h7'/></g><g fill='none' stroke='%23261d31' stroke-width='1.6' stroke-linecap='round'><path d='M5 2.5h7M8.5 3v12M5 15.5h7'/></g></svg>") 8 9, text;
+}
+
+/* Command Center tab bar scrolls horizontally when it overflows a narrow
+   sidebar; hide the scrollbar (overlay on mac, hidden elsewhere) — scroll with
+   trackpad / Shift+wheel, like a browser tab strip. */
+.cth-tabbar { scrollbar-width: none; -ms-overflow-style: none; }
+.cth-tabbar::-webkit-scrollbar { height: 0; display: none; }
+
+/* Same treatment for a vertical list (the fullscreen agent roster): still
+   scrollable by wheel/trackpad, but the bar itself never takes a slice out of an
+   already narrow rail. */
+.cth-scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+.cth-scroll-hidden::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Pixel-snapping for any rasterised content */
+canvas, img, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* Focus ring — 2px outer offset, ink */
+:focus-visible {
+  outline: 1px solid var(--cth-ink-300);
+  outline-offset: 2px;
+}
+
+/* Text inputs — resting border faint, focused border dark and thicker.
+   The resting 1px ink-100 is deliberately quiet so a panel full of boxes stays
+   calm, but that left NOTHING saying which box has the keyboard: these inputs
+   set `outline: none` (the global focus ring above sits OUTSIDE the inset
+   border and reads as detached from it), so the browser's own signal was gone
+   too. Focus now darkens and thickens the inset border instead.
+
+   Inset, so 1px to 2px changes no geometry and the text does not shift when you
+   click into the box. Both :focus and :focus-visible: a textarea you clicked
+   into is exactly as focused as one you tabbed into, and here we WANT the mouse
+   case — it is the one the founder is looking at while typing. */
+.cth-input { box-shadow: inset 0 0 0 1px var(--cth-ink-100); }
+.cth-input:focus,
+.cth-input:focus-visible { box-shadow: inset 0 0 0 2px var(--cth-ink-700); }
+
+/* Custom scrollbar — chunky, pixel-feel */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track {
+  background: var(--cth-cream-200);
+  box-shadow: inset 0 0 0 1px var(--cth-ink-100);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--cth-ink-700);
+  box-shadow: inset 0 0 0 1px var(--cth-ink-300);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--cth-ink-900); }
+
+/* commit-graph (open-source git visualiser) — harmonise with the pixel theme */
+/* Commit history. The `* { font-family: … !important }` blanket that used to live
+   here existed to reach inside the third-party commit-graph widget; the rows are
+   ours now, so fonts are set per element and the override would only fight the
+   monospace on hashes and timestamps. */
+.cth-commit-graph {
+  background: var(--cth-paper-100);
+  font-family: var(--cth-font-ui);
+  color: var(--cth-ink-900);
+}
+/* Row hover — the whole line is the click target for opening a commit. */
+.cth-commit-graph > div:hover { background: var(--cth-cream-200); }
+
+/* Drag region for hidden inset title bar (mac) */
+.cth-titlebar-drag { -webkit-app-region: drag; }
+.cth-titlebar-nodrag { -webkit-app-region: no-drag; }
+
+/* In-app tooltip for title-bar controls.
+   The native `title` attribute does not reliably render on buttons inside the
+   hiddenInset title bar, so those labels were correct in the markup and simply
+   invisible in the running app. CSS-only on purpose: no state, no re-render, and
+   nothing for the drag region to swallow. Usage: className="cth-tip"
+   data-tip="…". Keep aria-label for screen readers; drop `title` so a native
+   tooltip can never double up on this one. */
+.cth-tip { position: relative; }
+.cth-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  white-space: nowrap;
+  padding: 3px 7px 2px;
+  font-family: var(--cth-font-ui);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--cth-cream-100);
+  background: var(--cth-ink-900);
+  box-shadow: inset 0 0 0 1px var(--cth-ink-700);
+  opacity: 0;
+  pointer-events: none;
+  /* Delay matches the native tooltip feel, so it does not flash while the
+     pointer is just crossing the title bar on its way somewhere else. */
+  transition: opacity 90ms ease-out 400ms;
+  z-index: 100;
+}
+.cth-tip:hover::after,
+.cth-tip:focus-visible::after { opacity: 1; }
+
+/* Left-anchored variant, for a tip on a control that is NOT near the right edge
+   — the default right:0 would run the bubble off toward the sidebar. */
+.cth-tip-left::after { left: 0; right: auto; }
+
+/* Wrapping variant. `nowrap` is right for a two-word title-bar hint and wrong
+   for a sentence that has to say what a button actually does: at 60+ characters
+   a nowrap bubble is wider than the panel it explains. */
+.cth-tip-wrap::after {
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+  line-height: 15px;
+}
+
+/* Settings (gear) button in the title bar — a clear bordered chip with a
+   neo-brutalist hover (lemon fill + offset shadow) so it reads as a button. */
+.cth-settings-btn { transition: background 80ms steps(2), box-shadow 80ms steps(2), transform 80ms steps(2); }
+.cth-settings-btn:hover {
+  background: var(--cth-lemon) !important;
+  box-shadow: inset 0 0 0 1px var(--cth-ink-300), 2px 2px 0 0 var(--cth-ink-900) !important;
+  transform: translate(-1px, -1px);
+}
+.cth-settings-btn:active {
+  transform: translate(0, 0);
+  box-shadow: inset 0 0 0 1px var(--cth-ink-300) !important;
+}
+
+/* Keyframes — pixel-style: step-based, no easing */
+@keyframes cth-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes cth-pulse {
+  0%, 49% { transform: scale(1); }
+  50%, 100% { transform: scale(0.7); }
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+
+/* xterm: disable font ligatures.
+ * Some browsers (e.g. Firefox 130+) treat sequences like "ff"/"ft"/"fi" as
+ * ligatures, which breaks xterm's per-char width measuring: an "f" gets measured
+ * too narrow and renders with a trailing gap ("f or" instead of "for"). Forcing
+ * ligatures off on both the measure container and the rendered rows keeps the
+ * monospace grid correct. See xtermjs/xterm.js#5156. */
+.xterm,
+.xterm-rows,
+.xterm-width-cache-measure-container {
+  font-variant-ligatures: none !important;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0 !important;
+}
+
+/* Arabic/RTL in terminals (see terminal/arabicJoiner.ts for the whole recipe).
+   `plaintext` gives each ROW its own base direction from its first strong
+   character — an Arabic row lays out right-to-left and right-aligned, a Latin
+   row is untouched. The span override matters just as much: xterm's DOM
+   renderer emits inline-block spans, which are ATOMIC to the bidi algorithm, so
+   the browser can never reorder them; plain inline text it can. !important is
+   load-bearing: the DOM renderer INJECTS a runtime stylesheet whose rules land
+   after this file and would otherwise win the cascade.
+
+   SCOPED to `.cth-bidi`, which terminalPool puts on a host only when the user
+   has switched Arabic terminals on. Unscoped, these rules would also reshape
+   the terminal of an English user who happened to fall back to the DOM renderer
+   after losing a WebGL lease — a layout change from a feature they never
+   enabled. The WebGL canvas ignores CSS entirely, so this is inert either way
+   for anyone on the GPU renderer. */
+.cth-bidi .xterm .xterm-rows > div,
+.cth-bidi.xterm .xterm-rows > div { unicode-bidi: plaintext !important; }
+.cth-bidi .xterm .xterm-rows > div > span,
+.cth-bidi.xterm .xterm-rows > div > span { display: inline !important; unicode-bidi: normal !important; }
+
+/* ─── RTL app language ───────────────────────────────────────────────────────
+   Everything below is under `[dir="rtl"]`, which i18n/useDirection puts on
+   <html> ONLY for a user who picked a right-to-left app language. For everyone
+   else <html> is `dir="ltr"` and not one of these selectors matches, so this
+   whole section is inert — no specificity change, no inherited property, no
+   repaint. That is the gate the Arabic UI ships under.
+
+   THE TERMINAL GRID IS NOT PROSE, so it does not mirror with the rest of the
+   app. `direction` inherits, and xterm's viewport would pick up `rtl` from
+   <html> and right-align the entire cell grid — reversing box-drawing frames,
+   putting the cursor column on the wrong side, and mirroring every TUI the
+   agents run. The grid is a fixed left-to-right coordinate space that the pty
+   also believes in (it addresses cells by column from the left), so the two
+   have to agree. Per-ROW direction is a separate question and already has an
+   answer: `.cth-bidi` above, which gives each row its own base direction from
+   its own text. That is the right layer for it — this rule pins the container,
+   that one frees the rows. */
+[dir="rtl"] .xterm,
+[dir="rtl"] .xterm-viewport,
+[dir="rtl"] .xterm-screen,
+[dir="rtl"] .xterm-rows,
+[dir="rtl"] .xterm-width-cache-measure-container { direction: ltr; }
+
+/* Tooltip bubbles anchor to an EDGE, and the edge they mean is "the side of the
+   control the text runs away from" — which swaps under RTL. These were written
+   as physical `right: 0` / `left: 0` (the `.cth-tip-left` variant), so in a
+   mirrored UI every tip would hang off the wrong side and the variant meant to
+   pull one back toward the middle would push it further out instead. */
+[dir="rtl"] .cth-tip::after { right: auto; left: 0; }
+[dir="rtl"] .cth-tip-left::after { left: auto; right: 0; }
+
+/* A code span or block keeps its own direction wherever it appears, RTL page or
+   not: reordering a shell command changes what it says. The markdown preview
+   already isolates its own (see `.cth-md-preview code`); this covers the same
+   content rendered outside that wrapper. */
+[dir="rtl"] code,
+[dir="rtl"] pre { direction: ltr; unicode-bidi: isolate; text-align: start; }
+
+/* Scrollbars, sliders and progress fills read from the inline start, so under
+   RTL they should fill from the right. `direction` alone does not reach a
+   native range input's track. */
+[dir="rtl"] input[type="range"] { direction: rtl; }
+
+/* ─── Markdown preview (v0.3.4) ──────────────────────────────────────────────
+   Shared by the IDE split/preview view and the fullscreen file overlay. All
+   colors ride the tokens, so light + dark themes come for free. */
+.cth-md-preview {
+  font-family: var(--cth-font-ui);
+  font-size: 14px; line-height: 1.65;
+  color: var(--cth-ink-900);
+  max-width: 72ch;
+  padding: 16px 20px 32px;
+}
+.cth-md-preview h1, .cth-md-preview h2, .cth-md-preview h3,
+.cth-md-preview h4, .cth-md-preview h5 {
+  color: var(--cth-ink-900);
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+}
+.cth-md-preview h1 { font-size: 24px; border-bottom: 1px solid var(--cth-ink-100); padding-bottom: 6px; }
+.cth-md-preview h2 { font-size: 19px; border-bottom: 1px solid var(--cth-ink-100); padding-bottom: 4px; }
+.cth-md-preview h3 { font-size: 16px; }
+.cth-md-preview h4 { font-size: 14px; }
+.cth-md-preview p { margin: 0.6em 0; }
+.cth-md-preview a { color: var(--cth-sky); }
+.cth-md-preview code {
+  font-family: var(--cth-font-mono); font-size: 12.5px;
+  background: var(--cth-cream-200); padding: 1px 5px; border-radius: 2px;
+}
+.cth-md-preview pre {
+  background: var(--cth-cream-200);
+  box-shadow: inset 0 0 0 1px var(--cth-ink-100);
+  padding: 10px 12px; overflow-x: auto; border-radius: 2px;
+}
+.cth-md-preview pre code { background: transparent; padding: 0; }
+/* Code is LTR no matter what language the prose around it is in: an inline
+   `code` inherits dir from the paragraph holding it, which would flip a shell
+   command or a path. `isolate` keeps it from disturbing the surrounding run.
+   For LTR prose this is what already happened, so nothing moves. */
+.cth-md-preview code, .cth-md-preview pre {
+  direction: ltr; unicode-bidi: isolate; text-align: start;
+}
+.cth-md-preview blockquote {
+  margin: 0.8em 0; padding-block: 2px; padding-inline-start: 14px;
+  border-inline-start: 3px solid var(--cth-ink-300); color: var(--cth-ink-700);
+}
+.cth-md-preview ul, .cth-md-preview ol { padding-inline-start: 22px; margin: 0.5em 0; }
+.cth-md-preview li { margin: 3px 0; }
+.cth-md-preview li::marker { color: var(--cth-ink-500); }
+.cth-md-preview input[type="checkbox"] { accent-color: var(--cth-mint); margin-inline-end: 6px; }
+.cth-md-preview table {
+  border-collapse: collapse; margin: 0.8em 0; display: block; overflow-x: auto;
+}
+.cth-md-preview th, .cth-md-preview td {
+  border: 1px solid var(--cth-ink-100); padding: 5px 10px; text-align: start;
+  font-size: 13px;
+}
+.cth-md-preview th { background: var(--cth-cream-200); font-weight: 600; }
+.cth-md-preview hr { border: none; border-top: 1px solid var(--cth-ink-100); margin: 1.4em 0; }
+/* Real (local) images inside rendered markdown. `max-width: 100%` is the whole
+   trick: agent screenshots are routinely 3000px wide and would otherwise force
+   a horizontal scrollbar on the entire preview pane. The hairline gives a light
+   screenshot an edge against the paper background so it doesn't bleed away. */
+.cth-md-preview .cth-md-image {
+  display: block; max-width: 100%; height: auto; margin: 0.6em 0;
+  box-shadow: inset 0 0 0 1px var(--cth-ink-100);
+  border-radius: 2px;
+}
+.cth-md-preview .cth-md-img {
+  display: inline-block; padding: 2px 8px; font-size: 12px;
+  background: var(--cth-cream-200); box-shadow: inset 0 0 0 1px var(--cth-ink-100);
+  color: var(--cth-ink-500); border-radius: 2px;
+}
+
+/* ─── Markdown inside a card (v0.4.6) ────────────────────────────────────────
+   The same renderer, hosted in a surface that already has its own type: the
+   ASK ME question and the task detail's Q&A trail. It inherits the host's face
+   and size (the mono face those cards set, not the UI face) and drops the document
+   chrome — no 72ch measure, no page padding — so a one-line question is still
+   one line. Every size below is relative, so the host sets the scale. */
+.cth-md-preview.cth-md-card {
+  font-family: inherit; font-size: inherit; line-height: inherit;
+  max-width: none; padding: 0;
+  /* A long path or URL in an agent's question wraps rather than widening the
+     card: the ASK ME column is narrow and does not scroll sideways. */
+  overflow-wrap: anywhere;
+}
+.cth-md-card > :first-child { margin-top: 0; }
+.cth-md-card > :last-child { margin-bottom: 0; }
+.cth-md-card p { margin: 1.1em 0; }
+.cth-md-card h1, .cth-md-card h2, .cth-md-card h3,
+.cth-md-card h4, .cth-md-card h5 {
+  margin: 0.8em 0 0.3em; border-bottom: none; padding-bottom: 0;
+}
+.cth-md-card h1 { font-size: 1.25em; }
+.cth-md-card h2 { font-size: 1.15em; }
+.cth-md-card h3, .cth-md-card h4, .cth-md-card h5 { font-size: 1.05em; }
+.cth-md-card code { font-size: 0.9em; padding: 0 3px; }
+.cth-md-card pre { margin: 0.5em 0; padding: 6px 8px; }
+/* 22px, not less: the list marker is painted OUTSIDE the padding box, and a
+   tighter indent clips "1." against the card's own 9px edge.
+   Logical, to match `.cth-md-preview` above — a card's list indent has to end
+   up on whichever side the list actually starts on, and an ASK ME question or a
+   task Q&A entry is exactly the agent-written text most likely to be Arabic. */
+.cth-md-card ul, .cth-md-card ol { padding-inline-start: 22px; margin: 0.4em 0; }
+.cth-md-card li { margin: 1px 0; }
+.cth-md-card blockquote { margin: 0.5em 0; padding-inline-start: 10px; }
+.cth-md-card hr { margin: 0.8em 0; }
+.cth-md-card table { margin: 0.5em 0; }
+.cth-md-card th, .cth-md-card td { padding: 3px 7px; font-size: 0.9em; }

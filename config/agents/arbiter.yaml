@@ -1,0 +1,5 @@
+role: arbiter
+output: arbiter_decision
+prompt: prompts/arbiter.md
+tool_grants: []
+kind: deterministic

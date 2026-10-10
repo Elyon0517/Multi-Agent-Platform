@@ -1,0 +1,5 @@
+role: correctness-reviewer
+output: review
+prompt: prompts/reviewer.correctness.md
+tool_grants: [workspace_read]
+kind: reviewer

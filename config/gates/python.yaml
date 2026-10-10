@@ -1,0 +1,10 @@
+language: python
+image: agentlab/gate-python:latest
+markers: [pyproject.toml, setup.py, requirements.txt]
+steps:
+  - { name: build, argv: ["uv", "sync"], timeout_s: 600, modes: [fast, full] }
+  - { name: typecheck, argv: ["mypy", "--strict", "."], timeout_s: 300, modes: [fast, full] }
+  - { name: lint, argv: ["ruff", "check", "."], timeout_s: 120, modes: [fast, full] }
+  - { name: format, argv: ["ruff", "format", "--diff", "."], timeout_s: 120, modes: [full] }
+  - { name: test, argv: ["pytest", "-q"], timeout_s: 300, modes: [fast, full] }
+  - { name: security, argv: ["pip-audit"], timeout_s: 300, modes: [full] }

@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from functools import partial
+from typing import TypeVar
+
+from pydantic import BaseModel, ValidationError
+
+from agentlab.core.budget import estimate_cents
+from agentlab.core.config import AppConfig
+from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted, call_with_retry
+from agentlab.core.ports import RunContext
+from agentlab.core.routing import Override, Route, Router
+from agentlab.core.schemas import AgentInput, AgentResult, Usage
+
+T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class Completion:
+    text: str
+    tokens_in: int
+    tokens_out: int
+
+
+ChatFn = Callable[..., Awaitable[Completion]]
+
+
+def render_user_message(inp: AgentInput) -> str:
+    return inp.model_dump_json(exclude_none=True, exclude_defaults=True, indent=1)
+
+
+class StructuredCaller:
+    def __init__(self, cfg: AppConfig, chat: ChatFn) -> None:
+        self._cfg = cfg
+        self._router = Router(cfg)
+        self._chat = chat
+
+    async def call(
+        self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext,
+        override: Override | None = None,
+    ) -> AgentResult[T]:
+        route = self._router.resolve(role, override)
+        log = AttemptLog()
+        started = time.monotonic()
+        last: Exception | None = None
+        for alias in route.chain:
+            try:
+                output, usage = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
+                return AgentResult[output_type](  # type: ignore[valid-type]
+                    role=role, output=output, alias=alias, model=self._router.model_of(alias), usage=usage,
+                    latency_ms=int((time.monotonic() - started) * 1000), attempts=log.count,
+                    retry_reasons=log.reasons,
+                    routing_reason=route.reason if alias == route.alias else f"fallback_from_{route.alias}",
+                )
+            except RetriesExhausted as e:
+                last = e
+        assert last is not None
+        raise last
+
+    async def _call_alias(
+        self, route: Route, alias: str, role: str, inp: AgentInput, output_type: type[T],
+        ctx: RunContext, log: AttemptLog,
+    ) -> tuple[T, Usage]:
+        alias_cfg = self._cfg.models.aliases[alias]
+        system = self._cfg.prompt(role)
+        messages = [{"role": "user", "content": render_user_message(inp)}]
+        usage = Usage()
+        schema = output_type.model_json_schema()
+        for _ in range(self._cfg.retry.structured_output_repair.max_repairs + 1):
+            prompt_chars = len(system) + sum(len(m["content"]) for m in messages)
+            completion = await call_with_retry(
+                partial(self._chat, model=alias_cfg.model, system=system, messages=list(messages),
+                        temperature=route.temperature, schema=schema),
+                self._cfg.retry.llm_call,
+                log,
+                partial(ctx.check_budget, estimate_cents(alias_cfg, prompt_chars)),
+            )
+            usage = Usage(
+                tokens_in=usage.tokens_in + completion.tokens_in,
+                tokens_out=usage.tokens_out + completion.tokens_out,
+                cost_cents=usage.cost_cents + alias_cfg.cost_cents(completion.tokens_in, completion.tokens_out),
+            )
+            try:
+                return output_type.model_validate_json(completion.text), usage
+            except ValidationError as e:
+                log.reasons.append("structured_output_invalid")
+                messages += [
+                    {"role": "assistant", "content": completion.text},
+                    {"role": "user", "content": f"Your output failed validation. Fix and resend JSON only:\n{e}"},
+                ]
+        raise LlmError(f"{role}: structured output invalid after repairs")

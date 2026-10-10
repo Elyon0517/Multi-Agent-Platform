@@ -1,0 +1,5 @@
+role: summarizer
+output: memory
+prompt: prompts/summarizer.md
+tool_grants: []
+kind: worker

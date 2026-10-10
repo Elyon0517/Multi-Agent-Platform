@@ -1,0 +1,5 @@
+role: planner
+output: plan
+prompt: prompts/planner.md
+tool_grants: [workspace_read, memory_search]
+kind: worker

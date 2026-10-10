@@ -1,0 +1,8 @@
+language: java
+image: agentlab/gate-jdk:latest
+markers: [pom.xml, build.gradle, build.gradle.kts]
+steps:
+  - { name: build, argv: ["mvn", "-q", "-B", "compile"], timeout_s: 600, modes: [fast, full] }
+  - { name: lint, argv: ["mvn", "-q", "spotless:check", "checkstyle:check"], timeout_s: 300, modes: [fast, full] }
+  - { name: test, argv: ["mvn", "-q", "test"], timeout_s: 300, modes: [fast, full] }
+  - { name: security, argv: ["mvn", "-q", "dependency-check:check"], timeout_s: 600, modes: [full] }

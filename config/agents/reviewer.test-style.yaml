@@ -1,0 +1,5 @@
+role: test-style-reviewer
+output: review
+prompt: prompts/reviewer.test-style.md
+tool_grants: [workspace_read]
+kind: reviewer

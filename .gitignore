@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+.env
+.env.*
+!.env.example
+node_modules/
+ui/dist/
+.agentlab/
+*.log
+.DS_Store

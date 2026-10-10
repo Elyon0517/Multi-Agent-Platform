@@ -1,0 +1,647 @@
+# Agent Converge Discovery
+
+> 状态：v1.2 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，下一步 P1 · 可持续更新
+> 最近更新：2026-10-09
+> 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
+> 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
+> 适用范围：个人本地 dev/研究工具，面向未来开源
+
+## v1.1 变更摘要（相对 PDF v1.0，目标不变）
+
+| # | 变更 | 原因 | ADR |
+|---|---|---|---|
+| 1 | 前端加入 **Office Floor 可视化**（移植 munder-difflin `scene/office/`，Pixi.js v8） | Agent 状态"看得见"，复用成熟实现 | ADR-011 |
+| 2 | LLM 改为 **单一 OpenAI 兼容网关 + 角色→模型别名映射**；root 与 sub agent 可用同一 endpoint 的不同模型 | 用户的实际访问方式 | ADR-012 |
+| 3 | 容器运行时使用 **Colima + docker CLI**（brew） | 本机无 Docker Desktop | ADR-013 |
+| 4 | 借鉴 homerail：**配置严格校验（未知字段报错）**、**所有循环静态上限**、**确定性命令白名单** | 配置即代码的安全前提 | ADR-014 |
+| 5 | 不做语音、不做跨平台桌面壳（Electron）；前端为 localhost Web | 范围收敛 | ADR-015 |
+| 7 | munder 的 `window.cth`（Electron IPC）以 `ui/src/bridge.ts` 适配层重实现，场景代码几乎零改动 | 便于对照上游、降低移植风险 | ADR-017 |
+| 6 | 新增「开发 Phase / Steps」章节，替代原里程碑的粗粒度描述；v1.2 按实际进度重排（§16） | 可执行性 | — |
+
+---
+
+## 一、项目定位与设计原则
+
+| 维度 | 决定 |
+|---|---|
+| 定位 | 个人本地 dev/研究工具，未来开源 |
+| 核心 MVP | Planner + Coder + Reviewer 的收敛 Loop |
+| 拓扑 | Supervisor（root）自动分派，调度逻辑抽成独立 policy 层（auto / manual 两种 policy） |
+| 消息 | 结构化对象，传 `artifact_id` 引用，**不传全文** |
+| Agent 生命周期 | 任务级临时实例；记忆宿主为 `project × role`，不是实例 |
+| 完成判定 | 所有 reviewer signoff（severity 阈值）→ 人工终审 |
+| 冲突 | 升级给人 + 震荡检测自动触发升级 |
+| Memory | Blackboard + Episodic + Semantic（MVP）；Procedural 延后 |
+| 隔离 | per-role namespace 私有 + 共享黑板；per-project Postgres schema |
+| 记忆写入 | 每轮 summarizer 自动抽取 + `pin_memory` 手动工具 |
+| LLM | **纯云端调用，本地不跑模型**；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口） |
+| 路由 | 静态 policy 表（角色→模型别名）+ root agent 受限 override（可复现优先） |
+| 多模型评审 | 2–3 个不同 LLM 并行独立 review（核心卖点） |
+| 预算 | 确定性中间件熔断 + LiteLLM virtual key 周限额，**不用 agent 做熔断** |
+| 安全 | Docker 沙箱 + 只读挂载 + 默认断网 + 工具白名单；密钥永不进 agent 进程 |
+| 运行形态 | 本地 daemon（CLI/TUI 为主）+ localhost TS UI（可选视图，非运行时依赖） |
+| 可视化 | Office Floor（Pixi）+ Run 树（React Flow）+ 看板/评审对比 |
+
+### 四条不可妥协的设计原则
+
+1. **确定性的事情不交给 LLM**：预算熔断、收敛判定、震荡检测、重试、路由，全部是普通 Python 代码。
+2. **配置即代码**：YAML + git 管理 agent 定义、模型策略、工具授权；DB 只存运行时状态。配置在加载时严格校验，未知字段直接报错。
+3. **便宜的检查先跑**：编译、类型、lint、测试在 LLM 评审之前，失败直接退回，不花一个 reviewer token。
+4. **一切可回放**：step 树 + artifact 内容寻址 + 事件日志，任何一次 run 都能重放和 diff。
+
+---
+
+## 二、编排框架：Google ADK vs LangGraph
+
+**结论**：自研 Loop Driver + Google ADK 作为 Agent 执行层的分层方案。复杂部分（Gate、severity 收敛、震荡、熔断、人工卡点）全是确定性逻辑；框架只需做好：调模型、挂工具、并行跑 reviewer。
+
+### 三层切分
+
+```
+Layer 3  Loop Driver（自研 · 纯 Python · 无框架依赖）
+  状态机：PLAN→CODE→GATE→REVIEW→ARBITRATE→HUMAN→DONE
+  职责：收敛判定、震荡检测、迭代上限、预算熔断、HIL 卡点、断点续跑（Postgres run / iteration）
+
+Layer 2  Agent Runtime（Google ADK，可替换）
+  LlmAgent(Planner/Coder/Reviewer×N/Summarizer/Arbiter)
+  ParallelAgent 跑评审团 · Callbacks 做中间件 · MCPToolset 挂工具
+
+Layer 1  Model Gateway（LiteLLM Proxy → 单一 OpenAI 兼容上游）
+  统一 OpenAI 格式 · 角色→模型别名 · retry=3 · per-project virtual key 预算与 RPM · 密钥隔离
+```
+
+框架隔离接口 `core/ports.py::AgentRuntime`，实现：`adapters/runtime/adk.py`（默认）、`adapters/runtime/raw.py`（兜底，直接 OpenAI SDK）、`adapters/runtime/fake.py`（测试/离线骨架）。
+
+---
+
+## 三、Loop Engine（系统灵魂）
+
+```
+Task → Planner → Coder → [客观 Gate] → [LLM 评审团] → Arbiter → Human → Done
+                   ↑          │ fail          │ changes      │ 冲突/震荡
+                   └──────────┴───────────────┘              └→ Human
+```
+
+1. **客观 Gate 前置**：build / typecheck / lint / test / diff 合法性先跑，失败退回 Coder，不消耗 reviewer token。
+2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。
+3. **结构化评审 + severity 阈值**：`blocking + major == 0` 即 signoff；minor / nit 只记录。
+4. **四个终止条件**：
+
+| 条件 | 动作 |
+|---|---|
+| 全部 reviewer signoff | → 人工终审 |
+| `iteration > max_iter`（默认 5） | → 升级给人 |
+| run token 或成本超预算 | → 暂停，等人决策 |
+| 震荡：连续 2 轮 `diff_hash` 相同，或 finding 指纹集合重复 | → 升级给人 |
+
+5. **状态机（可续跑）**：
+
+| 状态 | 下一步 |
+|---|---|
+| PLANNING | → CODING |
+| CODING | → GATING |
+| GATING | pass → REVIEWING；fail → CODING（带 gate 报告） |
+| REVIEWING | → ARBITRATING |
+| ARBITRATING | SIGNOFF → WAITING_HUMAN；BACK_TO_CODER → CODING；ESCALATE → WAITING_HUMAN |
+| WAITING_HUMAN | approve → DONE；reject+反馈 → CODING；abort → CANCELLED |
+
+每次状态迁移写一条 `iteration`/`event` 记录并 commit；进程挂掉后从 `run.status` 恢复。状态迁移表在 `core/loop/states.py` 中是**唯一事实源**，非法迁移抛异常（借鉴 homerail 的严格语义）。
+
+---
+
+## 四、客观 Gate：多语言适配器
+
+```python
+class GateAdapter(Protocol):
+    language: str
+    image: str
+    def detect(self, workspace: Path) -> bool: ...
+    async def run(self, workspace: Path, mode: GateMode) -> GateResult: ...
+```
+
+步骤（build / typecheck / lint / test / security）由 `config/gates/<lang>.yaml` 声明，适配器只负责执行与诊断解析。命令以 argv 列表执行，不经 shell。
+
+| 语言 | build | typecheck | lint/format | test | security |
+|---|---|---|---|---|---|
+| Python | `uv sync` | `mypy --strict` | `ruff check` + `ruff format --diff` | `pytest -q --cov` | `pip-audit` |
+| TypeScript | `pnpm build` | `tsc --noEmit` | `eslint` + `prettier --check` | `vitest run` | `pnpm audit` |
+| Java | `mvn -q -B compile` / `gradle build -x test` | 编译 + ErrorProne | `spotless:check` + checkstyle | `mvn -q test` | dependency-check |
+| C++ | `cmake -G Ninja && ninja` | 编译 + clang-tidy | `clang-format --dry-run --Werror` | `ctest --output-on-failure` | ASan/UBSan + cppcheck |
+
+C++：必须产出 `compile_commands.json`；增量缓存（ccache + 持久 build volume）+ 分级超时（build 600s / test 300s）。
+
+Gate 分两档：`fast`（每轮）/ `full`（进入 WAITING_HUMAN 前一次）。只把结构化 diagnostics 和日志尾部送进 prompt，完整日志存 blob。
+
+---
+
+## 五、多模型评审团与仲裁
+
+| Reviewer | 关注面 | 模型档 | 成本档 |
+|---|---|---|---|
+| correctness-reviewer | 正确性、边界、并发 | 强推理档 | 高 |
+| arch-reviewer | 架构、接口、可维护性 | 强推理档（不同厂商/型号） | 高 |
+| test-style-reviewer | 测试覆盖、风格、文档 | 廉价档 | 低 |
+
+三条硬规则：
+1. Reviewer 之间互相不可见（并行、独立调用）。
+2. 不投票：任一 reviewer 报 `blocking` 且 `confidence > 0.7` → 直接退回 Coder。
+3. Arbiter 不自行裁决真冲突：两 reviewer 结论直接矛盾 → 打包双方论点升级给人。
+
+Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化修复指令、检测矛盾。不做：判断谁对、忽略低 confidence 的 blocking、自行降级 severity、为收敛强行拍板。**Arbiter 是确定性代码**（`core/loop/arbiter.py`），LLM 仅可选用于生成修复指令的自然语言措辞。
+
+---
+
+## 六、Agent 清单
+
+| Role | 输入 | 输出 artifact | 默认模型别名 |
+|---|---|---|---|
+| supervisor (root) | 任务 + project 配置 | 调度决策（policy 层） | `root` |
+| planner | 需求 + 仓库上下文 + semantic memory | `plan`（含验收标准） | `strong` |
+| coder | plan + gate 报告 + arbiter 指令 | `diff` | `strong` |
+| reviewer × 3 | 需求 + 验收标准 + diff + gate 输出 | `review`（结构化 JSON） | `strong` / `strong-alt` / `cheap` |
+| arbiter | 全部 verdicts | `arbiter_decision` | 确定性代码 |
+| summarizer | 本轮全部 artifact | episodic memory 条目 | `cheap` |
+
+所有 agent 定义存于 `config/agents/*.yaml`，进 git。
+
+---
+
+## 七、LLM 网关、路由与 Retry 策略（v1.1 更新）
+
+### 7.1 单网关多模型（ADR-012）
+
+用户只有**一个 OpenAI 兼容 endpoint + 一个 key**，但不同角色用不同模型（例：root 用 GPT-6.1，sub reviewer/worker 用 GPT-5.5 或更低）。设计为三级映射：
+
+```
+role ──(model_policy.yaml)──▶ alias ──(models.yaml)──▶ provider model id ──▶ gateway endpoint
+supervisor                    root                     gpt-6.1                AGENTLAB_LLM_BASE_URL
+coder                         strong                   gpt-5.5
+test-style-reviewer           cheap                    gpt-5-mini
+```
+
+- **接口位置**：`.env`（不进 git）只需 `AGENTLAB_LLM_BASE_URL` + `AGENTLAB_LLM_API_KEY`；模型 id 在 `config/models.yaml` 中填，**代码零改动即可换模型**。
+- 代码中只出现**别名**（`root/strong/strong-alt/cheap`），永不硬编码模型名。
+- LiteLLM Proxy 可选：S0–S1 直连网关（`raw`/`adk` runtime 都走 OpenAI 兼容协议）；S2 起接 LiteLLM 做 virtual key 预算。两条路径共享同一份 `models.yaml`。
+- 多模型评审的"不同厂商"诉求降级为"不同型号"即可；若网关后有多家模型，直接在 `models.yaml` 配置。
+
+### 7.2 静态路由策略
+
+```yaml
+# config/model_policy.yaml
+roles:
+  supervisor:          { primary: root,   temperature: 0.2, fallback: [strong] }
+  planner:             { primary: strong, temperature: 0.2, fallback: [root] }
+  coder:               { primary: strong, temperature: 0.1, fallback: [root] }
+  correctness-reviewer:{ primary: strong, temperature: 0.0 }
+  arch-reviewer:       { primary: strong-alt, temperature: 0.0 }
+  test-style-reviewer: { primary: cheap,  temperature: 0.0 }
+  summarizer:          { primary: cheap,  temperature: 0.3 }
+override:
+  allowed_by: supervisor
+  allowed_transitions: [{ from: strong, to: root }, { from: strong-alt, to: root }]
+  forbidden: [downgrade_reviewer_below_tier_2]
+  must_log: true
+```
+
+### 7.3 Retry（retry = 3）
+
+`num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前过熔断；失败 attempt 的 token 也计入成本；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
+
+### 7.4 Embedding 与 Rerank（API）
+
+embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
+
+---
+
+## 八、预算与熔断（确定性中间件，非 agent）
+
+三道闸：
+1. LiteLLM virtual key（每 project 一把）—— `max_budget` / `rpm_limit` / 模型白名单（S2 起）。
+2. 应用层熔断中间件（ADK `before_model_callback` / raw runtime 调用前）—— 估算成本，超 run 预算直接短路，run 置 `WAITING_HUMAN`。
+3. per-run 软预算 —— `run.budget_cents`，80% 告警，100% 暂停。
+
+明确不做：用"检查 agent"判断要不要熔断。
+
+---
+
+## 九、Memory 与知识层
+
+| 类型 | 存储 | 写入方式 | MVP |
+|---|---|---|---|
+| Blackboard | `blackboard` 表（project+run，version 乐观锁） | agent 显式写 | Yes |
+| Episodic | `memory(kind='episodic')` | summarizer 自动抽取 | Yes |
+| Semantic | `memory(kind='semantic')` + pgvector | summarizer 提炼 + `pin_memory` | Yes |
+| Procedural | `memory(kind='procedural')` | 从成功 run 提炼 | 延后 |
+
+**三层作用域（v1.2，ADR-020）**
+
+| 层 | namespace | 归属 | 谁能读 | 谁写 | 已实现 |
+|---|---|---|---|---|---|
+| Global 个人知识 | `global` | 跨所有 project | 所有 agent | 用户上传 PDF / Markdown / txt（切块 + embedding） | Yes（内存版） |
+| Project | `project` | 单个 project | 该 project 的所有 agent | run 结束自动写结果；用户手写 note | Yes（内存版） |
+| Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | reviewer 提出 blocking/major 时自动记；用户手写 note | Yes（内存版） |
+
+每次调用 agent 前，Driver 通过 `RunHooks.context_for` 检索 `global ∪ project ∪ agent:<self>`，top-6 注入 `AgentInput.context.memory`。检索：BM25 + 向量（网关 embedding）→ RRF；embedding 失败自动降级为纯关键词，且 memory 任何异常都不会中断 run。扫描版 PDF（无文字层）会被拒绝并提示。
+
+**Project 进度**：project-planner（root 模型）把 project 目标拆成 phase → step；每个 step 可一键发起 run，run DONE 自动把 step 标为 done，失败/取消标 blocked；用户也可手动改状态（ADR-021）。
+
+旧命名空间 `shared` 由 `project` 取代；记忆归属 `project × role`。版本化非覆盖：`valid_from / valid_to / superseded_by`，永不物理删除。检索：`pgvector HNSW top-50 ∪ tsvector BM25 top-50 → RRF → rerank top-8`。
+
+---
+
+## 十、数据模型
+
+```
+project    (id, name, workspace_path, config_ref, budget_cents, default_language, created_at)
+agent_def  (id, project_id NULL, role, system_prompt_ref, model_policy, tool_grants[], version)
+run        (id, project_id, goal, status, max_iter, budget_cents, cost_cents, token_in, token_out,
+            started_at, paused_reason)
+iteration  (id, run_id, n, phase, gate_result jsonb, verdicts jsonb, diff_hash, finding_set jsonb)
+step       (id, run_id, iteration_id, agent_role, model_alias, model, prompt_ref, response_ref,
+            tool_calls jsonb, tokens, latency_ms, cost_cents, parent_step_id, attempt_count,
+            retry_reasons jsonb, routing_reason text)
+artifact   (id, run_id, kind, content_ref, sha256, created_by_step)   -- plan|diff|review|test_log|doc
+blackboard (id, project_id, run_id, key, value jsonb, version, updated_by, updated_at)
+memory     (id, project_id, namespace, kind, text, embedding vector(3072), embedding_model,
+            embedding_version, source_run_id, valid_from, valid_to, superseded_by, pinned, tsv)
+approval   (id, run_id, reason, payload jsonb, status, decided_by, decided_at)
+event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：可视化与回放的唯一事件流
+```
+
+- v1.1 新增 `event` 表：Office Floor、Run 树、TUI 都只消费这条事件流（SSE），见 §15.3。
+- `prompt_ref / response_ref / content_ref` 指向 blob 存储（本地文件，sha256 寻址），DB 不存大文本。
+- 隔离：单 Postgres 实例，每 project 一个 schema（`proj_<id>`）。导出 = `pg_dump -n schema`。
+
+---
+
+## 十一、安全与沙箱
+
+| 面 | 措施 |
+|---|---|
+| 文件系统 | Docker 容器，仅 workspace 读写挂载，其余只读或不挂载 |
+| `rm -rf` 防护 | 靠容器边界，不靠 prompt 约束 |
+| 网络 | 默认 `--network none`；装依赖时切白名单代理 |
+| 用户 | non-root，固定 uid/gid，`--cap-drop=ALL`，只读 rootfs + tmpfs |
+| 资源 | `--memory` / `--cpus` / `--pids-limit` / 每步超时 |
+| 工具授权 | per-agent 白名单（`agent_def.tool_grants`），runtime 调用前强制 |
+| 命令执行 | argv 列表、不经 shell、可执行文件白名单（借鉴 homerail `command` 节点） |
+| 密钥 | 永不进 agent 进程与沙箱；LLM key 只在 daemon/网关进程 |
+| 危险操作 | 写 workspace 外、开网络、force push、删分支 → `approval` 卡点 |
+
+容器运行时：Colima（`colima start --cpu 4 --memory 8`）+ docker CLI + docker-compose。
+
+---
+
+## 十二、技术选型总表
+
+| 层 | 选择 |
+|---|---|
+| 编排 | 自研 Loop Driver（Python 3.12+） |
+| Agent 运行时 | Google ADK（Python）；raw / fake 兜底 |
+| 模型网关 | 单一 OpenAI 兼容 endpoint；LiteLLM Proxy（S2 起） |
+| 存储 | Postgres 16 + pgvector；SQLAlchemy 2 + Alembic |
+| 结构化输出 | Pydantic v2（`extra="forbid"`） |
+| 沙箱 | Docker via Colima |
+| 工具层 | MCP（自研工具也写成 MCP server） |
+| 后端入口 | FastAPI daemon（localhost）+ Typer CLI + Textual TUI |
+| 前端 | React 18 + Vite + TypeScript + zustand + TanStack Query + SSE |
+| 可视化 | Pixi.js v8 Office Floor（移植自 munder-difflin）+ React Flow Run 树 + Monaco diff |
+| Trace | Langfuse 自托管（经 OTel，S5） |
+| 包管理 | uv（Python）/ npm（UI） |
+| 配置 | YAML + git（`config/`），加载即严格校验 |
+
+---
+
+## 十三、目录结构
+
+```
+agentlab/
+├── docker-compose.yml            # postgres+pgvector / litellm(可选) / langfuse(可选)
+├── .env.example                  # AGENTLAB_LLM_BASE_URL / AGENTLAB_LLM_API_KEY / DATABASE_URL
+├── config/
+│   ├── models.yaml               # 别名 → 模型 id + 能力矩阵 + 价格
+│   ├── model_policy.yaml         # 角色 → 别名 + override 白名单
+│   ├── retry.yaml
+│   ├── budget.yaml
+│   ├── agents/*.yaml
+│   ├── prompts/*.md
+│   ├── gates/{python,typescript,java,cpp}.yaml
+│   └── policies/{auto,manual}.yaml
+├── src/agentlab/
+│   ├── settings.py / bootstrap.py   # env + 组装根（composition root）
+│   ├── core/
+│   │   ├── ports.py              # AgentRuntime / GateAdapter / Sandbox / Store / MemoryStore / EventBus
+│   │   ├── schemas.py            # Plan/Diff/Finding/Verdict/GateResult/Event
+│   │   ├── config.py             # 严格配置模型
+│   │   ├── routing.py            # role → alias → model
+│   │   ├── budget.py
+│   │   ├── loop/{states,driver,convergence,oscillation,arbiter}.py
+│   │   └── llm/retry.py
+│   ├── adapters/
+│   │   ├── runtime/{fake,raw,adk}.py
+│   │   ├── gates/config_gate.py   # 读 config/gates/*.yaml，单一实现（ADR-018）
+│   │   ├── sandbox/{local,docker}.py
+│   │   ├── store/{memory,blobs}.py   # postgres.py 于 P2 加入
+│   │   ├── workspace.py / events.py
+│   │   └── memory/{blackboard,pgvector}.py   # P6
+│   ├── mcp/                      # workspace_fs / git / gate MCP server
+│   ├── api/                      # FastAPI + SSE
+│   ├── cli/                      # Typer + Textual
+│   └── db/migrations/            # alembic
+├── ui/                           # React + Vite + Pixi（Office Floor 移植）
+│   ├── src/scene/office/         # ← munder-difflin（MIT）
+│   ├── src/assets/               # ← tilesets（LimeZu，需署名）/ fonts（OFL）
+│   └── THIRD_PARTY_NOTICES.md
+├── evals/tasks/                  # 10 个固定回归任务
+├── docker/                       # gate 镜像：py / node / jdk / cpp
+└── tests/
+```
+
+---
+
+## 十四、关键文件骨架
+
+见代码：`core/loop/driver.py`（状态机主循环）、`core/schemas.py`（Finding/Verdict）、`core/loop/arbiter.py`、`core/loop/oscillation.py`、`core/llm/retry.py`。原 PDF 中的伪代码已落为可测试实现。
+
+---
+
+## 十五、前端与可视化（v1.1 重写）
+
+定位：localhost 的只读观察窗 + 审批入口，不是运行时依赖。关掉前端，CLI 照样跑完整流程。
+
+### 15.1 视图
+
+| 版本 | 内容 |
+|---|---|
+| v0（只读） | **Office Floor**、Run 列表、Run 时间线（iteration × phase）、Gate 诊断表、3 个 reviewer verdict 并排对比、成本与 token 看板 |
+| v1（交互） | 审批卡点（approve / reject+反馈）、恢复暂停的 run、调整 budget 与 max_iter |
+| v2（深度） | React Flow step 树、Monaco diff viewer、从任意 iteration 回放、memory 浏览与 pin、Memory Graph |
+
+### 15.2 从 munder-difflin 移植的内容（ADR-011）
+
+| munder 源 | Agent Converge 用途 | 改动 |
+|---|---|---|
+| `scene/office/*`（OfficeFloor、Character、CharacterSprite、Camera、pathfinding、ThoughtBubble、ToolBubble、MessageEnvelope、DeskScreen、SeatPool、TiledMapRenderer、theme*、cast、portraitArt、glRecovery、cafeteriaLines） | Office Floor 主场景 | 数据源 `window.cth`(Electron IPC) → `EventSource` SSE；删 `pixi.js/unsafe-eval`（浏览器无需） |
+| `design/tokens.{ts,css}`, `global.css`, `fonts.css` | 像素风设计系统 | 原样 |
+| `components/PixelPanel / PixelButton / PixelBadge / Icon / SpritePortrait` | 基础组件 | 原样 |
+| `components/TasksKanban` | Run 看板（状态列 = loop state） | 数据源替换 |
+| `components/ToolWaterfall` | 每个 agent 的 LLM 调用 / Gate 瀑布图（AgentDetail → tools） | 数据源：`step.finished` / `gate.finished` 事件折叠 |
+| `components/MemoryGraphPanel` + `memoryGraph/*` | memory 图谱（v2） | 数据源替换 |
+| `components/BlockedBanner` | WAITING_HUMAN 审批横幅 | 动作 → `/runs/{id}/approval` |
+| `components/ThreadsPanel` | agent 间 artifact 流转（AgentDetail → messages）；回复 = 带反馈 reject | 数据源替换 |
+| `components/AgentStrip` + `AgentCard` + `AgentNameEditor` | 底部 agent 卡片条：头像、状态、alias·model、context 进度、私人便签、拖拽排序、改名 | 去掉 PTY / 语音 / 新增 agent / 恢复团队；改名、排序、便签存 localStorage |
+| `components/RecentText` + `hooks/useTypewriter` | agent 最新输出（打字机） | 数据源：`step.finished.summary` |
+| `components/OfficeThemePicker` | 切换地图（office / brooklyn99） | 切换不再删除 agent，去掉确认弹窗 |
+| `components/AskMeTab` + `askMeOrder` | 待人工决策列表；回答 approve/abort/其它文字 = 反馈 | `WAITING_HUMAN` run 映射为 humanQA 卡片 |
+| `components/TaskDetailOverlay` | 看板卡片详情 | assign → 跳到该 run |
+| `assets/tilesets/*`, `assets/maps/*.tmj` | 地图与素材 | **LimeZu 许可，必须署名** |
+| `assets/fonts/*` | Press Start 2P / Inter / JetBrains Mono | OFL 1.1 |
+| `i18n/locales/{en,zh-CN}.json` 的 `office.*` 段 | 场景文案 | 只保留用到的 key |
+
+不移植：语音（realtime/freeflow、RealtimeMichaelToggle、CostHud）、PTY/xterm、Electron main/preload、hire/onboarding（AddAgentModal、OnboardingWizard）、Slack/webhook 触发器、Skills/Workers、更新器、SettingsModal。
+
+**精简版控制台（ADR-022）**：munder 的 CommandCenterPanel（13 个标签、大半依赖 PTY）不整体移植，改为右侧 8 个标签：runs / project / tasks / ask me / memory / graph / activity / settings。点任意头像或卡片在顶部展开 AgentDetail（activity / tools / messages）。
+
+**Settings**：网关 URL + API key 输入（password 输入框，可切换显示）；写入本地 `.env`（chmod 600）；后端只返回 `••••••••` + 后 4 位，永不回传完整 key（ADR-023）。
+
+### 15.3 角色与状态映射
+
+Office Floor 只认事件流，映射规则集中在 `ui/src/scene/adapter/` 一处：
+
+| Agent Converge | munder Agent 字段 |
+|---|---|
+| supervisor | `isGod = true`（坐 Michael 的办公室） |
+| planner / coder / reviewer×3 / summarizer / arbiter | 普通工位，各分配一个 cast 角色与 accent |
+| `step.started` (LLM 推理中) | `status = 'thinking'` |
+| `step.tool_call` | `status = 'working'`, `carrying = <ToolKind>` |
+| `step.finished` | `status = 'success'` → `idle` |
+| run `WAITING_HUMAN` | supervisor `status = 'blocked'` + BlockedBanner |
+| `artifact.created`（A → B 交接） | MessageEnvelope 飞行动画 |
+| run 状态迁移 | TasksKanban 卡片移动 |
+| 震荡/超限升级 | `StatusGlyph = 'looping'` |
+
+### 15.4 类型来源
+
+FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 schema 单一事实源。
+
+---
+
+## 十六、开发 Phase / Steps（v1.2 更新：按实际进度重排）
+
+图例：`[x]` 完成并有测试 · `[~]` 部分完成 / 已有骨架未接线 · `[ ]` 未开始 · `[!]` 阻塞（等用户）
+
+### 16.0 进度总览
+
+| Phase | 内容 | 状态 | 说明 |
+|---|---|---|---|
+| P0 | 架构骨架 | **完成** | 2026-10-09；fake 模型下 loop 端到端跑通，UI 可视化可演示 |
+| P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **下一步** | 需用户提供网关 URL / key |
+| P2 | S1 持久化 + 断点续跑 | 未开始 | 表已建好，Store 未接 |
+| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
+| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
+| P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆、PDF 上传 RAG、project phase/step 进度已实现（内存版）；Postgres/pgvector 落库、summarizer、导入导出未做 |
+| P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
+| P8 | S6 Eval | 未开始 | `evals/tasks/` 为空 |
+
+### 16.1 已完成（P0 · 2026-10-09）
+
+**配置与核心（`config/`、`src/agentlab/core/`）**
+- [x] 全套 YAML：models / model_policy / retry / budget / agents×8 / prompts×8 / gates×4 / policies×2 / litellm
+- [x] 严格加载：未知字段、未知别名、缺 prompt 文件、角色无路由，启动即报错（`core/config.py`）
+- [x] 角色 → 别名 → 模型 id 三级路由 + supervisor override 白名单 + reviewer 不得降档（`core/routing.py`）
+- [x] 状态迁移表为唯一事实源，非法迁移抛异常（`core/loop/states.py`）
+- [x] 收敛判定 `blocking + major == 0`、finding 指纹、Gate 失败指纹（`core/loop/convergence.py`）
+- [x] 震荡检测：diff_hash 相同或 finding 集合重复（同上）
+- [x] 确定性 Arbiter：去重排序、高置信 blocking 否决、跨 reviewer 矛盾升级（`core/loop/arbiter.py`）
+- [x] Retry=3（仅瞬时错误）+ 每次 attempt 前过熔断 + JSON 修复独立预算 + fallback 1 个模型（`core/llm/`）
+- [x] 预算守卫：超预算暂停到 WAITING_HUMAN，80% 告警一次（`core/budget.py`）
+- [x] Loop Driver：PLANNING → CODING → GATING → REVIEWING → ARBITRATING → WAITING_HUMAN → DONE，四个终止条件全实现；approve / reject(带反馈) / abort；预算暂停后可加预算恢复（`core/loop/driver.py`）
+
+**适配器（`src/agentlab/adapters/`）**
+- [x] `FakeRuntime`（离线演示 / 测试）
+- [x] `RawRuntime`：OpenAI 兼容网关，错误分类为可重试 / 不可重试（**代码就绪，未用真实网关测过**）
+- [x] `ConfigGate`：按 YAML 执行步骤 + tsc / pytest / 通用诊断解析，日志尾部入 prompt、全文存 blob
+- [x] `LocalSandbox`（环境变量去密钥）、`DockerSandbox`（断网 / 只读 rootfs / cap-drop / 资源限制）
+- [x] `GitWorkspace`：禁止写出 workspace 与 `.git`；`InMemoryStore`、`FileBlobStore`（sha256 寻址）、进程内 EventBus
+
+**接口与基础设施**
+- [x] FastAPI：`/health` `/roster` `/runs` `/runs/{id}` `/runs/{id}/decision` `/runs/{id}/events`(SSE) `/artifacts/{run}/{id}`
+- [x] CLI：`agentlab config-check` / `demo` / `run` / `serve`
+- [x] Colima + docker + compose 插件；`docker compose up -d postgres` 实测建出 §10 全部 10 张表
+
+**UI（`ui/`）**
+- [x] munder 可视化移植：Office Floor、像素设计系统、TasksKanban、MemoryGraphPanel、BlockedBanner、ThreadsPanel 等
+- [x] `bridge.ts` 适配层重实现 `window.cth`；`scene/adapter/mapping.ts` 事件 → 小人状态 / 信封动画
+- [x] Run 列表、Run 时间线（step 表）、评审对比、审批横幅（approve / reject+反馈 / abort）
+- [x] 浏览器实测：点 Demo → 小人工作 → 审批横幅 → Approve → DONE
+- [x] 署名：`ui/THIRD_PARTY_NOTICES.md`
+
+**质量**
+- [x] pytest 61 项；ruff、mypy --strict 全绿；UI tsc、vitest 5 项全绿
+
+### 16.1b 已完成（v1.2 · 2026-10-09，用户便利功能 + munder 补全）
+- [x] Settings：API key / 网关 URL 输入（mask，后端不回传完整 key），写 `.env`，新 run 立即生效
+- [x] Global 知识库：上传 PDF / md / txt → 切块 → embedding → 所有 agent 检索；可删除；"Test retrieval" 查看某个 agent 会拿到什么
+- [x] Project：project-planner 自动生成 phase/step；step 一键 run；run 完成自动打勾；进度条
+- [x] 三层记忆注入 Driver（`RunHooks`）；reviewer 本地记忆自动写；run 结果写 project 记忆；memory 故障降级不影响 run
+- [x] munder 补全：AgentStrip/AgentCard、AgentDetail（RecentText / ToolWaterfall / ThreadsPanel）、OfficeThemePicker、AskMeTab、TaskDetailOverlay、Activity
+- [x] 测试：pytest 71、vitest 14；浏览器实测 settings / 换主题 / project→run→ask me 反馈→approve→进度打勾全流程
+
+### 16.2 已知缺口（P0 中有配置或骨架，但尚未接线）
+
+| 项 | 现状 | 归属 Phase |
+|---|---|---|
+| 持久化 | 运行数据、记忆、project 都只在内存，重启即丢；DDL 已建表 | P2 |
+| 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
+| CLI 审批 / resume | 依赖持久化，未做 | P2 |
+| supervisor（root）角色 | 配置与路由都有，Driver 尚未调用；调度目前是固定状态机 | P3 |
+| summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
+| 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
+| 危险操作卡点 `dangerous_ops_require_approval` | 已配置，未强制执行 | P3 |
+| `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
+| Gate 镜像 | `docker/` 为空；DockerSandbox 未实测跑过 Gate | P1（Python）/ P5（其余） |
+| Gate 诊断表、成本看板 | UI 未做 | P4 |
+| `step.prompt_ref / response_ref` | 字段已有，未写入 blob | P2 |
+| UI 类型 | 手写 TS 类型，未用 openapi-typescript 生成 | P4 |
+
+### 16.3 接下来的步骤
+
+#### P1 · S0 Walking Skeleton（下一步，半天–1 天）
+目标：真实模型 + 真实沙箱，Coder 把一个小 repo 的失败测试改绿。
+- [x] Colima 启动；`docker compose up` 起 Postgres + pgvector
+- [!] 用户提供网关：`.env` 填 `AGENTLAB_LLM_BASE_URL` / `AGENTLAB_LLM_API_KEY`；`config/models.yaml` 填真实模型 id
+- [ ] `agentlab ping`：对每个别名发一次最小请求，验证连通、JSON 输出、usage 字段
+- [ ] 用真实网关跑 `RawRuntime`，修正 prompt 格式与结构化输出问题
+- [ ] 建 `docker/gate-python` 镜像；Gate 默认走 `DockerSandbox`
+- [ ] Coder 输入加入相关文件内容（当前只给 goal / plan / diff）
+- [ ] 准备 `evals/tasks/py-fix-add` 作为第一个固定任务
+- 演示：`agentlab run "make tests pass" -w <小repo>` 用真实模型改绿
+- 完成标准：真实模型下 3 次运行中至少 2 次自动收敛到 signoff
+
+#### P2 · S1 持久化 + 断点续跑（1–2 天）
+- [ ] `PostgresStore` 实现 `core/ports.py::Store`，与 `InMemoryStore` 跑同一套测试
+- [ ] Alembic 接管 `0001_init.sql`
+- [ ] prompt / response 写入 blob，`step.prompt_ref / response_ref` 落库
+- [ ] `kill -9` 后 `agentlab resume <run_id>` 从 `run.status` 继续
+- [ ] CLI：`resume / status / show / decide`
+- 演示：真实小 repo 跑到一半 kill -9，resume 后完成
+
+#### P3 · S2 评审团真实化 + HIL（2–3 天）系统真正形态
+- [x] 3 个 reviewer 并行、互相不可见（fake 下验证）
+- [x] Arbiter 冲突打包升级（fake 下验证）
+- [x] 审批流：approval 表结构 + API 审批
+- [ ] 3 个 reviewer 用不同模型别名真实运行
+- [ ] supervisor 接入：仅在 policy 允许处做调度 / override 决策，决策写 `routing_reason`
+- [ ] 工具层（MCP）+ `tool_grants` 强制 + 危险操作走 approval
+- [ ] LiteLLM Proxy + per-project virtual key
+- [ ] `AdkRuntime`（ParallelAgent + before_model_callback 熔断）
+- 演示：一个带安全隐患的改动，三方结果并排展示
+
+#### P4 · S5a 可视化 v0 收尾（0.5–1 天）
+- [x] SSE 事件流、Office Floor 接事件流、Run 列表 / 时间线、评审对比、审批横幅
+- [ ] Gate 诊断表（file:line、code、message）
+- [ ] 成本与 token 看板（按 run / 角色 / 模型）
+- [ ] openapi-typescript 生成类型，替换手写类型
+
+#### P5 · S3 多语言 Gate（每语言 0.5–1 天）
+- [x] 4 种语言 Gate YAML
+- [ ] `docker/` 下 node / jdk / cpp 镜像
+- [ ] 按顺序实测 TypeScript → Java → C++（ccache、compile_commands.json、分级超时）
+- 演示：同一套 loop 在 4 种语言的 repo 上跑通
+
+#### P6 · S4 Memory + Project 化（2–3 天）
+- [x] memory / blackboard 表（DDL）
+- [x] 三层作用域 global / project / agent，Driver 注入（内存版）
+- [x] Global 文档上传（PDF / md / txt）+ 切块 + 网关 embedding + BM25∪向量 RRF（内存版）
+- [x] project-planner 生成 phase/step；run 完成自动更新进度
+- [ ] 把以上三块落到 Postgres（`memory` 表 + pgvector HNSW + tsvector；`project` 表加 phases JSONB）
+- [ ] summarizer 接入，每轮自动抽 episodic
+- [ ] `pin_memory` 工具；rerank
+- [ ] per-project schema、`pg_dump -n` 导入导出
+- 演示：第二个 project 复用第一个 project 沉淀的经验
+
+#### P7 · S5b 可视化 v2 + 可观测（2–3 天）
+- [~] Memory Graph 已移植（等 P6 提供数据）
+- [ ] React Flow step 树、Monaco diff、iteration 回放
+- [ ] Langfuse（OTel）
+
+#### P8 · S6 Eval（持续，P1 起就开始积累）
+- [ ] 10 个固定回归任务；`agentlab eval` 输出评分卡
+- 评分卡结构（摘自 homerail `scorecard.ts`，无需再查原 repo）：每项 check = `{name, passed, severity(hard|soft), gate, source_type, detail}`；汇总 = `{run_id, passed, verdict, score, total, hard_error_count, soft_warning_count, blind_spot_count, categories: {name: passed}}`；任一 hard 失败即 FAIL，soft 只计数；CLI 退出码 = passed ? 0 : 1，便于 CI
+
+---
+
+## 十七、可参考的开源项目
+
+| 目标 | 参考 | 重点看 |
+|---|---|---|
+| ADK 多 agent 编排 | google/adk-python + adk-samples | ParallelAgent / LoopAgent、callbacks、LongRunningFunctionTool |
+| 收敛 loop 与 Gate | OpenHands、SWE-agent | 动作空间、沙箱执行器、测试反馈回灌格式 |
+| 代码编辑与 diff 应用 | Aider | repo map、edit format、commit 策略 |
+| 多模型路由与预算 | BerriAI/litellm | proxy virtual key、budget、retry、fallback |
+| 沙箱 | OpenHands runtime | Docker 隔离、网络策略、挂载 |
+| Trace | langfuse/langfuse | OTel ingest、self-host compose |
+| Hybrid 检索 | pgvector 官方示例 + RRF | HNSW 参数、tsvector 融合 |
+| **可视化** | **munder-difflin**（已移植完毕，见 §15.2 与 `ui/THIRD_PARTY_NOTICES.md`） | Pixi office floor、状态→动画映射、像素设计系统 |
+| **DAG 严格语义** | **homerail**（已消化完毕，ADR-014 + P8 评分卡结构） | WorkflowSpec 严格校验、while 静态上限、command 白名单、scorecard/replay |
+
+---
+
+## 十八、风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| ADK 无图级 checkpoint | 复杂回放受限 | Loop Driver 自管状态机 + artifact 内容寻址 |
+| ADK HIL 需手写样板 | 开发成本 | HIL 走 `approval` 表 + run 状态 |
+| ADK 版本迭代快 | 升级痛 | `AgentRuntime` 接口隔离；保留 raw runtime |
+| C++ Gate 构建慢 | 每轮几分钟 | ccache + 持久 build volume + fast/full 两档 |
+| 三个 reviewer 成本高 | 烧钱 | Gate 前置 + 第三 reviewer 廉价档 + 硬预算 |
+| 多模型结构化输出格式不一 | 解析失败 | Pydantic + `max_repairs=2` + 能力矩阵降级 ReAct |
+| 云端全量依赖 | 断网即停摆 | retry=3 + fallback + run 可暂停续跑 |
+| Reviewer 无限挑 nit | 永不收敛 | `blocking + major == 0` 即 signoff |
+| 单网关单 key（v1.1） | 网关限流影响所有角色 | 角色级 RPM 配置 + 预算中间件；reviewer 并发可配 |
+| munder 移植代码量大（~5.6k 行场景 + 组件） | 维护负担 | 只改数据适配层，场景代码尽量保持原样便于对照上游 |
+| LimeZu 素材许可（v1.1） | 开源分发受限（"不可再分发素材"） | 开源前评估：替换为自绘/CC0 素材或要求使用者自购；署名常驻 |
+
+---
+
+## 十九、待办与开放问题
+
+- [!] 填入网关 `AGENTLAB_LLM_BASE_URL` / key 与 `models.yaml` 的真实模型 id（用户测试时提供，阻塞 P1）
+- [ ] 网关是否提供 embedding 端点？否则 S4 需额外 embedding 来源
+- [ ] C++ Gate 的 GTest 发现策略：CTest 注册 vs 直接跑二进制
+- [ ] Java 项目 Maven 与 Gradle 优先级
+- [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
+- [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**LimeZu 素材替换方案**
+
+---
+
+## 附录：决策记录（ADR 摘要）
+
+| # | 决策 | 日期 | 理由 |
+|---|---|---|---|
+| ADR-001 | 编排用「自研 Loop Driver + Google ADK 执行层」 | 2026-10-09 | ADK 的 ParallelAgent、Callbacks、MCP 契合度高；checkpoint 短板由自研状态机补齐 |
+| ADR-002 | Python 后端 + TypeScript 前端 | 2026-10-09 | ADK 生态为 Python；前端仅作观察窗 |
+| ADR-003 | 不跑本地模型，全部云端 API | 2026-10-09 | 降低硬件与运维负担 |
+| ADR-004 | 客观 Gate 前置于 LLM 评审 | 2026-10-09 | 砍掉 60–70% 无效评审轮次 |
+| ADR-005 | `blocking + major == 0` 即 signoff | 2026-10-09 | 防止多 reviewer 在 nit 上死循环 |
+| ADR-006 | 熔断用确定性中间件，不用 agent | 2026-10-09 | 非确定性的熔断等于没有熔断 |
+| ADR-007 | LLM retry = 3（额外重试，共 4 次请求），仅瞬时错误 | 2026-10-09 | 区分可重试与不可重试；JSON 修复独立预算 |
+| ADR-008 | 支持 Python / TS / Java / C++，Gate 做适配器 | 2026-10-09 | 目标代码库多语言 |
+| ADR-009 | 记忆归属 `project × role` 而非 agent 实例 | 2026-10-09 | agent 是任务级临时实例 |
+| ADR-010 | 记忆版本化（`superseded_by` / `valid_to`），不物理删除 | 2026-10-09 | 可回溯；开源后可审计 |
+| ADR-011 | 前端全量借鉴 munder-difflin 可视化（Pixi Office Floor + 像素设计系统 + 看板/瀑布/记忆图） | 2026-10-09 | 成熟实现，MIT；素材按 LimeZu/OFL 署名 |
+| ADR-012 | 单一 OpenAI 兼容网关 + 角色→别名→模型 id 三级映射 | 2026-10-09 | 用户同一 endpoint 不同模型；换模型零代码改动 |
+| ADR-013 | 容器运行时用 Colima + docker CLI | 2026-10-09 | 本机无 Docker Desktop，轻量 |
+| ADR-014 | 配置严格校验、循环静态上限、命令白名单（借鉴 homerail） | 2026-10-09 | 配置即代码的前提是"写错就报错" |
+| ADR-015 | 不做语音、不做 Electron 跨平台壳 | 2026-10-09 | 范围收敛，前端为 localhost Web |
+| ADR-016 | 新增 `event` 表作为可视化/回放唯一事件流 | 2026-10-09 | Office Floor、Run 树、TUI 共用一个数据源（DRY） |
+| ADR-017 | UI 用 Adapter 模式重实现 `window.cth`，而非改写 munder 场景代码 | 2026-10-09 | 场景 ~5.6k 行保持原样，改动集中在 `bridge.ts` + `scene/adapter/mapping.ts` |
+| ADR-018 | Gate 步骤由 `config/gates/*.yaml` 声明，单一 `ConfigGate` 执行 + 按工具选诊断解析器 | 2026-10-09 | 新增语言 = 加 YAML + 镜像，不加类（OCP） |
+| ADR-019 | 人工 reject 后重置本轮迭代计数（`run.iteration_base`），震荡检测只看当前轮 | 2026-10-09 | 人给了新信息，不应因旧历史立即判定震荡或超限 |
+| ADR-020 | 记忆三层作用域 global / project / agent:<role>，检索取并集 | 2026-10-09 | 用户要求：个人简历全局可读、project 有整体进度、agent 有本地记忆；所有 agent 可读 global（用户确认） |
+| ADR-021 | project-planner（root 模型）自动生成 phase/step；run DONE 自动打勾 | 2026-10-09 | 用户选择"planner 自动生成"；手动改状态作为兜底 |
+| ADR-022 | 控制台做精简版（8 标签），不整体移植 CommandCenterPanel | 2026-10-09 | 用户选择；原版大半依赖 PTY / 触发器 |
+| ADR-023 | API key 由 UI 写入本地 `.env`（chmod 600），后端只回 mask | 2026-10-09 | 用户选择 .env；最简单且已在 .gitignore |
+| ADR-024 | memory 故障降级为关键词检索，hook 异常不改变 run 结果 | 2026-10-09 | 实测：网关不可达时 embedding 报错曾导致 run 卡死 |

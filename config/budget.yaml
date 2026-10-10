@@ -1,0 +1,6 @@
+default_run_budget_cents: 500
+warn_ratio: 0.8
+default_project_weekly_cents: 5000
+loop:
+  max_iter: 5
+  blocking_confidence_threshold: 0.7

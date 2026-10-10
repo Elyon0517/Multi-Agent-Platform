@@ -1,0 +1,5 @@
+role: supervisor
+output: plan
+prompt: prompts/supervisor.md
+tool_grants: [read_artifact]
+kind: worker

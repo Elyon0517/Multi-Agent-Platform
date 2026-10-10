@@ -1,0 +1,5 @@
+role: project-planner
+output: project_plan
+prompt: prompts/project-planner.md
+tool_grants: [memory_search]
+kind: worker

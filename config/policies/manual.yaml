@@ -1,0 +1,4 @@
+name: manual
+dispatch: human
+require_human_signoff: true
+dangerous_ops_require_approval: [write_outside_workspace, enable_network, force_push, delete_branch]

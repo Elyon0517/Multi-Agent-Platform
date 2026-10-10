@@ -1,0 +1,10 @@
+language: typescript
+image: agentlab/gate-node:latest
+markers: [tsconfig.json, package.json]
+steps:
+  - { name: build, argv: ["pnpm", "build"], timeout_s: 600, modes: [fast, full] }
+  - { name: typecheck, argv: ["tsc", "--noEmit"], timeout_s: 300, modes: [fast, full] }
+  - { name: lint, argv: ["eslint", "."], timeout_s: 120, modes: [fast, full] }
+  - { name: format, argv: ["prettier", "--check", "."], timeout_s: 120, modes: [full] }
+  - { name: test, argv: ["vitest", "run"], timeout_s: 300, modes: [fast, full] }
+  - { name: security, argv: ["pnpm", "audit"], timeout_s: 300, modes: [full] }

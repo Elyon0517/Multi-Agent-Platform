@@ -1,0 +1,17 @@
+roles:
+  supervisor:           { primary: root, temperature: 0.2, fallback: [strong] }
+  project-planner:      { primary: root, temperature: 0.2, fallback: [strong] }
+  planner:              { primary: strong, temperature: 0.2, fallback: [root] }
+  coder:                { primary: strong, temperature: 0.1, fallback: [root] }
+  correctness-reviewer: { primary: strong, temperature: 0.0 }
+  arch-reviewer:        { primary: strong-alt, temperature: 0.0 }
+  test-style-reviewer:  { primary: cheap, temperature: 0.0 }
+  summarizer:           { primary: cheap, temperature: 0.3 }
+
+override:
+  allowed_by: supervisor
+  allowed_transitions:
+    - { from: strong, to: root }
+    - { from: strong-alt, to: root }
+  reviewer_min_tier: 2
+  must_log: true
