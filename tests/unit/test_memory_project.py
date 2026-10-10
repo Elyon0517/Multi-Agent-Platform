@@ -37,7 +37,7 @@ def _pdf(text: str) -> bytes:
 
 def _svc(tmp: Path) -> Services:
     (tmp / ".env").write_text("UNRELATED=1\n")
-    return build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp, env_file=tmp / ".env", runtime="fake",
+    return build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp, env_file=tmp / ".env", runtime="fake",
                                    llm_base_url=None, llm_api_key=None, _env_file=None))  # type: ignore[call-arg]
 
 

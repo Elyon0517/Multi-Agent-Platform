@@ -1501,6 +1501,7 @@
     "budgetTooltip": "费用 {{cost}} / 预算 {{budget}} 美分",
     "resumeBudget": "预算（美分）",
     "resumeMaxIter": "最大迭代次数",
-    "requiredBudget": "所需预算：{{value}} 美分"
+    "requiredBudget": "所需预算：{{value}} 美分",
+    "interruptedCall": "上次请求在确认 usage 前中断，结算状态未知。批准将重试缺失调用；网关可能已对中断请求计费。可选择终止。"
   }
 }

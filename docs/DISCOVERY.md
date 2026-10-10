@@ -1,6 +1,6 @@
 # Agent Converge Discovery
 
-> 状态：v1.4 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
+> 状态：v1.5 · P0 / P1 / P2 完成，下一步 P3 与 §16.4 项目隔离 · 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -347,7 +347,7 @@ agentlab/
 │   │   ├── runtime/{fake,raw,adk}.py
 │   │   ├── gates/config_gate.py   # 读 config/gates/*.yaml，单一实现（ADR-018）
 │   │   ├── sandbox/{local,docker}.py
-│   │   ├── store/{memory,blobs}.py   # postgres.py 于 P2 加入
+│   │   ├── store/{memory,postgres,blobs}.py
 │   │   ├── workspace.py / events.py
 │   │   └── memory/{blackboard,pgvector}.py   # P6
 │   ├── mcp/                      # workspace_fs / git / gate MCP server
@@ -442,7 +442,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 |---|---|---|---|
 | P0 | 架构骨架 | **完成** | 2026-10-09；fake 模型下 loop 端到端跑通，UI 可视化可演示 |
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
-| P2 | S1 持久化 + 断点续跑 | 未开始 | 表已建好，Store 未接 |
+| P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
@@ -510,7 +510,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - SSE 订阅在历史快照前注册，支持 Last-Event-ID，退出清理队列；UI 去重事件并读取累计费用/token。
 - reviewer 迭代号与实际 iteration 对齐；finding 身份由 runtime 强制覆盖；矛盾检测依赖明确 subject / stance，BLOCK 无 hard finding 升级为不一致。
 - usage 逐 attempt 记账，JSON 修复耗尽仍保留费用；并行等待所有结果并保留完成 step；预算采用共享预留。
-- project-planner 使用同一预算守卫，规划账目见 `/project-planning`；失败不发布空 project。账目目前仍为内存，P2 才持久化。
+- project-planner 使用同一预算守卫，规划账目见 `/project-planning`；失败不发布空 project。账目在 P2 已接入持久化。
 - diff 使用 run 起始/current 临时 Git index/tree 对比，不修改用户 index，排除秘密路径并将已识别密钥内容替换为可见脱敏标记；大文件/二进制改动显示 metadata，排除开始前的用户改动。同一 workspace 的并发用户修改仍需 worktree 隔离（§16.4）。
 - memory 使用退役与 superseded_by 保留旧版本；chunk 严守长度上限；模型 schema 使用合法 JSON。
 - SQL 增补 project.goal/phases、global nullable project_id、memory document/note/source；兼容迁移 0002 已在本地数据库应用。
@@ -520,9 +520,9 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 | 项 | 现状 | 归属 Phase |
 |---|---|---|
-| 持久化 | 运行数据、记忆、project 都只在内存，重启即丢；DDL 已建表 | P2 |
+| 持久化 | P2 已完成；配置数据库 URL 后启用，显式 memory 模式仍为临时数据 | 已完成 |
 | 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
-| CLI 审批 / resume | 依赖持久化，未做 | P2 |
+| CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
 | supervisor（root）角色 | 配置与路由都有，Driver 尚未调用；调度目前是固定状态机 | P3 |
 | summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
 | 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
@@ -530,7 +530,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
 | Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言尚未建镜像 | P5 |
 | Gate 诊断表、成本看板 | UI 未做 | P4 |
-| `step.prompt_ref / response_ref` | 字段已有，未写入 blob | P2 |
+| `step.prompt_ref / response_ref` | prompt / response 内容寻址并落库；逐 attempt 可追溯 | 已完成 |
 | UI 类型 | 手写 TS 类型，未用 openapi-typescript 生成 | P4 |
 
 ### 16.3 接下来的步骤
@@ -548,16 +548,16 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - 完成标准：真实模型下 3 次运行中至少 2 次自动收敛到 signoff
 
 #### P2 · S1 持久化 + 断点续跑（1–2 天）
-- [ ] `PostgresStore` 实现 `core/ports.py::Store`，与 `InMemoryStore` 跑同一套测试
-- [ ] Alembic 接管 `0001_init.sql` 与后续迁移（包含 `0002_model_alignment.sql`）
-- [ ] baseline tree 引用、独立 Git 对象库及 workspace/Git 根目录归属持久化；重启恢复沿用原 baseline，不重新捕获用户当前文件
-- [ ] 冻结的 reviewer batch 输入和已成功结果落库；恢复只补跑缺失 reviewer，不重新检索记忆或重复计费
-- [ ] run 费用/token、逐 attempt usage、预算/迭代上限调整与 project-planner 账目落库；未返回 usage 的在途请求显式记为结算未知，不声称 exactly-once 计费
-- [ ] 恢复操作使用事务与运行锁，防止多个 driver 同时续跑；重启后保留 WAITING_HUMAN 与 pending approval，不自动批准
-- [ ] 验收覆盖预算暂停、部分评审成功、execution_error 和 signoff 等断点，并验证 reject/abort/终止的缓存及对象库清理
-- [ ] prompt / response 写入 blob，`step.prompt_ref / response_ref` 落库
-- [ ] `kill -9` 后 `agentlab resume <run_id>` 从 `run.status` 继续
-- [ ] CLI：`resume / status / show / decide`
+- [x] `PostgresStore` 实现 `core/ports.py::Store`，与 `InMemoryStore` 跑同一套测试
+- [x] Alembic 接管 `0001_init.sql` 与后续迁移（包含 `0002_model_alignment.sql`）
+- [x] baseline tree 引用、独立 Git 对象库及 workspace/Git 根目录归属持久化；重启恢复沿用原 baseline，不重新捕获用户当前文件
+- [x] 冻结的 reviewer batch 输入和已成功结果落库；恢复只补跑缺失 reviewer，不重新检索记忆或重复计费
+- [x] run 费用/token、逐 attempt usage、预算/迭代上限调整与 project-planner 账目落库；未返回 usage 的在途请求显式记为结算未知，不声称 exactly-once 计费
+- [x] 恢复操作使用事务与运行锁，防止多个 driver 同时续跑；重启后保留 WAITING_HUMAN 与 pending approval，不自动批准
+- [x] 验收覆盖预算暂停、部分评审成功、execution_error 和 signoff 等断点，并验证 reject/abort/终止的缓存及对象库清理
+- [x] prompt / response 写入 blob，`step.prompt_ref / response_ref` 落库
+- [x] `kill -9` 后 `agentlab resume <run_id>` 从 `run.status` 继续
+- [x] CLI：`resume / status / show / decide`
 - 演示：真实小 repo 跑到一半 kill -9，resume 后完成
 
 #### P3 · S2 评审团真实化 + HIL（2–3 天）系统真正形态
@@ -620,7 +620,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 隔离：project 各自拥有 workspace、模型/任务配置、对话、运行记录、预算与记忆；agent 私有记忆按 project × role 归属。global 知识为明确共享的个人知识，项目私有文档不得进入 global。切换 project 同步切换 run、agent 状态、事件、看板、审批和检索范围；后端校验 project/thread/run/step 归属。workspace 路径重叠需要检测；并发修改同一仓库需要独立 worktree/沙箱。
 
-待修的 workspace 子目录边界：`ensure_repo` 当前只检查 workspace 自身的 `.git`，可能在已有 monorepo 的包目录执行 `git init`，意外创建内嵌仓库。列入本节项目隔离工作：先用 `git rev-parse --show-toplevel` 判断祖先仓库；初版优先明确拒绝非仓库根目录的 workspace 并提示使用根目录，后续如支持子目录则分别保存 Git 根目录与 workspace 范围，限定所有快照、上下文和编辑路径。未落地前不得宣称此场景已支持。
+workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse --show-toplevel`，拒绝已有 monorepo 内的非根目录 workspace，不创建嵌套仓库。子目录范围支持与项目间路径重叠检查仍属于本节。
 
 当前检查结果（以上是目标，尚未完整实现）：
 - `auto/manual` YAML 有配置，Driver 尚未调用 supervisor，固定状态机仍负责调度。
@@ -628,9 +628,9 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - 非 global 记忆检索按 project_id 过滤；global 知识有意共享。
 - `/runs` 返回全量记录；UI runs/tasks/agent 状态没有完整按项目隔离，切换 project 只改 activeProjectId。
 - `/runs` 已根据 project_id 继承 workspace，并在创建 run 前验证 project/step 归属，拒绝不匹配的路径；完整项目隔离仍待实现。
-- 未实现对话 thread/message 数据模型，数据仍为内存存储；Docker/workspace 边界与数据库隔离尚待验证。
+- 未实现对话 thread/message 数据模型；P2 已持久化现有运行、项目与记忆。完整项目隔离仍待本节实现。
 
-实施顺序：先修复项目归属/workspace/界面状态隔离，再实现项目配置与 run 快照、两种调度路径及选择界面，随后接入持久化与对话。
+P2 持久化基础已完成；本节先修复项目归属/workspace/界面状态隔离，再实现项目配置、两种调度路径及选择界面，随后接入对话。run 的全局配置快照已在 P2 实现，项目专属配置仍待本节。
 
 ---
 
@@ -747,3 +747,16 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - API 将仓库初始化和 baseline 捕获共同纳入错误处理；Git CalledProcessError / TimeoutExpired 返回 503 + 安全错误类型，并清理临时对象目录，不发布半创建的 run。明确的不可读/越界错误返回 422。
 
 本次验收：后端 152 项，ruff / mypy 通过；新增 11 个回归用例覆盖写入边界、独立子项目、磁盘写满与 API 创建失败清理。
+
+
+### 16.1h · P2 持久化验收（2026-10-10）
+
+- PostgresStore 与 InMemoryStore 共用事务回滚、事件序号、审批、checkpoint 和运行锁契约。Alembic 接管既有 SQL；迁移版本表按当前 schema 隔离。
+- `.agentlab/snapshots/<id>` 保存脱敏 Git 对象与原 baseline；数据库保存 tree/metadata、冻结输入、已成功结果、配置及 prompt 快照。成功结果保存到阶段处理完成，阶段数据与状态在同一事务提交，事件在提交后发布。
+- 每个网络 attempt 在发送前记录 in_flight；返回 usage、响应和累计费用在同一事务提交。有效响应在 AgentResult 写入前崩溃也可恢复。未返回 usage 的请求保留结算未知并进入 interrupted_call 审批，批准仅授权重试，无法保证网关 exactly-once 计费。
+- 预算、迭代调整、项目规划草稿/结果与逐次 usage、文档版本和来源删除均持久化。记忆检索沿用 BM25/cosine + JSON embedding；SQL 向量检索优化未包含在 P2。
+- CLI 支持 db-upgrade / status / show / resume / decide；API 支持重启后的 decision 与 resume。WAITING_HUMAN 不自动批准；reject/abort 清理缓存，终止释放对象，长期暂停通过显式 abort 清理。需共同备份数据库与 `.agentlab`，对象库缺失会拒绝恢复。
+- 15 项集成用例覆盖 Store 契约、预算、部分评审、execution_error、signoff、结算未知、规划失败 usage、版本化记忆、多进程记忆刷新、API 重启审批、reject/abort 清理与真实 kill -9。
+- 真实网关 + Docker 恢复 smoke：run `6b2e0c696274`，付费 planner 返回后 kill -9，CLI resume 后 FULL Gate 通过、停在 signoff；planner step 仍为 1，累计 8451 input / 631 output tokens，按配置估算 5.4875c。未代替用户批准最终 signoff。
+- Smoke workspace 放在 `~/.agentlab-workspaces`，避免 macOS 临时路径无法被 Colima 挂载，以及在父仓库中意外创建嵌套仓库。
+- 历史 §16.1d–g 中“P2 待持久化”的说明记录的是当时状态；由本节更新。当前总验收：后端 167 项、前端 17 项，ruff / mypy / UI build 通过。

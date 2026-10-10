@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import copy
 import threading
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
 
+from agentlab.core.ports import RunBusy
 from agentlab.core.schemas import (
     Approval,
     ApprovalStatus,
@@ -21,13 +26,62 @@ class NotFound(KeyError):
 
 class InMemoryStore:
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._run_locks: dict[str, threading.Lock] = {}
+        self._checkpoints: dict[str, dict[str, Any]] = {}
+        self._records: dict[tuple[str, str], dict[str, Any]] = {}
         self._runs: dict[str, Run] = {}
         self._iterations: dict[str, list[Iteration]] = defaultdict(list)
         self._steps: dict[str, list[Step]] = defaultdict(list)
         self._artifacts: dict[str, list[Artifact]] = defaultdict(list)
         self._approvals: dict[str, list[Approval]] = defaultdict(list)
         self._events: dict[str, list[Event]] = defaultdict(list)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        with self._lock:
+            fields = (
+                "_runs",
+                "_iterations",
+                "_steps",
+                "_artifacts",
+                "_approvals",
+                "_events",
+                "_checkpoints",
+                "_records",
+            )
+            backup = {key: copy.deepcopy(getattr(self, key)) for key in fields}
+            try:
+                yield
+            except BaseException:
+                for key, value in backup.items():
+                    setattr(self, key, value)
+                raise
+
+    @contextmanager
+    def lock_run(self, run_id: str) -> Iterator[None]:
+        with self._lock:
+            lock = self._run_locks.setdefault(run_id, threading.Lock())
+        if not lock.acquire(blocking=False):
+            raise RunBusy(run_id)
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def save_checkpoint(self, run_id: str, data: dict[str, Any]) -> None:
+        with self._lock:
+            self._checkpoints[run_id] = copy.deepcopy(data)
+
+    def checkpoint(self, run_id: str) -> dict[str, Any] | None:
+        return copy.deepcopy(self._checkpoints.get(run_id))
+
+    def put_record(self, kind: str, key: str, data: dict[str, Any]) -> None:
+        with self._lock:
+            self._records[kind, key] = copy.deepcopy(data)
+
+    def records(self, kind: str) -> list[dict[str, Any]]:
+        return [copy.deepcopy(data) for (k, _), data in self._records.items() if k == kind]
 
     def create_run(self, run: Run) -> Run:
         with self._lock:

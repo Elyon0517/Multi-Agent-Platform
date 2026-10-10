@@ -1501,6 +1501,7 @@
     "budgetTooltip": "{{cost}}c of {{budget}}c budget",
     "resumeBudget": "Budget (cents)",
     "resumeMaxIter": "Maximum iterations",
-    "requiredBudget": "Required: {{value}} cents"
+    "requiredBudget": "Required: {{value}} cents",
+    "interruptedCall": "The previous request was interrupted before usage was confirmed. Approve to retry the missing calls; the gateway may have charged the interrupted request. Abort to stop."
   }
 }

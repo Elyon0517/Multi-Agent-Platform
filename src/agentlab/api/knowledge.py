@@ -142,6 +142,7 @@ def build_router(svc: Services) -> APIRouter:
     def replace_phases(project_id: str, phases: list[ProjectPhase]) -> Project:
         project = get_project(project_id)
         project.phases = phases
+        svc.projects.save(project)
         return project
 
     @r.patch("/projects/{project_id}/steps/{step_id}", response_model=Project)
@@ -151,6 +152,7 @@ def build_router(svc: Services) -> APIRouter:
             project.find_step(step_id).status = body.status
         except StopIteration as e:
             raise HTTPException(404, "step not found") from e
+        svc.projects.save(project)
         return project
 
     return r

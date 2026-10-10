@@ -10,6 +10,7 @@ from typing import Protocol
 
 from pydantic import Field
 
+from agentlab.core.ports import Store
 from agentlab.core.schemas import Strict, new_id, utcnow
 
 GLOBAL = "global"
@@ -83,9 +84,12 @@ def bm25_rank(query: str, items: list[MemoryItem], k1: float = 1.5, b: float = 0
     for item, d in zip(items, docs, strict=True):
         length = sum(d.values())
         s = sum(
-            math.log(1 + (len(docs) - df[t] + 0.5) / (df[t] + 0.5)) * d[t] * (k1 + 1)
+            math.log(1 + (len(docs) - df[t] + 0.5) / (df[t] + 0.5))
+            * d[t]
+            * (k1 + 1)
             / (d[t] + k1 * (1 - b + b * length / avg))
-            for t in q if t in d
+            for t in q
+            if t in d
         )
         if s > 0:
             scored.append((s, item))
@@ -108,6 +112,9 @@ class InMemoryMemoryStore:
     last_error: str | None = None
     _items: dict[str, MemoryItem] = field(default_factory=dict)
 
+    def flush(self) -> None:
+        pass
+
     def _can_embed(self) -> bool:
         return self.embedder is not None and self.embedder.available()
 
@@ -124,33 +131,49 @@ class InMemoryMemoryStore:
     async def add(self, items: list[MemoryItem]) -> list[MemoryItem]:
         vectors = await self._embed([i.text for i in items]) if items else None
         if vectors is not None and self.embedder is not None:
-            items = [i.model_copy(update={"embedding": v, "embedding_model": self.embedder.model})
-                     for i, v in zip(items, vectors, strict=True)]
+            items = [
+                i.model_copy(update={"embedding": v, "embedding_model": self.embedder.model})
+                for i, v in zip(items, vectors, strict=True)
+            ]
         for i in items:
             self._items[i.id] = i
+        self.flush()
         return items
 
     def items_in(self, namespace: str, project_id: str | None = None) -> list[MemoryItem]:
-        return [i for i in self._items.values()
-                if i.valid_to is None and i.namespace == namespace
-                and (namespace == GLOBAL or i.project_id == project_id)]
+        return [
+            i
+            for i in self._items.values()
+            if i.valid_to is None and i.namespace == namespace and (namespace == GLOBAL or i.project_id == project_id)
+        ]
 
     def stats(self) -> dict[str, object]:
         items = [item for item in self._items.values() if item.valid_to is None]
-        return {"items": len(items), "embedded": sum(1 for i in items if i.embedding),
-                "embedding_model": self.embedder.model if self.embedder else None,
-                "embedding_ready": self._can_embed(), "last_error": self.last_error}
+        return {
+            "items": len(items),
+            "embedded": sum(1 for i in items if i.embedding),
+            "embedding_model": self.embedder.model if self.embedder else None,
+            "embedding_ready": self._can_embed(),
+            "last_error": self.last_error,
+        }
 
     def delete_source(self, namespace: str, source: str) -> int:
-        doomed = [k for k, i in self._items.items()
-                  if i.valid_to is None and i.namespace == namespace and i.source == source]
+        doomed = [
+            k for k, i in self._items.items() if i.valid_to is None and i.namespace == namespace and i.source == source
+        ]
         for key in doomed:
             self._items[key].valid_to = utcnow().isoformat()
+        self.flush()
         return len(doomed)
 
     def _scope(self, project_id: str | None, namespaces: list[str]) -> list[MemoryItem]:
-        return [i for i in self._items.values() if i.valid_to is None and i.namespace in namespaces
-                and (i.namespace == GLOBAL or i.project_id == project_id)]
+        return [
+            i
+            for i in self._items.values()
+            if i.valid_to is None
+            and i.namespace in namespaces
+            and (i.namespace == GLOBAL or i.project_id == project_id)
+        ]
 
     async def search(self, project_id: str | None, namespaces: list[str], query: str, k: int = 8) -> list[Hit]:
         pool = self._scope(project_id, namespaces)
@@ -161,3 +184,42 @@ class InMemoryMemoryStore:
             rankings.append(sorted(vec, key=lambda i: -cosine(qvs[0], i.embedding or []))[:50])
         pinned = [i for i in pool if i.pinned]
         return rrf([*rankings, pinned], k)
+
+
+class PersistentMemoryStore(InMemoryMemoryStore):
+    def __init__(self, store: Store, embedder: Embedder | None = None) -> None:
+        super().__init__(embedder)
+        self.store = store
+        self._items = {i.id: i for i in (MemoryItem.model_validate(row) for row in store.records("memory"))}
+        self._persisted = {i.id: i.model_dump_json() for i in self._items.values()}
+
+    def flush(self) -> None:
+        with self.store.transaction():
+            for item in sorted(self._items.values(), key=lambda i: i.valid_to is not None):
+                if self._persisted.get(item.id) != item.model_dump_json():
+                    self.store.put_record("memory", item.id, item.model_dump(mode="json"))
+        self._persisted = {i.id: i.model_dump_json() for i in self._items.values()}
+
+    def _refresh(self) -> None:
+        for data in self.store.records("memory"):
+            item = MemoryItem.model_validate(data)
+            local = self._items.get(item.id)
+            if local is None or self._persisted.get(item.id) == local.model_dump_json():
+                self._items[item.id] = item
+                self._persisted[item.id] = item.model_dump_json()
+
+    def items_in(self, namespace: str, project_id: str | None = None) -> list[MemoryItem]:
+        self._refresh()
+        return super().items_in(namespace, project_id)
+
+    def _scope(self, project_id: str | None, namespaces: list[str]) -> list[MemoryItem]:
+        self._refresh()
+        return super()._scope(project_id, namespaces)
+
+    def delete_source(self, namespace: str, source: str) -> int:
+        self._refresh()
+        return super().delete_source(namespace, source)
+
+    def stats(self) -> dict[str, object]:
+        self._refresh()
+        return super().stats()

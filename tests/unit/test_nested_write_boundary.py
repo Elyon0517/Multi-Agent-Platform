@@ -87,7 +87,7 @@ async def test_api_git_creation_failures_are_explicit_and_release_objects(tmp_pa
     from agentlab.bootstrap import build_services
     from agentlab.settings import Settings
     from tests.conftest import CONFIG_DIR
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     closed = []
     original = GitWorkspace.close
     def close(self):  # type: ignore[no-untyped-def]

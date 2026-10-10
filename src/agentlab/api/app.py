@@ -17,7 +17,7 @@ from agentlab.adapters.store.memory import NotFound
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.loop.driver import Decision, Driver
-from agentlab.core.ports import execution_error_reason
+from agentlab.core.ports import RunBusy, execution_error_reason
 from agentlab.core.schemas import Approval, Artifact, Event, Iteration, Run, Step
 from agentlab.demo import seed_demo_workspace
 
@@ -53,13 +53,18 @@ def create_app(svc: Services | None = None) -> FastAPI:
     drivers: dict[str, Driver] = {}
     tasks: set[asyncio.Task[Run]] = set()
     app = FastAPI(title="Agent Converge", version="0.1.0")
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-                       allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(build_router(svc))
 
     def spawn(driver: Driver, run_id: str) -> None:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)
+
         def finished(done: asyncio.Task[Run]) -> None:
             tasks.discard(done)
             if not done.cancelled() and (error := done.exception()) is not None:
@@ -85,8 +90,15 @@ def create_app(svc: Services | None = None) -> FastAPI:
         for r, a in svc.cfg.agents.items():
             alias = policy[r].primary if r in policy else ""
             m = aliases[alias] if alias else None
-            out.append({"role": r, "kind": a.kind, "alias": alias, "model": m.model if m else "",
-                        "ctx_window": m.ctx_window if m else 0})
+            out.append(
+                {
+                    "role": r,
+                    "kind": a.kind,
+                    "alias": alias,
+                    "model": m.model if m else "",
+                    "ctx_window": m.ctx_window if m else 0,
+                }
+            )
         return out
 
     @app.post("/runs", response_model=Run)
@@ -103,8 +115,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
             body.workspace = project.workspace
         elif body.step_id:
             raise HTTPException(422, "step_id requires project_id")
-        ws = Path(body.workspace) if body.workspace else seed_demo_workspace(
-            Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
+        ws = (
+            Path(body.workspace)
+            if body.workspace
+            else seed_demo_workspace(Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
+        )
         try:
             driver = svc.driver(ws, body.runtime, body.language)
         except (MissingGatewayConfig, NoGateDetected) as e:
@@ -115,7 +130,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         except Exception as exc:
             driver.workspace.close()  # type: ignore[attr-defined]
             reason = execution_error_reason(exc)
-            status = 422 if reason in {"workspace_unreadable", "workspace_escape"} else 503
+            status = 422 if reason in {"workspace_unreadable", "workspace_escape", "workspace_root_required"} else 503
             raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
         if body.project_id and body.step_id:
             try:
@@ -133,8 +148,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
     @app.get("/runs/{run_id}", response_model=RunDetail)
     def run_detail(run_id: str) -> RunDetail:
         return RunDetail(
-            run=get_run(run_id), iterations=svc.store.iterations(run_id), steps=svc.store.steps(run_id),
-            artifacts=svc.store.artifacts(run_id), pending_approval=svc.store.pending_approval(run_id),
+            run=get_run(run_id),
+            iterations=svc.store.iterations(run_id),
+            steps=svc.store.steps(run_id),
+            artifacts=svc.store.artifacts(run_id),
+            pending_approval=svc.store.pending_approval(run_id),
         )
 
     @app.get("/artifacts/{run_id}/{artifact_id}")
@@ -149,14 +167,29 @@ def create_app(svc: Services | None = None) -> FastAPI:
         get_run(run_id)
         driver = drivers.get(run_id)
         if driver is None:
-            raise HTTPException(409, "run not owned by this daemon")
+            try:
+                driver = svc.restore_driver(run_id)
+                drivers[run_id] = driver
+            except Exception as exc:
+                raise HTTPException(409, f"recovery failed: {type(exc).__name__}") from exc
         try:
-            run = driver.decide(run_id, body.decision, body.feedback, budget_cents=body.budget_cents,
-                                max_iter=body.max_iter)
-        except (ValueError, MissingGatewayConfig) as e:
+            run = driver.decide(
+                run_id, body.decision, body.feedback, budget_cents=body.budget_cents, max_iter=body.max_iter
+            )
+        except (ValueError, MissingGatewayConfig, RunBusy) as e:
             raise HTTPException(409, str(e)) from e
         spawn(driver, run_id)
         return run
+
+    @app.post("/runs/{run_id}/resume", response_model=Run)
+    async def resume(run_id: str) -> Run:
+        get_run(run_id)
+        try:
+            driver = svc.restore_driver(run_id)
+            drivers[run_id] = driver
+            return await driver.run(run_id)
+        except Exception as exc:
+            raise HTTPException(409, f"resume failed: {type(exc).__name__}") from exc
 
     @app.get("/runs/{run_id}/events")
     async def events(run_id: str, request: Request, after: int = 0) -> EventSourceResponse:

@@ -55,8 +55,16 @@ def run(
         return await _drive(svc, driver, driver.create(goal), auto_approve)
 
     final = asyncio.run(go())
-    typer.echo(json.dumps({"run_id": final.id, "status": final.status, "cost_cents": round(final.cost_cents, 3),
-                           "paused_reason": final.paused_reason}))
+    typer.echo(
+        json.dumps(
+            {
+                "run_id": final.id,
+                "status": final.status,
+                "cost_cents": round(final.cost_cents, 3),
+                "paused_reason": final.paused_reason,
+            }
+        )
+    )
 
 
 @app.command()
@@ -68,7 +76,9 @@ def demo(auto_approve: Annotated[bool, typer.Option()] = True) -> None:
 
 @app.command()
 def config_check() -> None:
-    cfg = build_services().cfg
+    from agentlab.core.config import load_config
+    from agentlab.settings import Settings
+    cfg = load_config(Settings().config_dir)
     typer.echo(f"ok: {len(cfg.agents)} agents, {len(cfg.gates)} gates, aliases={sorted(cfg.models.aliases)}")
     for role, pol in cfg.model_policy.roles.items():
         typer.echo(f"  {role:<22} -> {pol.primary:<10} ({cfg.models.aliases[pol.primary].model})")
@@ -98,7 +108,9 @@ def ping() -> None:
             for alias, model in svc.cfg.models.aliases.items():
                 try:
                     result = await client.chat.completions.create(
-                        model=model.model, temperature=0.0, max_tokens=64,
+                        model=model.model,
+                        temperature=0.0,
+                        max_tokens=64,
                         messages=[{"role": "user", "content": 'Return JSON only: {"ok": true}'}],
                         response_format={"type": "json_object"},
                     )
@@ -106,14 +118,30 @@ def ping() -> None:
                     usage = result.usage
                     good = valid and usage is not None
                     passed &= good
-                    typer.echo(json.dumps({"alias": alias, "model": model.model, "ok": good,
-                                           "tokens": usage.total_tokens if usage else None}))
+                    typer.echo(
+                        json.dumps(
+                            {
+                                "alias": alias,
+                                "model": model.model,
+                                "ok": good,
+                                "tokens": usage.total_tokens if usage else None,
+                            }
+                        )
+                    )
                 except Exception as exc:
                     passed = False
                     # Do not echo gateway exceptions: their payload may contain request secrets.
-                    typer.echo(json.dumps({"alias": alias, "model": model.model, "ok": False,
-                                           "error": type(exc).__name__,
-                                           "status": getattr(exc, "status_code", None)}))
+                    typer.echo(
+                        json.dumps(
+                            {
+                                "alias": alias,
+                                "model": model.model,
+                                "ok": False,
+                                "error": type(exc).__name__,
+                                "status": getattr(exc, "status_code", None),
+                            }
+                        )
+                    )
         return passed
 
     if not asyncio.run(probe()):
@@ -135,8 +163,10 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
 
     async def evaluate() -> list[dict[str, object]]:
         results: list[dict[str, object]] = []
+        workspace_root = Path.home() / ".agentlab-workspaces"
+        workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         for index in range(trials):
-            workspace = Path(tempfile.mkdtemp(prefix="py-fix-add-", dir=root.resolve()))
+            workspace = Path(tempfile.mkdtemp(prefix="py-fix-add-", dir=workspace_root))
             shutil.copytree(template, workspace, dirs_exist_ok=True)
             driver = svc.driver(workspace, "raw", "python")
             driver.hooks = NoHooks()  # isolate convergence from optional RAG/embedding calls
@@ -145,26 +175,33 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
             if baseline.passed or baseline.failed_at != "test":
                 raise RuntimeError("smoke baseline must fail specifically at the tests")
             typer.echo(f"Trial {index + 1}/{trials}: baseline tests fail; starting real model loop", err=True)
-            run = await driver.run(driver.create(
-                "Fix calc.add so all tests pass. Preserve the tests and their assertions; "
-                "support positive, negative and zero integer inputs. Keep changes minimal."
-            ).id)
+            run = await driver.run(
+                driver.create(
+                    "Fix calc.add so all tests pass. Preserve the tests and their assertions; "
+                    "support positive, negative and zero integer inputs. Keep changes minimal."
+                ).id
+            )
             diff = await driver.workspace.diff()
             checks = await driver.gate.run(workspace, GateMode.FULL)
             tests_unchanged = (workspace / "test_calc.py").read_bytes() == (template / "test_calc.py").read_bytes()
             result: dict[str, object] = {
-                "trial": index + 1, "run_id": run.id, "workspace": str(workspace),
-                "status": run.status, "reason": run.paused_reason,
+                "trial": index + 1,
+                "run_id": run.id,
+                "workspace": str(workspace),
+                "status": run.status,
+                "reason": run.paused_reason,
                 "signoff": run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "signoff",
-                "gate_passed": checks.passed, "tests_unchanged": tests_unchanged,
+                "gate_passed": checks.passed,
+                "tests_unchanged": tests_unchanged,
                 "iterations": len(svc.store.iterations(run.id)),
-                "tokens": run.tokens_in + run.tokens_out, "estimated_cost_cents": run.cost_cents,
+                "tokens": run.tokens_in + run.tokens_out,
+                "estimated_cost_cents": run.cost_cents,
             }
             result["passed"] = bool(result["signoff"] and checks.passed and tests_unchanged)
             results.append(result)
-            (workspace.parent / f"{run.id}-diff.txt").write_text(diff)
-            (workspace.parent / f"{run.id}-gate.json").write_text(checks.model_dump_json(indent=2))
-            (workspace.parent / f"{run.id}-events.json").write_text(
+            (root / f"{run.id}-diff.txt").write_text(diff)
+            (root / f"{run.id}-gate.json").write_text(checks.model_dump_json(indent=2))
+            (root / f"{run.id}-events.json").write_text(
                 json.dumps([e.model_dump(mode="json") for e in svc.store.events(run.id)], indent=2)
             )
             (root / "results.json").write_text(json.dumps(results, indent=2))
@@ -176,3 +213,75 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
     typer.echo(f"Convergence: {successes}/{trials}; human approval remains pending.")
     if successes < min(2, trials):
         raise typer.Exit(1)
+
+
+@app.command()
+def status(run_id: Annotated[str | None, typer.Argument()] = None) -> None:
+    """Read durable run state without starting model calls."""
+    svc = build_services()
+    runs = [svc.store.get_run(run_id)] if run_id else svc.store.list_runs()
+    for item in runs:
+        typer.echo(item.model_dump_json())
+
+
+@app.command()
+def resume(run_id: str, auto_approve: bool = False) -> None:
+    """Continue an existing checkpoint; pending approvals remain pending."""
+    svc = build_services()
+    driver = svc.restore_driver(run_id)
+    result = asyncio.run(_drive(svc, driver, svc.store.get_run(run_id), auto_approve))
+    typer.echo(result.model_dump_json())
+
+
+@app.command()
+def decide(
+    run_id: str,
+    decision: str,
+    feedback: str | None = None,
+    budget_cents: float | None = None,
+    max_iter: int | None = None,
+) -> None:
+    """Resolve a persisted approval then continue the run."""
+    if decision not in {"approve", "reject", "abort"}:
+        raise typer.BadParameter("decision must be approve, reject or abort")
+    from typing import cast
+
+    from agentlab.core.loop.driver import Decision
+
+    svc = build_services()
+    driver = svc.restore_driver(run_id)
+    item = driver.decide(run_id, cast(Decision, decision), feedback, budget_cents=budget_cents, max_iter=max_iter)
+    typer.echo(asyncio.run(_drive(svc, driver, item, False)).model_dump_json())
+
+
+@app.command()
+def db_upgrade() -> None:
+    """Apply versioned migrations to the configured PostgreSQL database."""
+    from agentlab.db.migrate import upgrade
+    from agentlab.settings import Settings
+
+    settings = Settings()
+    if not settings.database_url:
+        raise typer.BadParameter("set AGENTLAB_DATABASE_URL")
+    upgrade(settings.database_url)
+    typer.echo("database upgraded")
+
+
+@app.command()
+def show(run_id: str) -> None:
+    """Show the durable run timeline, artifacts and pending approval."""
+    svc = build_services()
+    typer.echo(
+        json.dumps(
+            {
+                "run": svc.store.get_run(run_id).model_dump(mode="json"),
+                "iterations": [x.model_dump(mode="json") for x in svc.store.iterations(run_id)],
+                "steps": [x.model_dump(mode="json") for x in svc.store.steps(run_id)],
+            "attempts": [x for x in svc.store.records("attempt") if x.get("run_id") == run_id],
+                "artifacts": [x.model_dump(mode="json") for x in svc.store.artifacts(run_id)],
+                "events": [x.model_dump(mode="json") for x in svc.store.events(run_id)],
+                "pending_approval": a.model_dump(mode="json") if (a := svc.store.pending_approval(run_id)) else None,
+            },
+            indent=2,
+        )
+    )

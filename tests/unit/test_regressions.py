@@ -67,7 +67,7 @@ async def test_escape_is_an_approval_and_never_writes_outside(cfg, tmp_path):  #
 
 async def test_budget_approval_requires_an_increase_and_auto_approve_stops(cfg, tmp_path):  # type: ignore[no-untyped-def]
     driver = await make_driver(cfg, tmp_path)
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     svc.store = driver.store
     run = await _drive(svc, driver, driver.create("fix add", budget_cents=0.01), True)
     assert run.paused_reason == "budget_exceeded"
@@ -123,7 +123,7 @@ async def test_subscribe_registers_before_first_next():
 
 
 async def test_sse_history_live_gap_and_last_event_id(tmp_path):  # type: ignore[no-untyped-def]
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     run = svc.store.create_run(Run(goal="g", workspace="."))
     for _ in range(3):
         svc.store.append_event(Event(run_id=run.id, type=EventType.RUN_STATUS))
@@ -210,7 +210,7 @@ async def test_refusal_is_not_an_empty_response_and_schema_is_json():
 
 
 async def test_project_planning_failure_is_budgeted_and_does_not_publish(cfg, tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     async def chat(**kwargs):  # type: ignore[no-untyped-def]
         return Completion("invalid", 100, 10)
     runtime = object.__new__(RawRuntime)
@@ -225,7 +225,7 @@ async def test_project_planning_failure_is_budgeted_and_does_not_publish(cfg, tm
 
 
 async def test_document_versions_are_retired_not_deleted(tmp_path):  # type: ignore[no-untyped-def]
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     await svc.knowledge.ingest("notes.txt", b"first version")
     first = next(iter(svc.knowledge.memory._items.values()))
     await svc.knowledge.ingest("notes.txt", b"second version")
@@ -243,7 +243,7 @@ def test_chunks_never_exceed_size():
 
 
 async def test_project_planner_budget_stops_before_any_request(cfg, tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     request = AsyncMock(return_value=Completion('{"phases":[]}', 100, 10))
     runtime = object.__new__(RawRuntime)
     runtime._caller = StructuredCaller(cfg, request)

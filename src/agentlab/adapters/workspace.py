@@ -4,12 +4,13 @@ import asyncio
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 from agentlab.adapters.sandbox.local import run_argv, scrubbed_env
-from agentlab.core.ports import WorkspaceUnreadable
+from agentlab.core.ports import WorkspaceRootRequired, WorkspaceUnreadable
 from agentlab.core.schemas import FileEdit
 
 
@@ -17,14 +18,27 @@ class WorkspaceEscape(PermissionError):
     kind = "workspace_escape"
 
 
+class PersistentDirectory:
+    def __init__(self, path: Path) -> None:
+        self.name = str(path.resolve())
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.name, ignore_errors=True)
+
+
 class GitWorkspace:
-    def __init__(self, root: Path, secrets: tuple[str, ...] = ()) -> None:
+    def __init__(self, root: Path, secrets: tuple[str, ...] = (), snapshot_dir: Path | None = None) -> None:
         self.root = root.resolve()
         self._secrets = secrets
         self._baseline_tree: str | None = None
         self._baseline_meta: dict[str, tuple[str, str]] = {}
         self._edited_paths: set[str] = set()
-        self._snapshot_dir = tempfile.TemporaryDirectory(prefix="agentlab-objects-")
+        self._snapshot_dir = (
+            PersistentDirectory(snapshot_dir)
+            if snapshot_dir
+            else tempfile.TemporaryDirectory(prefix="agentlab-objects-")
+        )
         self._object_env: dict[str, str] | None = None
         self._present_repositories: set[str] = set()
 
@@ -39,29 +53,73 @@ class GitWorkspace:
     @staticmethod
     def _sensitive(rel: str) -> bool:
         parts = Path(rel.casefold()).parts
-        return any(part.startswith(".env") or part in {
-            ".git", ".agentlab", ".netrc", ".npmrc", "credentials.json", "secrets.json",
-            "id_rsa", "id_ed25519", "node_modules", "__pycache__"
-        } for part in parts) or Path(rel.casefold()).suffix in {".pem", ".key"}
+        return any(
+            part.startswith(".env")
+            or part
+            in {
+                ".git",
+                ".agentlab",
+                ".netrc",
+                ".npmrc",
+                "credentials.json",
+                "secrets.json",
+                "id_rsa",
+                "id_ed25519",
+                "node_modules",
+                "__pycache__",
+            }
+            for part in parts
+        ) or Path(rel.casefold()).suffix in {".pem", ".key"}
 
     def close(self) -> None:
         self._snapshot_dir.cleanup()
 
+    def export_state(self) -> dict[str, object]:
+        return {
+            "root": str(self.root),
+            "snapshot_dir": self._snapshot_dir.name,
+            "baseline_tree": self._baseline_tree,
+            "baseline_meta": self._baseline_meta,
+            "edited_paths": sorted(self._edited_paths),
+            "present_repositories": sorted(self._present_repositories),
+        }
+
+    def restore_state(self, state: dict[str, object]) -> None:
+        if str(self.root) != state["root"]:
+            raise ValueError("workspace root changed")
+        self._baseline_tree = str(state["baseline_tree"])
+        self._baseline_meta = {str(k): (str(v[0]), str(v[1])) for k, v in dict(state["baseline_meta"]).items()}  # type: ignore[call-overload]
+        self._edited_paths = set(state["edited_paths"])  # type: ignore[call-overload]
+        self._present_repositories = set(state["present_repositories"])  # type: ignore[call-overload]
+        self._git_bytes("cat-file", "-e", self._baseline_tree)
+
     def _snapshot_env(self) -> dict[str, str]:
         if self._object_env is None:
-            result = subprocess.run(["git", "-C", str(self.root), "rev-parse", "--path-format=absolute",
-                                     "--git-path", "objects"], capture_output=True, check=True,
-                                    env=scrubbed_env(), timeout=30)
+            result = subprocess.run(
+                ["git", "-C", str(self.root), "rev-parse", "--path-format=absolute", "--git-path", "objects"],
+                capture_output=True,
+                check=True,
+                env=scrubbed_env(),
+                timeout=30,
+            )
             objects = Path(self._snapshot_dir.name) / "objects"
-            objects.mkdir()
-            self._object_env = {**scrubbed_env(), "GIT_OBJECT_DIRECTORY": str(objects),
-                                "GIT_ALTERNATE_OBJECT_DIRECTORIES": result.stdout.decode().strip()}
+            objects.mkdir(exist_ok=True)
+            self._object_env = {
+                **scrubbed_env(),
+                "GIT_OBJECT_DIRECTORY": str(objects),
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES": result.stdout.decode().strip(),
+            }
         return self._object_env
 
-    def _git_bytes(self, *args: str, data: bytes | None = None,
-                   env: dict[str, str] | None = None) -> bytes:
-        result = subprocess.run(["git", "-C", str(self.root), *args], input=data,
-                                capture_output=True, check=True, env=env or self._snapshot_env(), timeout=30)
+    def _git_bytes(self, *args: str, data: bytes | None = None, env: dict[str, str] | None = None) -> bytes:
+        result = subprocess.run(
+            ["git", "-C", str(self.root), *args],
+            input=data,
+            capture_output=True,
+            check=True,
+            env=env or self._snapshot_env(),
+            timeout=30,
+        )
         return result.stdout
 
     def _snapshot(self) -> tuple[str, dict[str, tuple[str, str]]]:
@@ -71,11 +129,14 @@ class GitWorkspace:
         entries: list[bytes] = []
         metadata: dict[str, tuple[str, str]] = {}
         stages = self._git_bytes("ls-files", "--stage", "-z")
-        gitlinks = {os.fsdecode(path): header.split()[1].decode()
-                    for item in stages.split(b"\0") if item
-                    for header, path in [item.split(b"\t", 1)] if header.startswith(b"160000 ")}
-        repository_roots = set(gitlinks) | {name.rstrip("/") for name in names
-                                           if name and (self.root / name).is_dir()}
+        gitlinks = {
+            os.fsdecode(path): header.split()[1].decode()
+            for item in stages.split(b"\0")
+            if item
+            for header, path in [item.split(b"\t", 1)]
+            if header.startswith(b"160000 ")
+        }
+        repository_roots = set(gitlinks) | {name.rstrip("/") for name in names if name and (self.root / name).is_dir()}
         with tempfile.TemporaryDirectory(prefix="agentlab-index-") as directory:
             pending: list[tuple[str, str, str, Path]] = []
             for rel in sorted(names):
@@ -96,20 +157,42 @@ class GitWorkspace:
                         # Gitlinks can refer to commits absent from the parent object database.
                         oid = gitlinks.get(rel)
                         if (path / ".git").exists():
-                            head = subprocess.run(["git", "-C", str(path), "rev-parse", "--verify", "HEAD"],
-                                                  capture_output=True, env=scrubbed_env(), timeout=30)
+                            head = subprocess.run(
+                                ["git", "-C", str(path), "rev-parse", "--verify", "HEAD"],
+                                capture_output=True,
+                                env=scrubbed_env(),
+                                timeout=30,
+                            )
                             if head.returncode == 0:
                                 oid = head.stdout.decode().strip()
                         if oid:
                             entries.append(f"160000 {oid}\t".encode() + os.fsencode(rel) + b"\0")
                             kind = "submodule"
                             if (path / ".git").exists():
-                                status = subprocess.run(["git", "-C", str(path), "status", "--porcelain", "-z"],
-                                                        capture_output=True, check=True, env=scrubbed_env(), timeout=30)
+                                status = subprocess.run(
+                                    ["git", "-C", str(path), "status", "--porcelain", "-z"],
+                                    capture_output=True,
+                                    check=True,
+                                    env=scrubbed_env(),
+                                    timeout=30,
+                                )
                                 if status.stdout:
-                                    patch = subprocess.run(["git", "-C", str(path), "diff", "--no-ext-diff",
-                                                            "--no-textconv", "--binary", "HEAD"], capture_output=True,
-                                                           check=True, env=scrubbed_env(), timeout=30)
+                                    patch = subprocess.run(
+                                        [
+                                            "git",
+                                            "-C",
+                                            str(path),
+                                            "diff",
+                                            "--no-ext-diff",
+                                            "--no-textconv",
+                                            "--binary",
+                                            "HEAD",
+                                        ],
+                                        capture_output=True,
+                                        check=True,
+                                        env=scrubbed_env(),
+                                        timeout=30,
+                                    )
                                     dirty = status.stdout + patch.stdout
                                     for edited in sorted(self._edited_paths):
                                         if edited.startswith(rel + "/") and (self.root / edited).is_file():
@@ -122,8 +205,11 @@ class GitWorkspace:
                         for edited in sorted(self._edited_paths):
                             if edited.startswith(rel + "/") and (self.root / edited).is_file():
                                 unborn += (self.root / edited).read_bytes()
-                        data = ("[embedded repository without HEAD; edited content sha256="
-                                + hashlib.sha256(unborn).hexdigest() + "]\n").encode()
+                        data = (
+                            "[embedded repository without HEAD; edited content sha256="
+                            + hashlib.sha256(unborn).hexdigest()
+                            + "]\n"
+                        ).encode()
                         mode, kind = "100644", "embedded-unborn"
                     else:
                         if not path.exists():
@@ -150,13 +236,17 @@ class GitWorkspace:
             if pending:
                 # Sanitized copies avoid Git filters and prevent secrets entering even temporary blobs.
                 paths = b"".join(os.fsencode(path) + b"\n" for _, _, _, path in pending)
-                oids = self._git_bytes("hash-object", "-w", "--no-filters", "--stdin-paths", data=paths).splitlines()
+                owned_env = {k: v for k, v in self._snapshot_env().items()
+                             if k != "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+                oids = self._git_bytes("hash-object", "-w", "--no-filters", "--stdin-paths",
+                                       data=paths, env=owned_env).splitlines()
                 if len(oids) != len(pending):
                     raise RuntimeError("incomplete batch hashing")
                 for (rel, mode, kind, _), batch_oid in zip(pending, oids, strict=True):
                     entries.append(f"{mode} ".encode() + batch_oid + b"\t" + os.fsencode(rel) + b"\0")
                     metadata[rel] = (batch_oid.decode(), kind)
-            env = {**self._snapshot_env(), "GIT_INDEX_FILE": str(Path(directory) / "index")}
+            env = {k: v for k, v in self._snapshot_env().items() if k != "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+            env["GIT_INDEX_FILE"] = str(Path(directory) / "index")
             self._git_bytes("read-tree", "--empty", env=env)
             self._git_bytes("update-index", "-z", "--index-info", data=b"".join(entries), env=env)
             tree = self._git_bytes("write-tree", env=env).decode().strip()
@@ -181,8 +271,11 @@ class GitWorkspace:
             raise WorkspaceEscape("edit contains secret material")
         targets = [(self._resolve(e.path), e) for e in edits]
         stages = self._git_bytes("ls-files", "--stage", "-z")
-        gitlinks = {os.fsdecode(item.split(b"\t", 1)[1]).casefold()
-                    for item in stages.split(b"\0") if item.startswith(b"160000 ")}
+        gitlinks = {
+            os.fsdecode(item.split(b"\t", 1)[1]).casefold()
+            for item in stages.split(b"\0")
+            if item.startswith(b"160000 ")
+        }
         for path, _ in targets:
             rel = path.relative_to(self.root).as_posix().casefold()
             if any(rel == link or rel.startswith(link + "/") for link in gitlinks):
@@ -190,9 +283,9 @@ class GitWorkspace:
             for parent in (path, *path.parents):
                 if parent == self.root:
                     break
-                if (parent / ".git").exists() or ((parent / "HEAD").is_file()
-                                                 and (parent / "objects").is_dir()
-                                                 and (parent / "refs").is_dir()):
+                if (parent / ".git").exists() or (
+                    (parent / "HEAD").is_file() and (parent / "objects").is_dir() and (parent / "refs").is_dir()
+                ):
                     raise WorkspaceEscape("nested repository requires its own project")
         for path, edit in targets:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,8 +308,7 @@ class GitWorkspace:
             if not rel or len(files) >= 40 or remaining <= 0:
                 continue
             parts = Path(rel).parts
-            if any(part.startswith(".") or part in {"node_modules", "dist", "venv", "__pycache__"}
-                   for part in parts):
+            if any(part.startswith(".") or part in {"node_modules", "dist", "venv", "__pycache__"} for part in parts):
                 continue
             if self._sensitive(rel):
                 continue
@@ -238,18 +330,39 @@ class GitWorkspace:
         return files
 
     async def ensure_repo(self) -> None:
+        top = await run_argv(["git", "-C", str(self.root), "rev-parse", "--show-toplevel"], None, 30, scrubbed_env())
+        if top.exit_code == 0 and Path(top.stdout.strip()).resolve() != self.root:
+            raise WorkspaceRootRequired("workspace must point to the existing repository root")
+        if top.exit_code not in (0, 128):
+            raise RuntimeError("cannot detect repository root")
         if not (self.root / ".git").exists():
             await self._git("init", "-q")
-            await self._git("-c", "user.name=agentlab", "-c", "user.email=agentlab@local",
-                            "commit", "-q", "--allow-empty", "-m", "agentlab baseline")
+            await self._git(
+                "-c",
+                "user.name=agentlab",
+                "-c",
+                "user.email=agentlab@local",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "agentlab baseline",
+            )
 
     def _diff(self) -> str:
         current, metadata = self._snapshot()
         baseline = self._baseline_tree or self._git_bytes("mktree", data=b"").decode().strip()
-        changed = os.fsdecode(self._git_bytes("diff", "--name-only", "-z", "--no-renames",
-                                             baseline, current)).split("\0")
-        changed = sorted(set(changed) | {path for path in metadata.keys() & self._baseline_meta.keys()
-                                         if metadata[path] != self._baseline_meta[path]})
+        changed = os.fsdecode(self._git_bytes("diff", "--name-only", "-z", "--no-renames", baseline, current)).split(
+            "\0"
+        )
+        changed = sorted(
+            set(changed)
+            | {
+                path
+                for path in metadata.keys() & self._baseline_meta.keys()
+                if metadata[path] != self._baseline_meta[path]
+            }
+        )
         parts: list[str] = []
         for path in changed:
             if not path:
@@ -257,13 +370,36 @@ class GitWorkspace:
             old_oid, old_kind = self._baseline_meta.get(path, ("absent", "text"))
             new_oid, new_kind = metadata.get(path, ("absent", "text"))
             if old_kind == new_kind == "text":
-                parts.append(self._git_bytes("diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-                                             baseline, current, "--", ":(literal)" + path).decode())
+                parts.append(
+                    self._git_bytes(
+                        "diff",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "--no-renames",
+                        baseline,
+                        current,
+                        "--",
+                        ":(literal)" + path,
+                    ).decode()
+                )
             else:
-                parts.append(f"diff --git a/{path} b/{path}\nchanged ({old_kind} -> {new_kind})\n"
-                             f"old blob {old_oid}\nnew blob {new_oid}\n")
-                parts.append(self._git_bytes("diff", "--raw", "--no-ext-diff", "--no-textconv", "--no-renames",
-                                             baseline, current, "--", ":(literal)" + path).decode())
+                parts.append(
+                    f"diff --git a/{path} b/{path}\nchanged ({old_kind} -> {new_kind})\n"
+                    f"old blob {old_oid}\nnew blob {new_oid}\n"
+                )
+                parts.append(
+                    self._git_bytes(
+                        "diff",
+                        "--raw",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "--no-renames",
+                        baseline,
+                        current,
+                        "--",
+                        ":(literal)" + path,
+                    ).decode()
+                )
                 # A formerly large/binary file rewritten as source must show its actual new contents.
                 if new_kind == "text" and new_oid != "absent":
                     text = self._git_bytes("cat-file", "blob", new_oid).decode()

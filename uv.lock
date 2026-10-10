@@ -12,13 +12,17 @@ name = "agentlab"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "alembic" },
     { name = "fastapi" },
     { name = "openai" },
+    { name = "pgvector" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "python-multipart" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
     { name = "sse-starlette" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -27,12 +31,6 @@ dependencies = [
 [package.optional-dependencies]
 adk = [
     { name = "google-adk" },
-]
-postgres = [
-    { name = "alembic" },
-    { name = "pgvector" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "sqlalchemy" },
 ]
 
 [package.dev-dependencies]
@@ -47,18 +45,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", marker = "extra == 'postgres'", specifier = ">=1.13" },
+    { name = "alembic", specifier = ">=1.13" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-adk", marker = "extra == 'adk'", specifier = ">=1.0" },
     { name = "openai", specifier = ">=1.50" },
-    { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "pgvector", specifier = ">=0.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pypdf", specifier = ">=6.20.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.30" },

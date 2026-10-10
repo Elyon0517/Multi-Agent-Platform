@@ -15,11 +15,15 @@ dependencies = [
     "openai>=1.50",
     "pypdf>=6.20.0",
     "python-multipart>=0.0.32",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "pgvector>=0.3",
 ]
 
 [project.optional-dependencies]
 adk = ["google-adk>=1.0"]
-postgres = ["sqlalchemy>=2.0", "psycopg[binary]>=3.2", "alembic>=1.13", "pgvector>=0.3"]
+postgres = [] # compatibility: PostgreSQL is now a core capability
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "httpx>=0.27"]

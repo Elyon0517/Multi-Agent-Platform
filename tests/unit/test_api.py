@@ -12,7 +12,7 @@ from tests.conftest import CONFIG_DIR
 
 
 def test_run_lifecycle_over_http(tmp_path: Path) -> None:
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="fake", env_file=tmp_path / ".env"))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="fake", env_file=tmp_path / ".env", _env_file=None))
     with TestClient(create_app(svc)) as client:
         assert {r["role"] for r in client.get("/roster").json()} >= {"supervisor", "coder", "arbiter"}
         run = client.post("/runs", json={"goal": "fix add", "runtime": "fake", "language": "python"}).json()
@@ -28,7 +28,7 @@ def test_run_lifecycle_over_http(tmp_path: Path) -> None:
 
 
 def test_missing_gateway_is_a_clear_400(tmp_path: Path) -> None:
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="raw", env_file=tmp_path / ".env",
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="raw", env_file=tmp_path / ".env",
                                   llm_base_url=None, llm_api_key=None, _env_file=None))  # type: ignore[call-arg]
     with TestClient(create_app(svc)) as client:
         res = client.post("/runs", json={"goal": "x", "language": "python"})
@@ -36,7 +36,7 @@ def test_missing_gateway_is_a_clear_400(tmp_path: Path) -> None:
 
 
 def test_project_run_rejects_wrong_workspace_and_unknown_step(tmp_path: Path) -> None:
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="fake",
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="fake",
                                   env_file=tmp_path / ".env", _env_file=None))  # type: ignore[call-arg]
     project = svc.projects.create("p", "goal", str(tmp_path / "workspace"))
     with TestClient(create_app(svc)) as client:

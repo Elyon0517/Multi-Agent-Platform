@@ -14,5 +14,6 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     database_url: str | None = None
+    store_backend: str = "auto"
     runtime: str = "raw"
     sandbox: str = "docker"

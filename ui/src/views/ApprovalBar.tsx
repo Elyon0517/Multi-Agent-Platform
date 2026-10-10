@@ -41,6 +41,7 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
         }}
         onAction={onAction}
       />
+      {approval.reason === 'interrupted_call' && <p>{t('lab.interruptedCall')}</p>}
       {approval.reason !== 'signoff' && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <Field id="resume-budget" label={t('lab.resumeBudget')}

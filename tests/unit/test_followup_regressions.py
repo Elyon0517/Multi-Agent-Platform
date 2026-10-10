@@ -139,7 +139,7 @@ async def test_project_paid_plan_survives_actual_overrun(cfg, tmp_path):  # type
     from agentlab.core.project import PhasePlan, ProjectPlan
     from agentlab.settings import Settings
     from tests.conftest import CONFIG_DIR
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     project = svc.projects.create("p", "g", str(tmp_path), publish=False)
     runtime = SimpleNamespace(run_agent=AsyncMock(return_value=AgentResult(
         role="project-planner", output=ProjectPlan(phases=[PhasePlan(title="phase", steps=["step"])]), alias="root", model="test", usage=Usage(cost_cents=2))))

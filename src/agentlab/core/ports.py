@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -30,12 +31,22 @@ class WorkspaceUnreadable(OSError):
     kind = "workspace_unreadable"
 
 
+class WorkspaceRootRequired(ValueError):
+    pass
+
+
 def execution_error_reason(exc: Exception) -> str:
+    if isinstance(exc, WorkspaceRootRequired):
+        return "workspace_root_required"
     if isinstance(exc, WorkspaceUnreadable):
         return "workspace_unreadable"
     if isinstance(exc, PermissionError) and getattr(exc, "kind", None) == "workspace_escape":
         return "workspace_escape"
     return "execution_error"
+
+
+class RunBusy(RuntimeError):
+    pass
 
 
 class BudgetCheck(Protocol):
@@ -49,12 +60,14 @@ class RunContext:
     record_usage: Callable[[Usage], None] | None = None
     reserve_budget: Callable[[float], None] | None = None
     release_budget: Callable[[float], None] | None = None
+    on_result: Callable[[AgentResult[Any]], None] | None = None
+    attempt_started: Callable[[dict[str, Any]], str] | None = None
+    attempt_finished: Callable[[str, dict[str, Any]], None] | None = None
+    usage_transaction: Callable[[], AbstractContextManager[None]] = nullcontext
 
 
 class AgentRuntime(Protocol):
-    async def run_agent(
-        self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext
-    ) -> AgentResult[T]: ...
+    async def run_agent(self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext) -> AgentResult[T]: ...
 
     async def run_parallel(
         self, inputs: dict[str, AgentInput], output_type: type[T], ctx: RunContext
@@ -110,6 +123,18 @@ class BlobStore(Protocol):
 
 
 class Store(Protocol):
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+    def lock_run(self, run_id: str) -> AbstractContextManager[None]: ...
+
+    def save_checkpoint(self, run_id: str, data: dict[str, Any]) -> None: ...
+
+    def checkpoint(self, run_id: str) -> dict[str, Any] | None: ...
+
+    def put_record(self, kind: str, key: str, data: dict[str, Any]) -> None: ...
+
+    def records(self, kind: str) -> list[dict[str, Any]]: ...
+
     def create_run(self, run: Run) -> Run: ...
 
     def get_run(self, run_id: str) -> Run: ...

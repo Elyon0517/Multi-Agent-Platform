@@ -112,7 +112,7 @@ async def test_api_unreadable_baseline_returns_explicit_error_not_500(tmp_path, 
     from agentlab.bootstrap import build_services
     from agentlab.settings import Settings
     from tests.conftest import CONFIG_DIR
-    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
+    svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     def unreadable(self):  # type: ignore[no-untyped-def]
         raise WorkspaceUnreadable("private detail")
     monkeypatch.setattr(GitWorkspace, "begin_run", unreadable)

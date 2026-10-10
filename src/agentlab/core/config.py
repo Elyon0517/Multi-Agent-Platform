@@ -142,6 +142,7 @@ class PolicyCfg(Strict):
 
 
 class AppConfig(Strict):
+    frozen_prompts: dict[str, str] = {}
     root: Path
     models: ModelsCfg
     model_policy: ModelPolicyCfg
@@ -165,7 +166,7 @@ class AppConfig(Strict):
         for role, agent in self.agents.items():
             if agent.kind != "deterministic" and role not in self.model_policy.roles:
                 raise ConfigError(f"agents/{role}: missing model_policy entry")
-            if not (self.root / agent.prompt).is_file():
+            if role not in self.frozen_prompts and not (self.root / agent.prompt).is_file():
                 raise ConfigError(f"agents/{role}: prompt file {agent.prompt} not found")
         return self
 
@@ -174,7 +175,11 @@ class AppConfig(Strict):
         return sorted(r for r, a in self.agents.items() if a.kind == "reviewer")
 
     def prompt(self, role: str) -> str:
-        return (self.root / self.agents[role].prompt).read_text()
+        return (
+            self.frozen_prompts[role]
+            if role in self.frozen_prompts
+            else (self.root / self.agents[role].prompt).read_text()
+        )
 
 
 def _read(path: Path) -> object:

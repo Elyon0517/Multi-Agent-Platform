@@ -54,17 +54,37 @@ class Finding(Strict):
     suggestion: str = ""
     confidence: float = Field(ge=0.0, le=1.0)
     reviewer_id: str = ""
-    subject: Literal["", "add-validation", "remove-validation", "add-lock", "remove-lock",
-                     "change-interface", "preserve-interface", "add-test", "remove-test",
-                     "change-algorithm", "preserve-algorithm"] = ""
+    subject: Literal[
+        "",
+        "add-validation",
+        "remove-validation",
+        "add-lock",
+        "remove-lock",
+        "change-interface",
+        "preserve-interface",
+        "add-test",
+        "remove-test",
+        "change-algorithm",
+        "preserve-algorithm",
+    ] = ""
     stance: Literal["require", "forbid"] | None = None
 
     @field_validator("subject", mode="before")
     @classmethod
     def normalize_subject(cls, value: object) -> str:
-        allowed = {"", "add-validation", "remove-validation", "add-lock", "remove-lock",
-                   "change-interface", "preserve-interface", "add-test", "remove-test",
-                   "change-algorithm", "preserve-algorithm"}
+        allowed = {
+            "",
+            "add-validation",
+            "remove-validation",
+            "add-lock",
+            "remove-lock",
+            "change-interface",
+            "preserve-interface",
+            "add-test",
+            "remove-test",
+            "change-algorithm",
+            "preserve-algorithm",
+        }
         normalized = value.strip().casefold() if isinstance(value, str) else ""
         if normalized not in allowed or not isinstance(value, str):
             logging.getLogger(__name__).warning("unknown finding subject normalized to empty")
@@ -305,3 +325,5 @@ class AgentResult(BaseModel, Generic[T]):
     retry_reasons: list[str] = []
     routing_reason: str = ""
     usage_recorded: bool = False
+    prompt_ref: str | None = None
+    response_ref: str | None = None
