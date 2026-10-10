@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.6 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（回答 / 任务分流，§2.5、ADR-025），下一步 P2.5 → P3 · 可持续更新
+> 状态：v1.7 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -25,6 +25,7 @@
 | 1 | 新增 **Root 会话层**：用户在对话中只与 root 交流；root 每轮判断意图——**回答**（只读工具检索后直接回复）、**澄清**、或**任务**（交给收敛 Loop） | 原设计中每条消息都会进入编码流水线，问答无法得到回复；参照 Codex / Claude Code 的单一会话入口 | ADR-025 |
 | 2 | 对话窗口显示 root 的回复、任务进度与内联审批，而不只是 run 状态 | 对话是主要交互界面 | ADR-025 |
 | 3 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 实时信息（如天气、最新文档）需要搜索；保持简单 | ADR-026 |
+| 4 | （v1.7）新增 **Monitor 模块**：按 agent 统计累计消耗的 token（跨所有 project 汇总，不按 project 区分） | 了解哪个 agent 用得最多，便于调整模型与分工 | ADR-027 |
 
 ---
 
@@ -348,12 +349,15 @@ message    (id, thread_id, seq, author user|assistant|system, kind, text, run_id
             turn_id NULL, sources jsonb, created_at)                           -- v1.6：逐条存储，替代整段 JSON
 root_turn  (id, thread_id, user_message_id, intent, tool_calls jsonb,
             prompt_ref, response_ref, tokens, cost_cents, created_at)          -- v1.6：可回放、可计费
+usage_ledger (id, ts, role, model_alias, model, tokens_in, tokens_out, cost_cents,
+            source run|turn|planning, ref_id, project_id NULL)                -- v1.7：Monitor 用，存于 public
 ```
 
 - v1.1 新增 `event` 表：Office Floor、Run 树、TUI 都只消费这条事件流（SSE），见 §15.3。
 - `prompt_ref / response_ref / content_ref` 指向 blob 存储（本地文件，sha256 寻址），DB 不存大文本。
 - v1.6：对话事件（`message.created`、`message.delta` 流式输出、`turn.finished`）与 run 事件共用 SSE，按 `thread_id` 订阅；任务进度消息由 run 事件确定性生成。`project_id` 为 NULL 的对话存于 `public`，其余存于各项目 schema。
 - 隔离：单 Postgres 实例，每 project 一个 schema（`proj_<id>`）。导出 = `pg_dump -n schema`。
+- v1.7：`usage_ledger` 是跨项目的用量流水，放在 `public`（与模型目录等共享元数据同级）。每次拿到模型返回的 usage 时追加一行（与现有记账同一位置），只追加不修改；Monitor 直接对它按 `role` 汇总。保留 `project_id` 列只为以后需要时可追溯，Monitor 界面不按 project 拆分。
 
 ---
 
@@ -486,7 +490,7 @@ agentlab/
 
 不移植：语音（realtime/freeflow、RealtimeMichaelToggle、CostHud）、PTY/xterm、Electron main/preload、hire/onboarding（AddAgentModal、OnboardingWizard）、Slack/webhook 触发器、Skills/Workers、更新器、SettingsModal。
 
-**精简版控制台（ADR-022）**：munder 的 CommandCenterPanel（13 个标签、大半依赖 PTY）不整体移植，改为右侧 8 个标签：runs / project / tasks / ask me / memory / graph / activity / settings。点任意头像或卡片在顶部展开 AgentDetail（activity / tools / messages）。
+**精简版控制台（ADR-022）**：munder 的 CommandCenterPanel（13 个标签、大半依赖 PTY）不整体移植，改为右侧 8 个标签：runs / project / tasks / ask me / memory / graph / activity / settings（v1.6 增加 chat，v1.7 增加 monitor）。点任意头像或卡片在顶部展开 AgentDetail（activity / tools / messages）。
 
 **Settings**：网关 URL + API key 输入（password 输入框，可切换显示）；写入本地 `.env`（chmod 600）；后端只返回 `••••••••` + 后 4 位，永不回传完整 key（ADR-023）。
 
@@ -510,6 +514,41 @@ Office Floor 只认事件流，映射规则集中在 `ui/src/scene/adapter/` 一
 
 FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 schema 单一事实源。
 
+### 15.5 Monitor：按 agent 统计 token（v1.7，ADR-027）
+
+**目的**：一眼看出每个 agent 累计用了多少 token、花了多少钱，便于决定给谁换模型、怎么分工。
+
+**范围**：
+- 按 **agent（角色）** 汇总，**不区分 project**：所有项目、所有对话、所有 run 的用量合在一起。
+- 角色来自 `config/agents/*.yaml`，新增角色（例如以后的 researcher）会自动出现，不改代码。当前对应关系：
+
+| 你习惯的叫法 | 当前角色 |
+|---|---|
+| root | `root`（对话）、`supervisor`（auto 分派）、`project-planner`（项目规划） |
+| researcher | 暂无独立角色；root 的检索与上网搜索计入 `root` |
+| developer | `coder`；`planner` 单独一行 |
+| reviewer | `correctness-reviewer`、`arch-reviewer`、`test-style-reviewer`，另显示 reviewer 合计 |
+| worker（其他执行类 agent） | `summarizer` 等其余 `kind: worker` 的角色，各自一行 |
+
+`arbiter` 是确定性代码，不消耗 token，不显示。
+
+**显示内容**（控制台新增 `monitor` 标签）：
+
+| 列 | 含义 |
+|---|---|
+| Agent | 角色名（reviewer 另有合计行） |
+| 调用次数 | 拿到 usage 的模型调用次数（含重试、JSON 修复与 fallback） |
+| 输入 / 输出 / 总 token | 累计 token |
+| 费用 | 按 `models.yaml` 价格估算的累计费用 |
+| 模型 | 该角色实际用过的模型（可能多个） |
+
+另附一个按总 token 排序的横向条形图；顶部显示全部 agent 的总计。打开标签时刷新，任务运行中每几秒刷新一次。
+
+**口径**：
+- 数据来源唯一：`usage_ledger`（§10）。所有拿到 usage 的地方（run 内的 agent 调用、root 对话与上网搜索、项目规划）都写同一张表。
+- 失败但网关返回了 usage 的调用也计入；没有返回 usage 的中断请求无法计量，单独显示「未计量调用」次数。
+- 不新增限制或告警，只做展示；预算仍由 §8 负责。
+
 ---
 
 ## 十六、开发 Phase / Steps（v1.2 更新：按实际进度重排）
@@ -525,7 +564,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
-| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
+| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型、Monitor 模块（v1.7，§15.5） |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
@@ -673,7 +712,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 #### P4 · S5a 可视化 v0 收尾（0.5–1 天）
 - [x] SSE 事件流、Office Floor 接事件流、Run 列表 / 时间线、评审对比、审批横幅
 - [ ] Gate 诊断表（file:line、code、message）
-- [ ] 成本与 token 看板（按 run / 角色 / 模型）
+- [ ] Monitor 模块（v1.7，§15.5）：`usage_ledger` 落库（迁移 + 在现有记账点追加写入）、`GET /monitor/usage` 按角色汇总、控制台 `monitor` 标签（表格 + 条形图）；历史 run 的 step 与 root_turn 用量一次性回填
+  - 验收：跑一个 fake 任务 + 一轮对话后，root / planner / coder / 三个 reviewer 的调用次数与 token 和 step、root_turn 记录一致；跨两个项目的数据合并显示
 - [ ] openapi-typescript 生成类型，替换手写类型
 
 #### P5 · S3 多语言 Gate（每语言 0.5–1 天）
@@ -827,6 +867,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-024 | memory 故障降级为关键词检索，hook 异常不改变 run 结果 | 2026-10-09 | 实测：网关不可达时 embedding 报错曾导致 run 卡死 |
 | ADR-025 | 新增 Root 会话层：每条用户消息先由 root 判断 回答 / 澄清 / 任务；回答走只读工具直接回复，任务交给收敛 Loop，进度与审批回到对话 | 2026-10-10 | 用户要求：对话应能直接得到回复，编码需求再分配任务（参照 Codex / Claude Code）；root 不自行编码，保留 Gate、多模型评审与人工终审 |
 | ADR-026 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 2026-10-10 | 用户要求保持简单；系统重点是 multi-agent 分工，而不是增加限制 |
+| ADR-027 | 新增 Monitor 模块：按 agent 汇总累计 token 与费用，跨项目合并；数据来自 `public.usage_ledger` 单一流水表 | 2026-10-10 | 用户要求只按 agent 区分、不分 project；单表追加写入，比每次扫描所有项目 schema 简单、快 |
 
 
 ### 可靠性复核补充（2026-10-09）
