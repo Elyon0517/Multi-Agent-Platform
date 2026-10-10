@@ -786,6 +786,17 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - `agentlab.db.isolation` 是可重复执行的一次性迁移入口，db-upgrade/启动也会检查。所有已有项目统一迁移，不存在新旧双轨运行路径。锁旧表、复制完整记录、逐表核对行数和内容，任何失败回滚；只读 `legacy_projects` 保留旧数据，不自动删除。public 中空的旧项目表作为建表模板，触发器禁止旧客户端再次写入项目数据。
 - `proj_<id>` 包含 project/agent_def/run/iteration/step/artifact/blackboard/memory/approval/event/run_checkpoint/state_record。项目记忆、对话、Dispatch、attempt、规划调用账目均按归属迁移。public 保留全局知识、共享记录、project_schema/run_directory 路由元数据；模型目录仍以 YAML 为准。项目内外键、serial 序列与 ownership CHECK 不依赖其他项目。
 - 本地迁移：既有 4 个 default run、9 个 iteration、28 个 step、33 个 artifact、4 条 memory、4 个 approval、163 个 event、4 个 checkpoint、8 个 state_record 全部迁入 `proj_default`；完整记录比对通过。真实 run `6b2e0c696274` 保持 WAITING_HUMAN/signoff，cost=5.4875c，恢复 driver 成功。
-- `pg_dump -n proj_default` 已在临时数据库恢复，并核对 4 run / 163 event / 4 checkpoint。恢复到新环境仍需共享 vector 扩展、路由目录注册与 `.agentlab` 中的对象/内容文件；完整导入工具尚待实现。后续 Alembic 结构变更必须同步项目 schemas，不能只更新 public 模板。
+- `pg_dump -n proj_default` 已在临时数据库恢复，并核对 4 run / 163 event / 4 checkpoint。恢复到新环境仍需共享 vector 扩展、路由目录注册与 `.agentlab` 中的对象/内容文件；完整导入工具尚待实现。后续 Alembic 结构变更通过下述 schema 版本机制同步，不能只更新 public 模板。
 
 本轮验证：后端 183 项（包含 17 个持久化集成用例）、前端 19 项，ruff/mypy/config-check/UI build 全部通过；新增模型 ID 多样性、global 上传 embedding、frozen roster、既有数据迁移/只读备份/失败回滚测试。
+
+
+### 16.1j · 各项目结构迁移与访问边界
+
+- 每个项目 schema 记录独立的 `alembic_version`。新项目从基础模板克隆时复制其当前版本；升级前，没有版本表的既有项目先按升级前的基础版本登记，随后补跑到 head。
+- db-upgrade/启动在同一事务内升级基础 schema 和 project_schema 登记的全部项目；任意项目失败，所有表结构和版本号一起回滚。迁移锁与项目创建共享锁协调，避免升级期间克隆到半更新模板；legacy_projects 只读备份不参与升级。
+- 迁移脚本的未限定表名通过目标 schema 的 search_path 解析；共享目录、全局元数据、扩展等仅基础 schema 执行的操作，必须使用 `op.get_context().config.attributes["migration_scope"] == "base"` 判断。新增项目表也必须更新 isolation.TABLES 克隆清单。基础 schema 的项目表是只读空模板，项目数据回填也需限制在 project scope。不得在 revision 中手工 COMMIT 或启用 autocommit，破坏跨 schema 原子性。
+- 回归验证：先创建两个项目（其中一个模拟旧版无版本表），再增加 run 列，确认已有项目与随后新建项目均有新列和一致版本；模拟某项目升级失败，确认基础/全部项目的列和版本完整回滚。
+- **访问控制边界：物理 schema 用于项目数据归档、导出和删除范围管理；访问控制仍由应用层按 project_id/角色过滤。** 当前使用同一数据库账号，records()/list_runs() 会遍历项目 schemas，PersistentMemoryStore 会把各项目记忆加载到同一进程后再按授权范围检索；数据库权限没有阻止跨项目读取。这不是数据库账号级隔离，也不是独立进程隔离。
+
+本轮验证：后端 184 项，包含 18 项持久化集成测试；ruff、mypy、config-check 通过。前端代码未改动。

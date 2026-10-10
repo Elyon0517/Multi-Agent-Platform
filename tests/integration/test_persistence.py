@@ -544,3 +544,77 @@ def test_existing_projects_migrate_and_backup_is_readonly(database_url, monkeypa
     store.create_run(fresh)
     assert store.get_run(fresh.id).project_id == "new_c"
     assert len(store.list_runs()) == 3
+
+
+def test_new_revision_upgrades_existing_project_schemas_atomically(database_url, tmp_path):
+    import shutil
+
+    import psycopg
+    from psycopg import sql
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.isolation import schema_name
+    from agentlab.db.migrate import upgrade
+
+    store = PostgresStore(database_url)
+    store.create_run(Run(project_id="before_one", goal="one", workspace="/tmp/one"))
+    store.create_run(Run(project_id="before_two", goal="two", workspace="/tmp/two"))
+    with psycopg.connect(database_url) as c:
+        base = c.execute("SELECT current_schema()").fetchone()[0]
+        # Adopt a pre-fix project without a version table, using the old base version.
+        c.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier(schema_name(base, "before_one"), "alembic_version")))
+    scripts = tmp_path / "alembic"
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/alembic", scripts)
+    revision = scripts / "versions/schema_regression.py"
+    revision.write_text("""from alembic import op
+revision = "schema_regression"
+down_revision = "project_threads"
+def upgrade():
+    op.execute("ALTER TABLE run ADD COLUMN regression_marker text")
+""")
+    upgrade(database_url, script_location=scripts)
+    upgrade(database_url, script_location=scripts)
+    store.create_run(Run(project_id="after", goal="after", workspace="/tmp/after"))
+    schemas = [base, *(schema_name(base, pid) for pid in ("before_one", "before_two", "after"))]
+    with psycopg.connect(database_url) as c:
+        for schema in schemas:
+            assert (
+                c.execute(
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='run' AND column_name='regression_marker'",
+                    (schema,),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                c.execute(
+                    sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version"))
+                ).fetchone()[0]
+                == "schema_regression"
+            )
+    (scripts / "versions/failing_revision.py").write_text("""from alembic import op
+revision = "failing_revision"
+down_revision = "schema_regression"
+def upgrade():
+    op.execute("ALTER TABLE run ADD COLUMN rollback_marker text")
+    if op.get_context().config.attributes["migration_scope"] == "project":
+        raise RuntimeError("project migration failed")
+""")
+    with pytest.raises(RuntimeError, match="project migration failed"):
+        upgrade(database_url, script_location=scripts)
+    with psycopg.connect(database_url) as c:
+        for schema in schemas:
+            assert (
+                c.execute(
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='run' AND column_name='rollback_marker'",
+                    (schema,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                c.execute(
+                    sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version"))
+                ).fetchone()[0]
+                == "schema_regression"
+            )

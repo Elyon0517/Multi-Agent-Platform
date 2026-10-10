@@ -81,6 +81,7 @@ def clone_tables(c: Any, base: str, target: str) -> None:
 
 
 def provision(c: Any, base: str, project_id: str) -> str:
+    c.execute("SELECT pg_advisory_xact_lock_shared(712460801)")
     c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (base + ":schema:" + project_id,))
     row = c.execute(
         sql.SQL("SELECT schema_name FROM {} WHERE project_id=%s").format(sql.Identifier(base, "project_schema")),
@@ -98,6 +99,16 @@ def provision(c: Any, base: str, project_id: str) -> str:
             )
         )
     c.execute(
+        sql.SQL("CREATE TABLE {} (version_num varchar(32) PRIMARY KEY)").format(
+            sql.Identifier(target, "alembic_version")
+        )
+    )
+    c.execute(
+        sql.SQL("INSERT INTO {} SELECT version_num FROM {}").format(
+            sql.Identifier(target, "alembic_version"), sql.Identifier(base, "alembic_version")
+        )
+    )
+    c.execute(
         sql.SQL("INSERT INTO {} VALUES (%s,%s)").format(sql.Identifier(base, "project_schema")), (project_id, target)
     )
     return target
@@ -108,6 +119,7 @@ def migrate(database_url: str) -> dict[str, Any]:
     with psycopg.connect(dsn, row_factory=dict_row) as connection:
         c: Any = connection
         base = c.execute("SELECT current_schema() AS name").fetchone()["name"]
+        c.execute("SELECT pg_advisory_xact_lock(712460801)")
         c.execute("SELECT pg_advisory_xact_lock(712460802)")
         if c.execute("SELECT to_regclass(%s) AS name", (base + ".project_schema",)).fetchone()["name"]:
             return {"already_migrated": True}
