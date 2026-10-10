@@ -44,13 +44,18 @@ export function App() {
 
   useEffect(() => {
     if (!activeRunId) { setDetail(null); return; }
-    const refresh = () => api.run(activeRunId).then(setDetail).catch(() => undefined);
+    const refresh = () => api.run(activeRunId).then((next) => {
+      if (useStore.getState().activeRunId !== activeRunId) return;
+      setDetail(next);
+      const current = useStore.getState().runs;
+      setRuns(current.map((run) => run.id === next.run.id ? next.run : run));
+    }).catch(() => undefined);
     void refresh();
     return api.events(activeRunId, (e) => {
       applyEvent(e);
       if (e.type === 'run.status' || e.type === 'step.finished' || e.type.startsWith('approval')) void refresh();
     });
-  }, [activeRunId, applyEvent]);
+  }, [activeRunId, applyEvent, setRuns]);
 
   const openRun = async (id: string) => {
     setRuns(await api.runs());

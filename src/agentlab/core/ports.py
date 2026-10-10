@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -20,6 +20,7 @@ from agentlab.core.schemas import (
     Iteration,
     Run,
     Step,
+    Usage,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -33,6 +34,9 @@ class BudgetCheck(Protocol):
 class RunContext:
     run: Run
     check_budget: BudgetCheck
+    record_usage: Callable[[Usage], None] | None = None
+    reserve_budget: Callable[[float], None] | None = None
+    release_budget: Callable[[float], None] | None = None
 
 
 class AgentRuntime(Protocol):
@@ -67,6 +71,8 @@ class Sandbox(Protocol):
 
 class Workspace(Protocol):
     root: Path
+
+    def begin_run(self) -> None: ...
 
     def read(self, path: str) -> str: ...
 

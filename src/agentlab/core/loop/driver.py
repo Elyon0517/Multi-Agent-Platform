@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agentlab.core.budget import BudgetExceeded, BudgetGuard
 from agentlab.core.config import AppConfig
+from agentlab.core.llm.retry import ParallelFailure
 from agentlab.core.loop.arbiter import arbitrate
 from agentlab.core.loop.convergence import gate_fingerprints, is_oscillating, review_fingerprints
 from agentlab.core.loop.hooks import NoHooks, RunHooks
@@ -63,6 +64,7 @@ class Driver:
     ) -> None:
         self.cfg, self.store, self.blobs, self.bus = cfg, store, blobs, bus
         self.runtime, self.gate, self.workspace = runtime, gate, workspace
+        self.runtime_factory: Callable[[], AgentRuntime] | None = None
         self.hooks: RunHooks = hooks or NoHooks()
         self._finished: set[str] = set()
         self._handlers: dict[S, Callable[[Run], Awaitable[None]]] = {
@@ -71,6 +73,7 @@ class Driver:
         }
 
     def create(self, goal: str, **overrides: Any) -> Run:
+        self.workspace.begin_run()
         defaults = {"max_iter": self.cfg.budget.loop.max_iter,
                     "budget_cents": self.cfg.budget.default_run_budget_cents}
         run = Run(goal=goal, workspace=str(self.workspace.root), **{**defaults, **overrides})
@@ -84,7 +87,15 @@ class Driver:
             try:
                 await self._handlers[run.status](run)
             except BudgetExceeded as e:
-                self._escalate(run, "budget_exceeded", {"detail": str(e)}, on_approve=run.status)
+                self._escalate(run, "budget_exceeded", {"required_budget_cents": e.required_budget_cents},
+                               on_approve=run.status)
+            except Exception as exc:
+                # Exceptions can contain prompts/keys. Persist only a safe error class.
+                reason = "workspace_escape" if isinstance(exc, PermissionError) else "execution_error"
+                self._escalate(run, reason, {
+                    "error_type": type(exc).__name__, "error_kind": getattr(exc, "kind", "execution_error")
+                }, on_approve=run.status)
+                log.error("run %s paused in %s: %s", run.id, run.status, type(exc).__name__)
             self.store.save_run(run)
         if run.status in TERMINAL and run.id not in self._finished:
             self._finished.add(run.id)
@@ -102,17 +113,38 @@ class Driver:
         approval = self.store.pending_approval(run_id)
         if run.status != S.WAITING_HUMAN or approval is None:
             raise ValueError(f"run {run_id} is not waiting for a human decision")
+        if budget_cents is not None and budget_cents <= 0:
+            raise ValueError("budget must be positive")
+        if max_iter is not None and not 1 <= max_iter <= 50:
+            raise ValueError("max_iter must be between 1 and 50")
+        if decision == "approve":
+            if approval.reason == "budget_exceeded":
+                required = approval.payload.get("required_budget_cents")
+                if budget_cents is None or budget_cents <= run.budget_cents or (
+                    required is not None and budget_cents < float(required)
+                ):
+                    raise ValueError("increase budget to at least the required amount before resuming")
+            if approval.reason == "max_iter_exceeded" and (max_iter is None or max_iter <= run.max_iter):
+                raise ValueError("increase max_iter before resuming")
+            if approval.on_approve == S.DONE and approval.reason != "signoff":
+                raise ValueError("only signoff approval can complete a run")
+        if decision != "abort" and self.runtime_factory is not None:
+            self.runtime = self.runtime_factory()  # reread gateway credentials when resuming
         run.budget_cents = budget_cents if budget_cents is not None else run.budget_cents
         run.max_iter = max_iter if max_iter is not None else run.max_iter
-        status_by_decision = {"approve": approval.on_approve, "reject": S.CODING, "abort": S.CANCELLED}
+        reject_state = S.CODING if self._latest_text(run, "plan") else S.PLANNING
+        status_by_decision = {"approve": approval.on_approve, "reject": reject_state, "abort": S.CANCELLED}
         approval_by_decision = {
             "approve": ApprovalStatus.APPROVED, "reject": ApprovalStatus.REJECTED, "abort": ApprovalStatus.ABORTED,
         }
         approval.status, approval.decided_by = approval_by_decision[decision], by
         approval.feedback, approval.decided_at = feedback, utcnow()
         self.store.save_approval(approval)
-        if decision == "reject":
-            self._save_artifact(run, "feedback", feedback or "rejected without feedback", "human")
+        if decision == "reject" or (decision == "approve" and approval.reason in {
+            "oscillation_detected", "reviewer_conflict", "inconsistent_verdict", "workspace_escape"
+        }):
+            if decision == "reject" or feedback:
+                self._save_artifact(run, "feedback", feedback or "rejected without feedback", "human")
             run.iteration_base = len(self.store.iterations(run_id))
         run.paused_reason = None
         self._emit(run, EventType.APPROVAL_DECIDED, actor=by, decision=decision, feedback=feedback)
@@ -121,7 +153,7 @@ class Driver:
         return run
 
     async def _planning(self, run: Run) -> None:
-        res = await self._agent(run, "planner", self._input(run), Plan)
+        res = await self._agent(run, "planner", self._input(run, feedback=self._latest_text(run, "feedback")), Plan)
         self._save_artifact(run, "plan", res.output.model_dump_json(), "planner", to="coder")
         self._advance(run, S.CODING)
 
@@ -156,8 +188,12 @@ class Driver:
 
     async def _reviewing(self, run: Run) -> None:
         inp = self._input(run, diff=self._latest_text(run, "diff"), gate=self._last_iteration(run).gate_result)
+        inp.iteration = self._last_iteration(run).n
         results = await self._agents(run, self.cfg.reviewer_roles, inp, Verdict)
-        verdicts = [r.output.model_copy(update={"reviewer_id": f"{r.role}@{r.model}"}) for r in results]
+        verdicts = [r.output.model_copy(update={
+            "reviewer_id": f"{r.role}@{r.model}",
+            "findings": [f.model_copy(update={"reviewer_id": f"{r.role}@{r.model}"}) for f in r.output.findings],
+        }) for r in results]
         for v in verdicts:
             self._save_artifact(run, "review", v.model_dump_json(), v.reviewer_id.split("@")[0], to="arbiter")
         it = self._last_iteration(run).model_copy(
@@ -206,18 +242,24 @@ class Driver:
     async def _agents(self, run: Run, roles: list[str], inp: AgentInput, out: type[T]) -> list[AgentResult[T]]:
         guard = BudgetGuard(run, self.cfg.budget.warn_ratio, lambda r: self._emit(
             r, EventType.BUDGET_WARNING, cost_cents=r.cost_cents, budget_cents=r.budget_cents))
-        ctx = RunContext(run=run, check_budget=guard.check)
+        ctx = RunContext(run=run, check_budget=guard.check, record_usage=guard.record,
+                         reserve_budget=guard.reserve, release_budget=guard.release)
         for role in roles:
             self._emit(run, EventType.STEP_STARTED, actor=role, role=role, iteration=inp.iteration)
         files = await self.workspace.context_files()
         inputs = {r: inp.model_copy(update={"context": {**inp.context, "files": files,
                                                        **await self._context(run, r, inp)}}) for r in roles}
-        if len(roles) == 1:
-            results = [await self.runtime.run_agent(roles[0], inputs[roles[0]], out, ctx)]
-        else:
-            results = await self.runtime.run_parallel(inputs, out, ctx)
+        failure: Exception | None = None
+        try:
+            if len(roles) == 1:
+                results = [await self.runtime.run_agent(roles[0], inputs[roles[0]], out, ctx)]
+            else:
+                results = await self.runtime.run_parallel(inputs, out, ctx)
+        except ParallelFailure as exc:
+            results, failure = exc.results, exc.cause
         for r in results:
-            guard.record(r.usage)
+            if not r.usage_recorded:
+                guard.record(r.usage)
             self.store.add_step(Step(
                 run_id=run.id, iteration_n=inp.iteration, role=r.role, model_alias=r.alias, model=r.model,
                 usage=r.usage, latency_ms=r.latency_ms, attempt_count=r.attempts,
@@ -226,8 +268,13 @@ class Driver:
             self._emit(run, EventType.STEP_FINISHED, actor=r.role, role=r.role, model=r.model,
                        cost_cents=r.usage.cost_cents, tokens=r.usage.tokens_in + r.usage.tokens_out,
                        tokens_in=r.usage.tokens_in, tokens_out=r.usage.tokens_out, latency_ms=r.latency_ms,
-                       iteration=inp.iteration, summary=summarize(r.output))
+                       iteration=inp.iteration, summary=summarize(r.output),
+                       cumulative_cost_cents=run.cost_cents, cumulative_tokens_in=run.tokens_in,
+                       cumulative_tokens_out=run.tokens_out)
         self.store.save_run(run)
+        if failure is not None:
+            raise failure
+        guard.check()
         return results
 
     def _input(self, run: Run, **extra: Any) -> AgentInput:
@@ -250,8 +297,11 @@ class Driver:
             feedback=self.blobs.get(fb.content_ref) if fb else None,
         )
 
-    def _escalate(self, run: Run, reason: str, payload: dict[str, Any], on_approve: S = S.DONE) -> None:
-        self.store.create_approval(Approval(run_id=run.id, reason=reason, payload=payload, on_approve=on_approve))
+    def _escalate(self, run: Run, reason: str, payload: dict[str, Any], on_approve: S | None = None) -> None:
+        resume = on_approve or (S.CODING if self._latest_text(run, "plan") else S.PLANNING)
+        if reason == "oscillation_detected":
+            resume = S.CODING
+        self.store.create_approval(Approval(run_id=run.id, reason=reason, payload=payload, on_approve=resume))
         run.paused_reason = reason
         self._emit(run, EventType.APPROVAL_REQUESTED, actor="supervisor", reason=reason, payload=payload)
         self._advance(run, S.WAITING_HUMAN)

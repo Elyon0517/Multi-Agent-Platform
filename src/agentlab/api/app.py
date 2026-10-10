@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -18,6 +19,8 @@ from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.loop.driver import Decision, Driver
 from agentlab.core.schemas import Approval, Artifact, Event, Iteration, Run, Step
 from agentlab.demo import seed_demo_workspace
+
+log = logging.getLogger(__name__)
 
 
 class CreateRun(BaseModel):
@@ -56,7 +59,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def spawn(driver: Driver, run_id: str) -> None:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        def finished(done: asyncio.Task[Run]) -> None:
+            tasks.discard(done)
+            if not done.cancelled() and (error := done.exception()) is not None:
+                log.error("background run %s failed: %s", run_id, type(error).__name__)
+
+        task.add_done_callback(finished)
 
     def get_run(run_id: str) -> Run:
         try:
@@ -138,25 +146,35 @@ def create_app(svc: Services | None = None) -> FastAPI:
         try:
             run = driver.decide(run_id, body.decision, body.feedback, budget_cents=body.budget_cents,
                                 max_iter=body.max_iter)
-        except ValueError as e:
+        except (ValueError, MissingGatewayConfig) as e:
             raise HTTPException(409, str(e)) from e
         spawn(driver, run_id)
         return run
 
     @app.get("/runs/{run_id}/events")
-    async def events(run_id: str, after: int = 0) -> EventSourceResponse:
+    async def events(run_id: str, request: Request, after: int = 0) -> EventSourceResponse:
         get_run(run_id)
+        try:
+            last = int(request.headers.get("last-event-id", "0"))
+            if after < 0 or last < 0:
+                raise ValueError
+            after = max(after, last)
+        except ValueError as exc:
+            raise HTTPException(422, "invalid event cursor") from exc
 
         async def stream() -> AsyncIterator[dict[str, str]]:
-            live = svc.bus.subscribe(run_id)
-            seen = after
-            for e in svc.store.events(run_id, after):
-                seen = e.seq
-                yield _sse(e)
-            async for e in live:
-                if e.seq > seen:
-                    seen = e.seq
-                    yield _sse(e)
+            live = svc.bus.subscribe(run_id)  # eager registration before the history snapshot
+            try:
+                seen = after
+                for event in svc.store.events(run_id, after):
+                    seen = event.seq
+                    yield _sse(event)
+                async for event in live:
+                    if event.seq > seen:
+                        seen = event.seq
+                        yield _sse(event)
+            finally:
+                await live.aclose()
 
         return EventSourceResponse(stream())
 

@@ -81,8 +81,8 @@ class TestArbiter:
 
     def test_conflict_escalates(self) -> None:
         d = arbitrate([
-            verdict("r1", finding(Severity.MAJOR, conf=0.6, issue="must lock")),
-            verdict("r2", finding(Severity.NIT, conf=0.6, issue="lock is harmful", reviewer="r2")),
+            verdict("r1", finding(Severity.MAJOR, conf=0.6, issue="must lock").model_copy(update={"subject": "lock", "stance": "require"})),
+            verdict("r2", finding(Severity.NIT, conf=0.6, issue="lock is harmful", reviewer="r2").model_copy(update={"subject": "lock", "stance": "forbid"})),
         ], 0.7)
         assert d.action == ArbiterAction.ESCALATE and d.conflicts
 

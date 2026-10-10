@@ -3,6 +3,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS project (
     id text PRIMARY KEY,
     name text NOT NULL,
+    goal text NOT NULL DEFAULT '',
+    phases jsonb NOT NULL DEFAULT '[]',
     workspace_path text NOT NULL,
     config_ref text,
     budget_cents numeric NOT NULL DEFAULT 5000,
@@ -94,13 +96,14 @@ CREATE TABLE IF NOT EXISTS blackboard (
 
 CREATE TABLE IF NOT EXISTS memory (
     id text PRIMARY KEY,
-    project_id text NOT NULL,
+    project_id text,
     namespace text NOT NULL,
-    kind text NOT NULL CHECK (kind IN ('episodic', 'semantic', 'procedural')),
+    kind text NOT NULL CHECK (kind IN ('episodic', 'semantic', 'procedural', 'document', 'note')),
     text text NOT NULL,
     embedding vector(3072),
     embedding_model text,
     embedding_version int,
+    source text NOT NULL DEFAULT '',
     source_run_id text,
     valid_from timestamptz NOT NULL DEFAULT now(),
     valid_to timestamptz,

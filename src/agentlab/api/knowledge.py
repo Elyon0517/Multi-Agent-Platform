@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentlab.bootstrap import MissingGatewayConfig, Services
+from agentlab.core.budget import BudgetExceeded
 from agentlab.core.memory.documents import UnsupportedDocument
 from agentlab.core.memory.store import GLOBAL, PROJECT, Hit, MemoryItem, agent_ns
 from agentlab.core.project import Project, ProjectPhase, StepStatus
@@ -38,6 +39,7 @@ class CreateProject(BaseModel):
     goal: str
     workspace: str
     runtime: str | None = None
+    budget_cents: float | None = Field(default=None, gt=0)
 
 
 class PatchStep(BaseModel):
@@ -106,18 +108,27 @@ def build_router(svc: Services) -> APIRouter:
     def memory_status() -> dict[str, object]:
         return svc.knowledge.memory.stats()
 
+    @r.get("/project-planning")
+    def planning_attempts() -> list[dict[str, Any]]:
+        return svc.projects.planning_attempts
+
     @r.get("/projects", response_model=list[Project])
     def list_projects() -> list[Project]:
         return svc.projects.list()
 
     @r.post("/projects", response_model=Project)
     async def create_project(body: CreateProject) -> Project:
-        project = svc.projects.create(body.name, body.goal, body.workspace)
+        project = svc.projects.create(body.name, body.goal, body.workspace, publish=False)
         try:
             await svc.projects.plan(project, svc.runtime(body.runtime), svc.knowledge,
-                                    svc.cfg.budget.default_run_budget_cents)
+                                    body.budget_cents or svc.cfg.budget.default_run_budget_cents)
         except MissingGatewayConfig as e:
-            raise HTTPException(400, f"{type(e).__name__}: {e}") from e
+            raise HTTPException(400, type(e).__name__) from e
+        except BudgetExceeded as e:
+            raise HTTPException(409, "project planning budget exceeded") from e
+        except Exception as e:
+            raise HTTPException(502, f"project planning failed: {type(e).__name__}") from e
+        svc.projects.save(project)
         return project
 
     @r.get("/projects/{project_id}", response_model=Project)

@@ -96,7 +96,8 @@ async def test_reject_feeds_back_to_coder(cfg: AppConfig, tmp_path: Path) -> Non
 async def test_reviewer_conflict_escalates(cfg: AppConfig, tmp_path: Path) -> None:
     def rev(sev: Severity, issue: str) -> Script:
         return lambda _: Verdict(reviewer_id="x", verdict="REQUEST_CHANGES", findings=[
-            Finding(severity=sev, category="correctness", file="calc.py", line=2, issue=issue, confidence=0.6)])
+            Finding(severity=sev, category="correctness", file="calc.py", line=2, issue=issue, confidence=0.6, subject="lock",
+                    stance="require" if sev.is_hard else "forbid")])
 
     d = await make_driver(cfg, tmp_path, {
         "correctness-reviewer": rev(Severity.MAJOR, "must lock"),

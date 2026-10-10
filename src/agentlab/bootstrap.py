@@ -77,13 +77,16 @@ class Services:
         return [ConfigGate(g, sandbox, lambda text: self.blobs.put(text)[0]) for g in self.cfg.gates.values()]
 
     def driver(self, workspace: Path, runtime: str | None = None, language: str | None = None) -> Driver:
-        ws = GitWorkspace(workspace)
+        key = self.gateway()[1]
+        ws = GitWorkspace(workspace, secrets=(key,) if key else ())
         if (runtime or self.settings.runtime) == "fake":
             from agentlab.demo import demo_gate_cfg
             gate = ConfigGate(demo_gate_cfg(), LocalSandbox())
         else:
             gate = resolve_gate(self.gates(), ws.root, language)
-        return Driver(self.cfg, self.store, self.blobs, self.bus, self.runtime(runtime), gate, ws, self.hooks)
+        driver = Driver(self.cfg, self.store, self.blobs, self.bus, self.runtime(runtime), gate, ws, self.hooks)
+        driver.runtime_factory = lambda: self.runtime(runtime)
+        return driver
 
 
 def build_services(settings: Settings | None = None) -> Services:

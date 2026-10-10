@@ -53,6 +53,8 @@ class Finding(Strict):
     suggestion: str = ""
     confidence: float = Field(ge=0.0, le=1.0)
     reviewer_id: str = ""
+    subject: str = ""
+    stance: Literal["require", "forbid"] | None = None
 
     def fingerprint(self) -> str:
         key = f"{self.file}|{self.category}|{self.severity}|{normalize_text(self.issue)}"
@@ -67,7 +69,7 @@ class Verdict(Strict):
 
     @property
     def is_signoff(self) -> bool:
-        return not any(f.severity.is_hard for f in self.findings)
+        return self.verdict != "BLOCK" and not any(f.severity.is_hard for f in self.findings)
 
 
 class Plan(Strict):
@@ -231,7 +233,7 @@ class Approval(Strict):
     id: str = Field(default_factory=new_id)
     run_id: str
     reason: str
-    on_approve: RunStatus = RunStatus.DONE
+    on_approve: RunStatus = RunStatus.CODING
     payload: dict[str, Any] = {}
     status: ApprovalStatus = ApprovalStatus.PENDING
     decided_by: str | None = None
@@ -287,3 +289,4 @@ class AgentResult(BaseModel, Generic[T]):
     attempts: int = 1
     retry_reasons: list[str] = []
     routing_reason: str = ""
+    usage_recorded: bool = False

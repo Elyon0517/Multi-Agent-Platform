@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from functools import partial
+from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -43,17 +43,30 @@ class StructuredCaller:
         override: Override | None = None,
     ) -> AgentResult[T]:
         route = self._router.resolve(role, override)
+        total_usage = Usage()
+        recorded = ctx.record_usage is not None
+        original_record = ctx.record_usage
+
+        def record(usage: Usage) -> None:
+            total_usage.tokens_in += usage.tokens_in
+            total_usage.tokens_out += usage.tokens_out
+            total_usage.cost_cents += usage.cost_cents
+            if original_record:
+                original_record(usage)
+
+        ctx = replace(ctx, record_usage=record)
         log = AttemptLog()
         started = time.monotonic()
         last: Exception | None = None
         for alias in route.chain:
             try:
-                output, usage = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
+                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
                 return AgentResult[output_type](  # type: ignore[valid-type]
-                    role=role, output=output, alias=alias, model=self._router.model_of(alias), usage=usage,
+                    role=role, output=output, alias=alias, model=self._router.model_of(alias), usage=total_usage,
                     latency_ms=int((time.monotonic() - started) * 1000), attempts=log.count,
                     retry_reasons=log.reasons,
                     routing_reason=route.reason if alias == route.alias else f"fallback_from_{route.alias}",
+                    usage_recorded=recorded,
                 )
             except RetriesExhausted as e:
                 last = e
@@ -70,19 +83,40 @@ class StructuredCaller:
         usage = Usage()
         schema = output_type.model_json_schema()
         for _ in range(self._cfg.retry.structured_output_repair.max_repairs + 1):
-            prompt_chars = len(system) + sum(len(m["content"]) for m in messages)
-            completion = await call_with_retry(
-                partial(self._chat, model=alias_cfg.model, system=system, messages=list(messages),
-                        temperature=route.temperature, schema=schema),
-                self._cfg.retry.llm_call,
-                log,
-                partial(ctx.check_budget, estimate_cents(alias_cfg, prompt_chars)),
-            )
-            usage = Usage(
-                tokens_in=usage.tokens_in + completion.tokens_in,
-                tokens_out=usage.tokens_out + completion.tokens_out,
-                cost_cents=usage.cost_cents + alias_cfg.cost_cents(completion.tokens_in, completion.tokens_out),
-            )
+            prompt_chars = len(system) + len(json.dumps(schema)) + sum(len(m["content"]) for m in messages)
+            estimate = estimate_cents(alias_cfg, prompt_chars)
+
+            def check_attempt(estimate: float = estimate) -> None:
+                if ctx.reserve_budget:
+                    ctx.reserve_budget(estimate)
+                else:
+                    ctx.check_budget(estimate)
+
+            async def attempt(estimate: float = estimate,
+                              messages: tuple[dict[str, str], ...] = tuple(messages)) -> Completion:
+                nonlocal usage
+                try:
+                    completion = await self._chat(model=alias_cfg.model, system=system, messages=list(messages),
+                                                  temperature=route.temperature, schema=schema)
+                    charged = Usage(tokens_in=completion.tokens_in, tokens_out=completion.tokens_out,
+                                    cost_cents=alias_cfg.cost_cents(completion.tokens_in, completion.tokens_out))
+                except LlmError as exc:
+                    charged = Usage(tokens_in=exc.tokens_in, tokens_out=exc.tokens_out,
+                                    cost_cents=alias_cfg.cost_cents(exc.tokens_in, exc.tokens_out))
+                    if ctx.record_usage:
+                        ctx.record_usage(charged)
+                    raise
+                finally:
+                    if ctx.release_budget:
+                        ctx.release_budget(estimate)
+                usage = Usage(tokens_in=usage.tokens_in + charged.tokens_in,
+                              tokens_out=usage.tokens_out + charged.tokens_out,
+                              cost_cents=usage.cost_cents + charged.cost_cents)
+                if ctx.record_usage:
+                    ctx.record_usage(charged)
+                return completion
+
+            completion = await call_with_retry(attempt, self._cfg.retry.llm_call, log, check_attempt)
             try:
                 return output_type.model_validate_json(completion.text), usage
             except ValidationError as e:

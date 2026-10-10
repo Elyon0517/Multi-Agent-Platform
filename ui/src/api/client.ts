@@ -168,8 +168,9 @@ export const api = {
   runs: () => json<Run[]>('/runs'),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),
   createRun: (body: CreateRunBody) => post<Run>('/runs', body),
-  decide: (id: string, decision: 'approve' | 'reject' | 'abort', feedback?: string) =>
-    post<Run>(`/runs/${id}/decision`, { decision, feedback }),
+  decide: (id: string, decision: 'approve' | 'reject' | 'abort', feedback?: string,
+    limits: { budget_cents?: number; max_iter?: number } = {}) =>
+    post<Run>(`/runs/${id}/decision`, { decision, feedback, ...limits }),
   artifact: (runId: string, artifactId: string) =>
     json<{ kind: string; content: string }>(`/artifacts/${runId}/${artifactId}`),
   settings: () => json<SettingView[]>('/settings'),

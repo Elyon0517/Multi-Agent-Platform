@@ -72,7 +72,7 @@ class TestBudget:
         assert warned == [9.0]
 
 
-RETRY = LlmCallCfg(num_retries=3, backoff_base_s=0, timeout_s=5, retry_on=[], do_not_retry_on=[])
+RETRY = LlmCallCfg(num_retries=3, backoff_base_s=0, timeout_s=5, retry_on=["rate_limit_429", "server_error_5xx"], do_not_retry_on=["auth_401_403"])
 
 
 async def _nosleep(_: float) -> None:

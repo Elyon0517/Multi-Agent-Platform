@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from agentlab.core.schemas import Event
+
+
+class Subscription(AsyncIterator[Event]):
+    def __init__(self, queue: asyncio.Queue[Event], close: Callable[[], None]) -> None:
+        self.queue, self.close = queue, close
+
+    async def __anext__(self) -> Event:
+        return await self.queue.get()
+
+    async def aclose(self) -> None:
+        self.close()
 
 
 class InProcessEventBus:
@@ -15,11 +26,7 @@ class InProcessEventBus:
         for q in list(self._subs[event.run_id]) + list(self._subs["*"]):
             q.put_nowait(event)
 
-    async def subscribe(self, run_id: str) -> AsyncIterator[Event]:
-        q: asyncio.Queue[Event] = asyncio.Queue()
-        self._subs[run_id].add(q)
-        try:
-            while True:
-                yield await q.get()
-        finally:
-            self._subs[run_id].discard(q)
+    def subscribe(self, run_id: str) -> Subscription:
+        queue: asyncio.Queue[Event] = asyncio.Queue()
+        self._subs[run_id].add(queue)
+        return Subscription(queue, lambda: self._subs[run_id].discard(queue))

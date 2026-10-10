@@ -11,7 +11,7 @@ def all_signoff(verdicts: list[Verdict]) -> bool:
 
 def hard_findings(verdicts: list[Verdict]) -> list[Finding]:
     return [
-        f.model_copy(update={"reviewer_id": f.reviewer_id or v.reviewer_id})
+        f.model_copy(update={"reviewer_id": v.reviewer_id})
         for v in verdicts
         for f in v.findings
         if f.severity.is_hard

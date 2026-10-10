@@ -31,7 +31,7 @@ def _print_event(e: Event) -> None:
 
 async def _drive(svc: Services, driver: Driver, run: Run, auto_approve: bool) -> Run:
     run = await driver.run(run.id)
-    while auto_approve and run.status == RunStatus.WAITING_HUMAN:
+    if auto_approve and run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "signoff":
         run = driver.decide(run.id, "approve", by="auto")
         run = await driver.run(run.id)
     for e in svc.store.events(run.id):

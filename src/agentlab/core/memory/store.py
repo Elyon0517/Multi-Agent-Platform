@@ -45,6 +45,8 @@ class MemoryItem(Strict):
     embedding: list[float] | None = None
     embedding_model: str | None = None
     created_at: str = Field(default_factory=lambda: utcnow().isoformat())
+    valid_to: str | None = None
+    superseded_by: str | None = None
 
 
 class Hit(Strict):
@@ -130,22 +132,24 @@ class InMemoryMemoryStore:
 
     def items_in(self, namespace: str, project_id: str | None = None) -> list[MemoryItem]:
         return [i for i in self._items.values()
-                if i.namespace == namespace and (namespace == GLOBAL or i.project_id == project_id)]
+                if i.valid_to is None and i.namespace == namespace
+                and (namespace == GLOBAL or i.project_id == project_id)]
 
     def stats(self) -> dict[str, object]:
-        items = list(self._items.values())
+        items = [item for item in self._items.values() if item.valid_to is None]
         return {"items": len(items), "embedded": sum(1 for i in items if i.embedding),
                 "embedding_model": self.embedder.model if self.embedder else None,
                 "embedding_ready": self._can_embed(), "last_error": self.last_error}
 
     def delete_source(self, namespace: str, source: str) -> int:
-        doomed = [k for k, i in self._items.items() if i.namespace == namespace and i.source == source]
-        for k in doomed:
-            del self._items[k]
+        doomed = [k for k, i in self._items.items()
+                  if i.valid_to is None and i.namespace == namespace and i.source == source]
+        for key in doomed:
+            self._items[key].valid_to = utcnow().isoformat()
         return len(doomed)
 
     def _scope(self, project_id: str | None, namespaces: list[str]) -> list[MemoryItem]:
-        return [i for i in self._items.values() if i.namespace in namespaces
+        return [i for i in self._items.values() if i.valid_to is None and i.namespace in namespaces
                 and (i.namespace == GLOBAL or i.project_id == project_id)]
 
     async def search(self, project_id: str | None, namespaces: list[str], query: str, k: int = 8) -> list[Hit]:

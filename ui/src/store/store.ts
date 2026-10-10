@@ -82,6 +82,7 @@ interface LabState {
   activeRunId: string | null;
   activeProjectId: string | null;
   events: LabEvent[];
+  lastEventSeq: number;
   tasks: BoardTask[];
   log: LogEntry[];
   telemetry: Telemetry;
@@ -145,9 +146,9 @@ function patchRun(run: Run, e: LabEvent, status?: Run['status']): Run {
   if (e.type === 'approval.requested') next.paused_reason = String(p.reason ?? '');
   if (e.type === 'approval.decided') next.paused_reason = null;
   if (e.type === 'step.finished') {
-    next.cost_cents = run.cost_cents + Number(p.cost_cents ?? 0);
-    next.tokens_in = run.tokens_in + Number(p.tokens_in ?? 0);
-    next.tokens_out = run.tokens_out + Number(p.tokens_out ?? 0);
+    next.cost_cents = Math.max(run.cost_cents, Number(p.cumulative_cost_cents ?? run.cost_cents));
+    next.tokens_in = Math.max(run.tokens_in, Number(p.cumulative_tokens_in ?? run.tokens_in));
+    next.tokens_out = Math.max(run.tokens_out, Number(p.cumulative_tokens_out ?? run.tokens_out));
   }
   return next;
 }
@@ -173,6 +174,7 @@ export const useStore = create<LabState>((set, get) => {
     activeRunId: null,
     activeProjectId: null,
     events: [],
+    lastEventSeq: 0,
     tasks: [],
     log: [],
     telemetry: EMPTY_TELEMETRY,
@@ -194,10 +196,11 @@ export const useStore = create<LabState>((set, get) => {
     },
 
     setRuns: (runs) => set((s) => ({ runs, tasks: tasksFor(runs, s.dismissedAsks) })),
-    setActiveRun: (id) => set({ activeRunId: id, events: [], telemetry: EMPTY_TELEMETRY, log: [] }),
+    setActiveRun: (id) => set({ activeRunId: id, events: [], lastEventSeq: 0, telemetry: EMPTY_TELEMETRY, log: [] }),
     setActiveProject: (id) => set({ activeProjectId: id }),
 
     applyEvent: (e) => {
+      if (e.run_id !== get().activeRunId || e.seq <= get().lastEventSeq) return;
       const { patches, handoffs, runStatus } = translate(e);
       const folded = foldTelemetry(get().telemetry, e);
       const recent = stepSummary(e);
@@ -220,7 +223,7 @@ export const useStore = create<LabState>((set, get) => {
           ...s.log, ...handoffs.map((h) => ({ ...h, ts: Date.parse(e.ts), kind: 'message' as const,
             subject: String(e.payload.kind ?? e.type) })),
         ].slice(-500);
-        return { agents, runs, tasks: tasksFor(runs, s.dismissedAsks), log, telemetry: folded.next,
+        return { lastEventSeq: e.seq, agents, runs, tasks: tasksFor(runs, s.dismissedAsks), log, telemetry: folded.next,
           events: [...s.events, e].slice(-2000) };
       });
       for (const h of handoffs) for (const l of get().handoffListeners) l(h);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -8,7 +9,7 @@ import openai
 from pydantic import BaseModel
 
 from agentlab.core.config import AppConfig
-from agentlab.core.llm.retry import NonRetryable, Retryable
+from agentlab.core.llm.retry import NonRetryable, ParallelFailure, Retryable
 from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.ports import RunContext
 from agentlab.core.schemas import AgentInput, AgentResult
@@ -42,18 +43,25 @@ class OpenAICompatChat:
         self, *, model: str, system: str, messages: list[dict[str, str]], temperature: float,
         schema: dict[str, object],
     ) -> Completion:
-        system_msg = {"role": "system", "content": f"{system}\n\nRespond with JSON matching:\n{schema}"}
+        system_msg = {"role": "system", "content":
+                      f"{system}\n\nRespond with JSON matching:\n{json.dumps(schema, ensure_ascii=False)}"}
         payload: list[Any] = [system_msg, *messages]
         try:
             resp = await self._client.chat.completions.create(
                 model=model, temperature=temperature, messages=payload, response_format={"type": "json_object"},
+                max_tokens=4096,
             )
         except openai.OpenAIError as e:
             raise classify(e) from e
-        text = resp.choices[0].message.content if resp.choices else None
-        if not text:
-            raise Retryable("empty_response")
+        message = resp.choices[0].message if resp.choices else None
+        text = message.content if message else None
         usage = resp.usage
+        refusal = (message and message.refusal) or (resp.choices and resp.choices[0].finish_reason == "content_filter")
+        if refusal or not text:
+            error = NonRetryable("content_policy_refusal") if refusal else Retryable("empty_response")
+            error.tokens_in = usage.prompt_tokens if usage else 0
+            error.tokens_out = usage.completion_tokens if usage else 0
+            raise error
         return Completion(text, usage.prompt_tokens if usage else 0, usage.completion_tokens if usage else 0)
 
 
@@ -93,4 +101,10 @@ class RawRuntime:
     async def run_parallel(
         self, inputs: dict[str, AgentInput], output_type: type[T], ctx: RunContext
     ) -> list[AgentResult[T]]:
-        return list(await asyncio.gather(*(self.run_agent(r, i, output_type, ctx) for r, i in inputs.items())))
+        outcomes = await asyncio.gather(*(self.run_agent(r, i, output_type, ctx) for r, i in inputs.items()),
+                                        return_exceptions=True)
+        results = [result for result in outcomes if not isinstance(result, BaseException)]
+        errors = [result for result in outcomes if isinstance(result, Exception)]
+        if errors:
+            raise ParallelFailure(errors[0], results)
+        return results

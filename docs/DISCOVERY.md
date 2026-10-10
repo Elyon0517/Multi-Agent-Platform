@@ -1,6 +1,6 @@
 # Agent Converge Discovery
 
-> 状态：v1.2 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
+> 状态：v1.3 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
 > 最近更新：2026-10-09
 > 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -103,7 +103,7 @@ Task → Planner → Coder → [客观 Gate] → [LLM 评审团] → Arbiter →
 | GATING | pass → REVIEWING；fail → CODING（带 gate 报告） |
 | REVIEWING | → ARBITRATING |
 | ARBITRATING | SIGNOFF → WAITING_HUMAN；BACK_TO_CODER → CODING；ESCALATE → WAITING_HUMAN |
-| WAITING_HUMAN | approve → DONE；reject+反馈 → CODING；abort → CANCELLED |
+| WAITING_HUMAN | signoff 的 approve → DONE；其他 approve → 恢复执行（预算/迭代上限须先提高）；reject+反馈 → 有 plan 时 CODING、否则 PLANNING；abort → CANCELLED |
 
 每次状态迁移写一条 `iteration`/`event` 记录并 commit；进程挂掉后从 `run.status` 恢复。状态迁移表在 `core/loop/states.py` 中是**唯一事实源**，非法迁移抛异常（借鉴 homerail 的严格语义）。
 
@@ -130,6 +130,8 @@ class GateAdapter(Protocol):
 
 C++：必须产出 `compile_commands.json`；增量缓存（ccache + 持久 build volume）+ 分级超时（build 600s / test 300s）。
 
+当前 P1 Python 离线 Gate 以 compileall 替代 uv sync，未运行联网 pip-audit；上表是最终目标，不能视为当前已实现的依赖安装/安全审计。
+
 Gate 分两档：`fast`（每轮）/ `full`（进入 WAITING_HUMAN 前一次）。只把结构化 diagnostics 和日志尾部送进 prompt，完整日志存 blob。
 
 ---
@@ -145,7 +147,7 @@ Gate 分两档：`fast`（每轮）/ `full`（进入 WAITING_HUMAN 前一次）�
 三条硬规则：
 1. Reviewer 之间互相不可见（并行、独立调用）。
 2. 不投票：任一 reviewer 报 `blocking` 且 `confidence > 0.7` → 直接退回 Coder。
-3. Arbiter 不自行裁决真冲突：两 reviewer 结论直接矛盾 → 打包双方论点升级给人。
+3. Arbiter 不自行裁决真冲突：两 reviewer 对同一 subject 提出 require / forbid 相反要求 → 打包双方论点升级给人；同一行的不同问题或不同严重程度不算矛盾。
 
 Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化修复指令、检测矛盾。不做：判断谁对、忽略低 confidence 的 blocking、自行降级 severity、为收敛强行拍板。**Arbiter 是确定性代码**（`core/loop/arbiter.py`），LLM 仅可选用于生成修复指令的自然语言措辞。
 
@@ -205,7 +207,7 @@ override:
 
 ### 7.3 Retry（retry = 3）
 
-`num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前过熔断；失败 attempt 的 token 也计入成本；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
+`num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前预留预算（并行请求共享预留量）；网关返回的 usage 逐次即时记账，包括空响应、拒绝与 JSON 修复失败。没有 usage 的传输失败无法准确计费，不伪造 token；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
 
 ### 7.4 Embedding 与 Rerank（API）
 
@@ -252,7 +254,7 @@ embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`me
 ## 十、数据模型
 
 ```
-project    (id, name, workspace_path, config_ref, budget_cents, default_language, created_at)
+project    (id, name, goal, phases jsonb, workspace_path, config_ref, budget_cents, default_language, created_at)
 agent_def  (id, project_id NULL, role, system_prompt_ref, model_policy, tool_grants[], version)
 run        (id, project_id, goal, status, max_iter, budget_cents, cost_cents, token_in, token_out,
             started_at, paused_reason)
@@ -262,7 +264,7 @@ step       (id, run_id, iteration_id, agent_role, model_alias, model, prompt_ref
             retry_reasons jsonb, routing_reason text)
 artifact   (id, run_id, kind, content_ref, sha256, created_by_step)   -- plan|diff|review|test_log|doc
 blackboard (id, project_id, run_id, key, value jsonb, version, updated_by, updated_at)
-memory     (id, project_id, namespace, kind, text, embedding vector(3072), embedding_model,
+memory     (id, project_id NULL for global, namespace, kind [document|note|episodic|semantic|procedural], text, source, embedding vector(3072), embedding_model,
             embedding_version, source_run_id, valid_from, valid_to, superseded_by, pinned, tsv)
 approval   (id, run_id, reason, payload jsonb, status, decided_by, decided_at)
 event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：可视化与回放的唯一事件流
@@ -287,6 +289,8 @@ event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：
 | 命令执行 | argv 列表、不经 shell、可执行文件白名单（借鉴 homerail `command` 节点） |
 | 密钥 | 永不进 agent 进程与沙箱；LLM key 只在 daemon/网关进程 |
 | 危险操作 | 写 workspace 外、开网络、force push、删分支 → `approval` 卡点 |
+
+写 workspace 外或秘密文件的尝试会暂停并生成审批；批准仅恢复到 Coder，用新反馈生成合法修改，不授权突破 workspace 边界。只有 signoff + FULL Gate 之后的批准才能完成项目 step。
 
 容器运行时：Colima（`colima start --cpu 4 --memory 8`）+ docker CLI + docker-compose。
 
@@ -335,7 +339,7 @@ agentlab/
 │   │   ├── config.py             # 严格配置模型
 │   │   ├── routing.py            # role → alias → model
 │   │   ├── budget.py
-│   │   ├── loop/{states,driver,convergence,oscillation,arbiter}.py
+│   │   ├── loop/{states,driver,convergence,arbiter}.py
 │   │   └── llm/retry.py
 │   ├── adapters/
 │   │   ├── runtime/{fake,raw,adk}.py
@@ -361,7 +365,7 @@ agentlab/
 
 ## 十四、关键文件骨架
 
-见代码：`core/loop/driver.py`（状态机主循环）、`core/schemas.py`（Finding/Verdict）、`core/loop/arbiter.py`、`core/loop/oscillation.py`、`core/llm/retry.py`。原 PDF 中的伪代码已落为可测试实现。
+见代码：`core/loop/driver.py`（状态机主循环）、`core/schemas.py`（Finding/Verdict）、`core/loop/arbiter.py`、`core/loop/convergence.py`、`core/llm/retry.py`。原 PDF 中的伪代码已落为可测试实现。
 
 ---
 
@@ -435,14 +439,14 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | Phase | 内容 | 状态 | 说明 |
 |---|---|---|---|
 | P0 | 架构骨架 | **完成** | 2026-10-09；fake 模型下 loop 端到端跑通，UI 可视化可演示 |
-| P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **下一步** | 需用户提供网关 URL / key |
+| P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 未开始 | 表已建好，Store 未接 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆、PDF 上传 RAG、project phase/step 进度已实现（内存版）；Postgres/pgvector 落库、summarizer、导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
-| P8 | S6 Eval | 未开始 | `evals/tasks/` 为空 |
+| P8 | S6 Eval | 部分完成 | 已有 py-fix-add 固定任务与 smoke；完整评分卡待做 |
 
 ### 16.1 已完成（P0 · 2026-10-09）
 
@@ -460,7 +464,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 **适配器（`src/agentlab/adapters/`）**
 - [x] `FakeRuntime`（离线演示 / 测试）
-- [x] `RawRuntime`：OpenAI 兼容网关，错误分类为可重试 / 不可重试（**代码就绪，未用真实网关测过**）
+- [x] `RawRuntime`：OpenAI 兼容网关，错误分类为可重试 / 不可重试（已用真实网关验证，见 §16.1c）
 - [x] `ConfigGate`：按 YAML 执行步骤 + tsc / pytest / 通用诊断解析，日志尾部入 prompt、全文存 blob
 - [x] `LocalSandbox`（环境变量去密钥）、`DockerSandbox`（断网 / 只读 rootfs / cap-drop / 资源限制）
 - [x] `GitWorkspace`：禁止写出 workspace 与 `.git`；`InMemoryStore`、`FileBlobStore`（sha256 寻址）、进程内 EventBus
@@ -478,7 +482,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] 署名：`ui/THIRD_PARTY_NOTICES.md`
 
 **质量**
-- [x] pytest 61 项；ruff、mypy --strict 全绿；UI tsc、vitest 5 项全绿
+- [x] 历史 P0 验收通过；当前测试数量与验证结果统一见 §16.1d
 
 ### 16.1b 已完成（v1.2 · 2026-10-09，用户便利功能 + munder 补全）
 - [x] Settings：API key / 网关 URL 输入（mask，后端不回传完整 key），写 `.env`，新 run 立即生效
@@ -486,7 +490,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] Project：project-planner 自动生成 phase/step；step 一键 run；run 完成自动打勾；进度条
 - [x] 三层记忆注入 Driver（`RunHooks`）；reviewer 本地记忆自动写；run 结果写 project 记忆；memory 故障降级不影响 run
 - [x] munder 补全：AgentStrip/AgentCard、AgentDetail（RecentText / ToolWaterfall / ThreadsPanel）、OfficeThemePicker、AskMeTab、TaskDetailOverlay、Activity
-- [x] 测试：pytest 71、vitest 14；浏览器实测 settings / 换主题 / project→run→ask me 反馈→approve→进度打勾全流程
+- [x] 测试：历史 v1.2 验收通过；当前数量统一见 §16.1d；浏览器实测 settings / 换主题 / project→run→ask me 反馈→approve→进度打勾全流程
 
 ### 16.1c P1 实测（2026-10-09）
 - [x] Colima（4 CPU / 8 GB）启动，Postgres + pgvector healthy；应用存储仍是内存版，未接数据库。
@@ -494,9 +498,21 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] `agentlab smoke --trials 3`：3/3 从失败测试收敛到 signoff，每次 1 轮；原测试保持不变，完整 Docker Gate 通过，停在人工终审，无自动批准。
 - [x] Python 镜像预装 pytest / mypy / ruff，默认 non-root、断网、只读 rootfs；超时清理容器。字节码与检查缓存放在容器 /tmp。
 - [x] 文件上下文每次调用刷新；修正 Coder prompt 与 FileEdit 输出结构；project run 继承 workspace 并验证 project/step 归属。
-- [x] 后端 75 项测试、ruff、mypy；前端 14 项测试与生产构建通过。界面中英文选择与偏好保存已接入。
+- [x] P1 阶段测试与构建通过；当前数量统一见 §16.1d。界面中英文选择与偏好保存已接入。
 - [!] 离线 Gate 以 compileall 替代 uv sync；目标项目依赖须预装到镜像。联网 pip-audit 暂未接入，Gate 不代表依赖安全审计。
 - [!] 对项目隔离、两种调度模式、对话侧栏的完整实现仍见 §16.4；P1 不代表这些功能已经完成。
+
+### 16.1d 可靠性修复验收（2026-10-09）
+- 异常（越界、重试耗尽、401、无效 JSON、git）统一暂停并生成审批；后台任务回收异常，错误信息只保留安全类别。
+- 只有 signoff 人工批准可 DONE；其余升级恢复执行，预算/迭代上限须显式提高。CLI auto-approve 仅用于 signoff；无 plan 的 reject 回到 PLANNING。
+- SSE 订阅在历史快照前注册，支持 Last-Event-ID，退出清理队列；UI 去重事件并读取累计费用/token。
+- reviewer 迭代号与实际 iteration 对齐；finding 身份由 runtime 强制覆盖；矛盾检测依赖明确 subject / stance，BLOCK 无 hard finding 升级为不一致。
+- usage 逐 attempt 记账，JSON 修复耗尽仍保留费用；并行等待所有结果并保留完成 step；预算采用共享预留。
+- project-planner 使用同一预算守卫，规划账目见 `/project-planning`；失败不发布空 project。账目目前仍为内存，P2 才持久化。
+- diff 相对 run 起始文本快照计算，不修改 Git index，过滤秘密文件/已识别密钥文本，排除开始前的用户改动。同一 workspace 的并发用户修改仍需 worktree 隔离（§16.4）。
+- memory 使用退役与 superseded_by 保留旧版本；chunk 严守长度上限；模型 schema 使用合法 JSON。
+- SQL 增补 project.goal/phases、global nullable project_id、memory document/note/source；兼容迁移 0002 已在本地数据库应用。
+- 当前验收：后端 99 项、前端 17 项；类型、lint 与构建通过。修复后真实模型 smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
 
 ### 16.2 已知缺口（P0 中有配置或骨架，但尚未接线）
 
@@ -602,7 +618,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - `Project` 没有模式、角色模型与任务字段；runtime/roster 使用全局模型策略。
 - 非 global 记忆检索按 project_id 过滤；global 知识有意共享。
 - `/runs` 返回全量记录；UI runs/tasks/agent 状态没有完整按项目隔离，切换 project 只改 activeProjectId。
-- `/runs` 未根据 project_id 继承 workspace：控制台不传 workspace 时会使用 demo workspace；需要先验证项目、继承路径并校验 step 归属，随后创建 run。
+- `/runs` 已根据 project_id 继承 workspace，并在创建 run 前验证 project/step 归属，拒绝不匹配的路径；完整项目隔离仍待实现。
 - 未实现对话 thread/message 数据模型，数据仍为内存存储；Docker/workspace 边界与数据库隔离尚待验证。
 
 实施顺序：先修复项目归属/workspace/界面状态隔离，再实现项目配置与 run 快照、两种调度路径及选择界面，随后接入持久化与对话。
@@ -645,7 +661,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 ## 十九、待办与开放问题
 
-- [!] 填入网关 `AGENTLAB_LLM_BASE_URL` / key 与 `models.yaml` 的真实模型 id（用户测试时提供，阻塞 P1）
+- [x] 网关 URL / key 与模型 id 已配置，P1 已验证；更多模型由用户后续补充。
 - [ ] 网关是否提供 embedding 端点？否则 S4 需额外 embedding 来源
 - [ ] C++ Gate 的 GTest 发现策略：CTest 注册 vs 直接跑二进制
 - [ ] Java 项目 Maven 与 Gradle 优先级

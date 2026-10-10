@@ -1498,6 +1498,9 @@
     "humanNeeded": "needs human: {{reason}}",
     "humanDecision": "human {{decision}}",
     "budgetWarning": "budget warning: {{cost}}c / {{budget}}c",
-    "budgetTooltip": "{{cost}}c of {{budget}}c budget"
+    "budgetTooltip": "{{cost}}c of {{budget}}c budget",
+    "resumeBudget": "Budget (cents)",
+    "resumeMaxIter": "Maximum iterations",
+    "requiredBudget": "Required: {{value}} cents"
   }
 }

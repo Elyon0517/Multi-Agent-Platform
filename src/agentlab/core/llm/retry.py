@@ -4,7 +4,7 @@ import asyncio
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from agentlab.core.budget import BudgetExceeded
 from agentlab.core.config import LlmCallCfg
@@ -12,8 +12,16 @@ from agentlab.core.config import LlmCallCfg
 R = TypeVar("R")
 
 
+class ParallelFailure(Exception):
+    def __init__(self, cause: Exception, results: list[Any]) -> None:
+        super().__init__(type(cause).__name__)
+        self.cause, self.results = cause, results
+
+
 class LlmError(Exception):
     kind: str = "llm_error"
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 class Retryable(LlmError):
@@ -57,9 +65,13 @@ async def call_with_retry(
         log.count += 1
         try:
             return await asyncio.wait_for(fn(), cfg.timeout_s)
-        except TimeoutError:
+        except TimeoutError as exc:
+            if "read_timeout" in cfg.do_not_retry_on or "read_timeout" not in cfg.retry_on:
+                raise NonRetryable("read_timeout") from exc
             log.reasons.append("read_timeout")
         except Retryable as e:
+            if e.kind in cfg.do_not_retry_on or e.kind not in cfg.retry_on:
+                raise NonRetryable(e.kind) from e
             log.reasons.append(e.kind)
         except (NonRetryable, BudgetExceeded):
             raise

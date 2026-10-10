@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agentlab.core.budget import BudgetGuard
 from agentlab.core.memory.documents import chunk, extract_text
 from agentlab.core.memory.store import (
     GLOBAL,
@@ -16,7 +17,7 @@ from agentlab.core.memory.store import (
 )
 from agentlab.core.ports import AgentRuntime, RunContext
 from agentlab.core.project import Project, ProjectPlan, StepStatus
-from agentlab.core.schemas import AgentInput, Run, RunStatus, Severity, Verdict
+from agentlab.core.schemas import AgentInput, Run, RunStatus, Severity, Verdict, utcnow
 
 CONTEXT_HITS = 6
 PROJECT_PLANNER = "project-planner"
@@ -35,10 +36,14 @@ class KnowledgeService:
 
     async def ingest(self, filename: str, data: bytes) -> DocumentSummary:
         text = extract_text(filename, data)
-        self.memory.delete_source(GLOBAL, filename)
         items = [MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT, text=c, source=filename)
                  for c in chunk(text)]
         await self.memory.add(items)
+        new_ids = {item.id for item in items}
+        for old in self.memory.items_in(GLOBAL):
+            if old.source == filename and old.id not in new_ids:
+                old.valid_to = utcnow().isoformat()
+                old.superseded_by = items[0].id if items else None
         return DocumentSummary(filename, len(items), len(text))
 
     def documents(self) -> list[DocumentSummary]:
@@ -63,10 +68,12 @@ class KnowledgeService:
 class ProjectService:
     def __init__(self) -> None:
         self._projects: dict[str, Project] = {}
+        self.planning_attempts: list[dict[str, Any]] = []
 
-    def create(self, name: str, goal: str, workspace: str) -> Project:
+    def create(self, name: str, goal: str, workspace: str, publish: bool = True) -> Project:
         p = Project(name=name, goal=goal, workspace=workspace)
-        self._projects[p.id] = p
+        if publish:
+            self._projects[p.id] = p
         return p
 
     def get(self, project_id: str) -> Project:
@@ -83,11 +90,27 @@ class ProjectService:
         hits = await knowledge.search(project.id, PROJECT_PLANNER, project.goal)
         inp = AgentInput(run_id=f"plan-{project.id}", iteration=0, goal=project.goal,
                          context={"memory": _format_hits(hits)} if hits else {})
-        ctx = RunContext(Run(goal=project.goal, workspace=project.workspace, project_id=project.id,
-                             budget_cents=budget_cents, max_iter=1), check_budget=lambda _: None)
-        result = await runtime.run_agent(PROJECT_PLANNER, inp, ProjectPlan, ctx)
-        project.phases = result.output.to_phases()
-        return project
+        run = Run(goal=project.goal, workspace=project.workspace, project_id=project.id,
+                  budget_cents=budget_cents, max_iter=1)
+        guard = BudgetGuard(run, 0.8, lambda _: None)
+        ctx = RunContext(run, check_budget=guard.check, record_usage=guard.record,
+                         reserve_budget=guard.reserve, release_budget=guard.release)
+        attempt: dict[str, Any] = {"id": run.id, "project_id": project.id, "status": "failed"}
+        try:
+            result = await runtime.run_agent(PROJECT_PLANNER, inp, ProjectPlan, ctx)
+            if not result.usage_recorded:
+                guard.record(result.usage)
+            guard.check()
+            project.phases = result.output.to_phases()
+            attempt["status"] = "completed"
+            return project
+        except Exception as exc:
+            attempt["error_type"] = type(exc).__name__
+            raise
+        finally:
+            attempt.update(budget_cents=run.budget_cents, cost_cents=run.cost_cents,
+                           tokens_in=run.tokens_in, tokens_out=run.tokens_out)
+            self.planning_attempts.append(attempt)
 
     def link_run(self, project_id: str, step_id: str, run_id: str) -> None:
         step = self.get(project_id).find_step(step_id)

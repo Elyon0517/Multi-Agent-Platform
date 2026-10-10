@@ -1498,6 +1498,9 @@
     "humanNeeded": "等待人工决策：{{reason}}",
     "humanDecision": "人工决策：{{decision}}",
     "budgetWarning": "预算预警：{{cost}} / {{budget}} 美分",
-    "budgetTooltip": "费用 {{cost}} / 预算 {{budget}} 美分"
+    "budgetTooltip": "费用 {{cost}} / 预算 {{budget}} 美分",
+    "resumeBudget": "预算（美分）",
+    "resumeMaxIter": "最大迭代次数",
+    "requiredBudget": "所需预算：{{value}} 美分"
   }
 }

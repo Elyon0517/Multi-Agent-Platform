@@ -32,19 +32,13 @@ def normalize(text: str) -> str:
 
 
 def chunk(text: str, size: int = CHUNK_CHARS, overlap: int = OVERLAP_CHARS) -> Iterator[str]:
-    paragraphs = [p.strip() for p in normalize(text).split("\n\n") if p.strip()]
-    buf = ""
-    for p in paragraphs:
-        while len(p) > size:
-            if buf:
-                yield buf
-                buf = ""
-            yield p[:size]
-            p = p[size - overlap:]
-        if len(buf) + len(p) + 2 > size and buf:
-            yield buf
-            buf = buf[-overlap:] + "\n\n" + p if overlap else p
-        else:
-            buf = f"{buf}\n\n{p}" if buf else p
-    if buf:
-        yield buf
+    if size <= 0 or not 0 <= overlap < size:
+        raise ValueError("require size > 0 and 0 <= overlap < size")
+    normalized = normalize(text)
+    start = 0
+    while start < len(normalized):
+        end = min(start + size, len(normalized))
+        yield normalized[start:end]
+        if end == len(normalized):
+            break
+        start = end - overlap
