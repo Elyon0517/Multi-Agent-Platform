@@ -167,7 +167,7 @@ def test_global_upload_project_plan_and_run_feed_memory_and_progress(tmp_path: P
         assert p["phases"][0]["steps"][0]["run_ids"] == [run["id"]]
 
         project_mem = c.get("/memory", params={"scope": "project", "project_id": project["id"]}).json()
-        assert any("approved" in m["text"] for m in project_mem)
+        assert not any("approved" in m["text"] for m in project_mem)
         agent_mem = c.get("/memory", params={"scope": "agent", "role": "arch-reviewer",
                                              "project_id": project["id"]}).json()
         assert agent_mem, "reviewer that flagged a blocking issue should remember it"

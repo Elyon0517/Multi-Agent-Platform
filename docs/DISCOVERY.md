@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.8 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 规划 summarizer 与删除项目（§9.1、ADR-028）· 可持续更新
+> 状态：v1.8 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -316,9 +316,9 @@ embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），�
 
 | 层 | namespace | 归属 | 谁能读 | 谁写 | 已实现 |
 |---|---|---|---|---|---|
-| Global 个人知识 | `global` | 跨所有 project | 所有 agent | 用户上传 PDF / Markdown / txt（切块 + embedding）；用户手写 note；（v1.8）summarizer 写入你的偏好与跨项目重要经验 | Yes（内存版） |
-| Project | `project` | 单个 project | 该 project 的所有 agent | run 结束自动写结果；用户手写 note；（v1.8）summarizer 写入项目经验 | Yes（内存版） |
-| Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | reviewer 提出 blocking/major 时自动记；用户手写 note；（v1.8）summarizer 写入角色经验 | Yes（内存版） |
+| Global 个人知识 | `global` | 跨所有 project | 所有 agent | 用户上传 PDF / Markdown / txt（切块 + embedding）；用户手写 note；（v1.8）summarizer 写入你的偏好与跨项目重要经验 | Yes（内存 / Postgres） |
+| Project | `project` | 单个 project | 该 project 的所有 agent | 用户手写 note；（v1.8）summarizer 写入项目经验 | Yes（内存 / Postgres） |
+| Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | 用户手写 note；（v1.8）summarizer 写入角色经验 | Yes（内存 / Postgres） |
 
 每次调用 agent 前，Driver 通过 `RunHooks.context_for` 检索 `global ∪ project ∪ agent:<self>`，top-6 注入 `AgentInput.context.memory`。检索：BM25 + 向量（网关 embedding）→ RRF；embedding 失败自动降级为纯关键词，且 memory 任何异常都不会中断 run。扫描版 PDF（无文字层）会被拒绝并提示。
 
@@ -341,7 +341,7 @@ embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），�
 | 取代旧规则 | summarizer 接入后，移除现有确定性写入（「Flagged in run …」reviewer 笔记与「Run X approved」项目笔记），避免重复。 |
 | 暂不做 | 对话（root 会话）中的偏好总结；后续按需在会话结束时加同样的流程。 |
 
-**删除项目**（当前不存在此功能，本次新增）：
+**删除项目**（v1.8 已实现）：
 
 - `DELETE /projects/{id}` + 控制台删除按钮，需二次确认；项目有未结束的 run 时拒绝删除。
 - 删除范围：`proj_<id>` schema（项目记忆、agent 记忆、对话、run、审批、事件等）、`project_schema` / `run_directory` 路由登记、`.agentlab` 中该项目的快照与对象、进程内缓存（记忆、事件订阅）。
@@ -594,7 +594,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；Monitor 已实现（v1.7，§15.5）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
-| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer（v1.8 方案见 §9.1）、删除项目、完整记忆导入导出未做 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；summarizer 与删除项目已完成（v1.8，§9.1）；pgvector 索引、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
 | P8 | S6 Eval | 基线完成 | 10 个固定修复 + 5 条 Root 对话；agentlab eval 输出评分卡；fake 不代表模型语义质量 |
 
@@ -672,8 +672,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
 | CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
 | supervisor（root）角色 | 项目 auto 模式调用并持久化 Dispatch；角色模型与任务经过确定性校验，非法分配需人类填写反馈后 reject 重生成，phase 顺序仍由 Driver 执行 | 已接线 |
-| summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入。v1.8 方案见 §9.1 | P6 |
-| 删除项目 | 无 API、无界面入口；项目记忆无法随项目清除。v1.8 方案见 §9.1 | P6 |
+| summarizer 角色 | 已在 `on_finished` 调用，结构化 MemoryOps + 三层归属校验 + pinned/document 保护；独立 25c 预算与 usage 流水，失败降级 | 已完成 |
+| 删除项目 | DELETE API + 控制台确认按钮；清除项目 schema、路由、缓存与快照，独占 blobs 删除、共享引用保留；未结束 run 拒绝删除 | 已完成 |
 | 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；网络 / Git 危险操作仍待接入 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
@@ -757,12 +757,12 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] Global 文档上传（PDF / md / txt）+ 切块 + 网关 embedding + BM25∪向量 RRF（内存版）
 - [x] project-planner 生成 phase/step；run 完成自动更新进度
 - [ ] 把以上三块落到 Postgres（`memory` 表 + pgvector HNSW + tsvector；`project` 表加 phases JSONB）
-- [ ] summarizer 接入（v1.8，§9.1）：run 结束时读人工反馈 + review findings + 相关已有记忆，输出 add / update / retire 操作并按 global / project / agent 分层写入
+- [x] summarizer 接入（v1.8，§9.1）：run 结束时读人工反馈 + review findings + 相关已有记忆，输出 add / update / retire 操作并按 global / project / agent 分层写入
   - prompt 与输出 schema（`MemoryOps`）；确定性校验层级、条目 id 归属与 pinned / document 保护
   - 在 `on_finished` 调用，独立小额预算，失败降级不影响 run；用量计入 `usage_ledger`
   - 移除「Flagged in run …」与「Run X approved」两条确定性写入
   - 验收：同一问题在两个 run 中被指出 → 只留一条经验（第二次为 update）；你的 reject 反馈中的偏好进入 global，项目约定进入 project；pinned 条目不被改动；summarizer 失败时 run 仍正常结束
-- [ ] 删除项目（v1.8，§9.1）：`DELETE /projects/{id}` + 控制台按钮（二次确认）；有未结束 run 时拒绝；删除项目 schema、路由登记、`.agentlab` 快照与对象、进程内缓存；保留 workspace、global 记忆与 `usage_ledger`
+- [x] 删除项目（v1.8，§9.1）：`DELETE /projects/{id}` + 控制台按钮（二次确认）；有未结束 run 时拒绝；删除项目 schema、路由登记、`.agentlab` 快照与对象、进程内缓存；保留 workspace、global 记忆与 `usage_ledger`
   - 验收：删除后该项目的 project / agent 记忆不再出现在任何检索与列表中，其他项目与 global 不受影响；Postgres 与内存两种 Store 行为一致
 - [ ] `pin_memory` 工具；rerank
 - [x] per-project schema，既有数据一次性迁移；`pg_dump -n` 导出/数据库级恢复验证
@@ -801,7 +801,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 
 | 用户路径 | 本轮实现 | 验证与边界 |
 |---|---|---|
-| 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 尚未接入循环 |
+| 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 在 run 结束时独立调用 |
 | auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
 | 左侧 project → 对话 → run | 逐条消息与 RootTurn 持久化；最近 20 条历史 + 项目信息 + 记忆；回答 / 澄清 / 任务分流 | project/thread 归属先验证；编码任务复用 run service，进度 / 审批 / 总结回到对话。项目外可聊天 |
 | 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
@@ -818,7 +818,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
 - 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
 - 当前已启用跨厂商路由：planner / coder 的 Opus worker 别名通过 Anthropic 执行，其余角色按模型策略路由；Monitor 的模型列记录实际使用的模型，可同时显示多个厂商。
-- ADK、工具白名单执行、危险操作审批、summarizer、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
+- ADK、工具白名单执行、危险操作审批、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
 
 ---
 
@@ -1003,3 +1003,14 @@ env.py 实际读取 migration_scope；项目范围执行前后比较基础 schem
 - `gpt-5.6-luna`、`gpt-5.6-terra` 网关探测返回 503，第三 reviewer 使用已验证的 `gpt-6-sol`。
 - P3 尚余 LiteLLM virtual key、ADK runtime 等未包含在本次实现。
 - 最终自动验证：199 项 Python（含真实 PostgreSQL）、19 项 Vitest、UI production build、Ruff、mypy 全部通过；固定评分卡 15/15（fake blind spots 明确为 15），见 `evals/baseline-scorecard.json`。
+
+
+### P6 §9.1 实现与验证（2026-10-10）
+
+- `MemoryOps` 提案在 run 终态触发一次；输入包含审批反馈与 review findings 的重复/后续消失信息，不读取完整 diff 或代码。后续 review 未再提出只标记为推断修复，不声称代码已验证修复。
+- global / project / agent 分层检索相关已有记忆；update 生成新版本并写 `superseded_by`，retire 写 `valid_to`；无权引用的 id/namespace、pinned 和 document 更新/退役被拒绝。旧两条固定写入已移除。
+- 单独 25c 预算，调用与操作留存审计记录，用量写入 Monitor 的 summarizer；失败记录日志和 failed 状态，不改变 run 结果。
+- 项目删除与 run 创建/完成、对话调用互斥；终态以外的 run 返回 409。Postgres DROP schema + 清除两张路由登记表；内存 Store 删除对应对象；保留 workspace、global 与 usage ledger。
+- 清除项目快照、事件订阅、driver 与记忆缓存、项目独占 blob；其他 run 与全局/其他项目对话所引用的共享 blob 保留。另一个持久化记忆缓存刷新后也不会返回已删除项目条目。
+- 验证：结构化 summarizer fake 覆盖反馈分层、跨 run update、退役、越权/保护、失败降级与计量；项目删除在内存与本地 PostgreSQL Store 上均通过。真实模型归纳质量尚未做在线评测。
+- 最终验证：226 项 Python unit、32 项持久化测试（含真实 PostgreSQL）、27 项 Vitest、UI production build、Ruff、mypy 均通过。新增 `p6_summarizer` 迁移扩展 usage ledger 的来源约束；既有项目 schema 升级与 base schema 隔离回归通过。

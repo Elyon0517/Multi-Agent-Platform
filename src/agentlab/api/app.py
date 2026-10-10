@@ -59,6 +59,20 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def monitor_usage() -> MonitorUsage:
         return summarize(svc.store, svc.cfg.agents)
 
+    @app.delete("/projects/{project_id}")
+    def delete_project(project_id: str) -> dict[str, bool]:
+        from agentlab.core.ports import RunBusy
+
+        try:
+            identifiers = svc.delete_project(project_id)
+        except KeyError as exc:
+            raise HTTPException(404, "project not found") from exc
+        except RunBusy as exc:
+            raise HTTPException(409, str(exc)) from exc
+        for identifier in identifiers:
+            drivers.pop(identifier, None)
+        return {"deleted": True}
+
     def spawn(driver: Driver, run_id: str) -> None:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)

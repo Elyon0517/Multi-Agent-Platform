@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from agentlab.adapters.events import InProcessEventBus
@@ -50,6 +51,79 @@ class Services:
         self.hooks = MemoryHooks(self.knowledge, self.projects)
         self.hooks.session_services = self
         self.bus.listeners.append(self.hooks.on_event)
+
+    def delete_project(self, project_id: str) -> list[str]:
+        import shutil
+        from contextlib import ExitStack
+
+        from agentlab.core.ports import RunBusy
+
+        with ExitStack() as locks:
+            locks.enter_context(self.store.lock_run("project:" + project_id))
+            self.projects.get(project_id)
+            runs = [r for r in self.store.list_runs() if r.project_id == project_id]
+            for run in runs:
+                locks.enter_context(self.store.lock_run(run.id))
+                locks.enter_context(self.store.lock_run("finishing:" + run.id))
+                locks.enter_context(self.store.lock_run("summarizer:" + run.id))
+            if any(r.status not in {"DONE", "CANCELLED"} for r in runs):
+                raise RunBusy("project has unfinished runs")
+            threads = [t["id"] for t in self.store.records("thread") if t.get("project_id") == project_id]
+            for thread in threads:
+                locks.enter_context(self.store.lock_run("turn:" + thread))
+                locks.enter_context(self.store.lock_run("thread:" + thread))
+            snapshots = []
+            for run in runs:
+                checkpoint = self.store.checkpoint(run.id) or {}
+                snapshot = checkpoint.get("workspace", {}).get("snapshot_dir")
+                if snapshot:
+                    path = Path(snapshot).resolve()
+                    root = (self.settings.data_dir / "snapshots").resolve()
+                    if path.is_relative_to(root) and path != root:
+                        snapshots.append(path)
+            # Content-addressed blobs may be shared, including Root turn and failed-call refs.
+            def references(value: Any) -> set[str]:
+                if isinstance(value, str):
+                    return {value} if value.startswith("blob://") else set()
+                if isinstance(value, dict):
+                    return set().union(*(references(child) for child in value.values()))
+                if isinstance(value, list):
+                    return set().union(*(references(child) for child in value))
+                return set()
+
+            owned: set[str] = set()
+            other: set[str] = set()
+            run_owners = {r.id: r.project_id for r in self.store.list_runs()}
+            for identifier, owner in run_owners.items():
+                target = owned if owner == project_id else other
+                target.update(references(self.store.checkpoint(identifier)))
+                for row in [*self.store.artifacts(identifier), *self.store.steps(identifier),
+                            *self.store.events(identifier), *self.store.iterations(identifier)]:
+                    target.update(references(row.model_dump(mode="json")))
+            planning_owners = {a.get("id"): a.get("project_id") for a in self.store.records("planning")}
+            for kind in ("root_turn", "thread", "attempt", "planning", "planning_call", "summarization",
+                         "summarizer_call"):
+                for data in self.store.records(kind):
+                    record_owner = data.get("project_id") or run_owners.get(data.get("run_id", ""))
+                    record_owner = record_owner or planning_owners.get(data.get("planning_id"))
+                    (owned if record_owner == project_id else other).update(references(data))
+            self.store.delete_project(project_id)
+            memory = self.knowledge.memory
+            memory._items = {key: item for key, item in memory._items.items() if item.project_id != project_id}
+            if isinstance(memory, PersistentMemoryStore):
+                memory._persisted = {key: value for key, value in memory._persisted.items() if key in memory._items}
+            self.projects._projects.pop(project_id, None)
+            self.projects.planning_attempts = [a for a in self.projects.planning_attempts
+                                              if a.get("project_id") != project_id]
+            for identifier in [*(r.id for r in runs), *("thread:" + t for t in threads)]:
+                self.bus.forget(identifier)
+            for path in snapshots:
+                shutil.rmtree(path, ignore_errors=True)
+            for ref in owned - other:
+                sha = ref.removeprefix("blob://")
+                if len(sha) == 64 and all(c in "0123456789abcdef" for c in sha):
+                    (self.blobs._root / sha[:2] / sha).unlink(missing_ok=True)
+            return [r.id for r in runs]
 
     def gateway(self) -> tuple[str | None, str | None]:
         return gateway_creds(self.env, self.settings)

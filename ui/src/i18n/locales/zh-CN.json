@@ -1407,6 +1407,8 @@
     "decodeFailed": "无法解码此图片——文件可能已损坏或扩展名有误"
   },
   "lab": {
+    "deleteProject": "删除项目",
+    "deleteProjectConfirm": "删除项目「{{name}}」？项目记录、记忆和快照将永久删除。workspace 文件、global 记忆和用量流水会保留。",
     "runs": "运行记录",
     "project": "项目",
     "tasks": "任务",

@@ -25,6 +25,16 @@ class CreateRun(BaseModel):
 
 
 async def create_run_service(svc: Services, body: CreateRun, *, record_user: bool = True) -> tuple[Run, Driver]:
+    from contextlib import nullcontext
+
+    try:
+        with svc.store.lock_run("project:" + body.project_id) if body.project_id else nullcontext():
+            return await _create_run_service(svc, body, record_user=record_user)
+    except RunBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bool = True) -> tuple[Run, Driver]:
     if body.project_id:
         try:
             project = svc.projects.get(body.project_id)
@@ -108,7 +118,7 @@ async def create_run_service(svc: Services, body: CreateRun, *, record_user: boo
         raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
     if body.project_id and body.step_id:
         try:
-            svc.projects.link_run(body.project_id, body.step_id, run.id)
+            svc.projects.link_run(body.project_id, body.step_id, run.id, locked=True)
         except (KeyError, StopIteration) as e:
             raise HTTPException(404, "project or step not found") from e
     return run, driver

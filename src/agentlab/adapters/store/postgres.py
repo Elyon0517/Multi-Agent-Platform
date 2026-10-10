@@ -25,6 +25,16 @@ class PostgresStore:
             "store_connection", default=None
         )
 
+    def delete_project(self, project_id: str) -> None:
+        with self.transaction():
+            self._query("SELECT pg_advisory_xact_lock_shared(712460801)")
+            rows = self._query("SELECT schema_name FROM project_schema WHERE project_id=%s FOR UPDATE", (project_id,))
+            if not rows:
+                raise NotFound(project_id)
+            self._query("DELETE FROM run_directory WHERE project_id=%s", (project_id,))
+            self._query(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(rows[0]["schema_name"])))
+            self._query("DELETE FROM project_schema WHERE project_id=%s", (project_id,))
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         current = self._connection.get()

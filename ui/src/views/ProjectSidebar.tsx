@@ -34,6 +34,16 @@ export function ProjectSidebar() {
     }) : () => undefined;
     return () => { alive = false; close(); };
   }, [scope, activeThreadId, runs]);
+  const deleteProject = async (project: Project) => {
+    if (!window.confirm(t('lab.deleteProjectConfirm', { name: project.name }))) return;
+    try {
+      await api.deleteProject(project.id);
+      setProjects(old => old.filter(p => p.id !== project.id));
+      const state = useStore.getState();
+      state.setRuns(state.runs.filter(r => r.project_id !== project.id));
+      if (state.activeProjectId === project.id) { setActiveProject(null); setActiveThread(null); state.setActiveRun(null); }
+    } catch (e) { setError(String(e)); }
+  };
   const newChat = async (projectId: string | null) => {
     if (creatingRef.current) return;
     creatingRef.current = true; setCreating(true); setError(null);
@@ -67,6 +77,7 @@ export function ProjectSidebar() {
           {project.id === activeProjectId && <div className="sidebar-project-threads">
             <button className="sidebar-item" type="button" disabled={creating} onClick={() => void newChat(project.id)}>＋ {t('lab.newConversation')}</button>
             {threadList(threads, project.id)}
+            <button className="sidebar-item" type="button" onClick={() => void deleteProject(project)}>{t('lab.deleteProject')}</button>
           </div>}
         </div>
       ))}

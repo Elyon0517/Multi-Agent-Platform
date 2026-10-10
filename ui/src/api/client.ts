@@ -232,6 +232,7 @@ export const api = {
   },
   threads: (id: string) => json<Conversation[]>(`${id === 'global' ? '' : `/projects/${id}`}/threads`),
   createThread: (id: string, title: string) => post<Conversation>(`${id === 'global' ? '' : `/projects/${id}`}/threads`, { title }),
+  deleteProject: (id: string) => json<{ deleted: boolean }>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   projects: () => json<Project[]>('/projects'),
   project: (id: string) => json<Project>(`/projects/${id}`),
   createProject: (body: { name: string; goal: string; workspace: string; runtime?: string; settings?: ProjectSettings }) =>

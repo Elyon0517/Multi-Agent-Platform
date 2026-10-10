@@ -68,9 +68,24 @@ def _project_plan(inp: AgentInput) -> ProjectPlan:
     ])
 
 
+def _summarizer(inp: AgentInput) -> BaseModel:
+    from agentlab.core.memory.summarizer import MemoryOp, MemoryOps
+
+    operations = []
+    for entry in inp.context.get("findings", []):
+        namespace = "agent:" + entry["role"]
+        text = "Check public functions for clear docstrings."
+        existing = next((i for i in inp.context.get("existing_memory", [])
+                         if i["namespace"] == namespace and i["source"] == "summarizer"), None)
+        operations.append(MemoryOp(action="update" if existing else "add", namespace=namespace,
+                                   text=text, target_id=existing["id"] if existing else None))
+    return MemoryOps(operations=operations)
+
+
 def demo_scripts() -> dict[str, Callable[[AgentInput], BaseModel]]:
     return {
         "project-planner": _project_plan,
+        "summarizer": _summarizer,
         "planner": _plan,
         "coder": _coder,
         **{r: _reviewer(r) for r in ("correctness-reviewer", "arch-reviewer", "test-style-reviewer")},

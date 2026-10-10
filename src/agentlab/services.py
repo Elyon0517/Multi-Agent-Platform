@@ -16,6 +16,7 @@ from agentlab.core.memory.store import (
     InMemoryMemoryStore,
     MemoryItem,
     MemoryKind,
+    PersistentMemoryStore,
     agent_ns,
     readable_namespaces,
 )
@@ -222,8 +223,8 @@ class ProjectService:
             if self.store:
                 self.store.put_record("planning", run.id, attempt)
 
-    def link_run(self, project_id: str, step_id: str, run_id: str) -> None:
-        with self.store.lock_run("project:" + project_id) if self.store else nullcontext():
+    def link_run(self, project_id: str, step_id: str, run_id: str, *, locked: bool = False) -> None:
+        with self.store.lock_run("project:" + project_id) if self.store and not locked else nullcontext():
             project = self.get(project_id)
             step = project.find_step(step_id)
             step.status = StepStatus.DOING
@@ -356,12 +357,7 @@ class MemoryHooks:
         return ctx
 
     async def after_reviews(self, run: Run, verdicts: list[Verdict]) -> None:
-        for v in verdicts:
-            role = v.reviewer_id.split("@")[0]
-            hard = [f for f in v.findings if f.severity in (Severity.BLOCKING, Severity.MAJOR)]
-            if hard:
-                text = "; ".join(f"{f.file}: {f.issue}" for f in hard[:5])
-                await self.knowledge.note(run.project_id, agent_ns(role), f"Flagged in run {run.id}: {text}", run.id)
+        pass
 
     async def on_waiting(self, run: Run) -> None:
         await asyncio.sleep(0)  # Flush committed progress before the summary.
@@ -369,15 +365,123 @@ class MemoryHooks:
 
     async def on_finished(self, run: Run) -> None:
         await asyncio.sleep(0)
-        self.projects.complete_run(run)
-        await self.summarize_run(run)
-        outcome = "approved" if run.status == RunStatus.DONE else f"ended as {run.status}"
-        text = f"Run {run.id} '{run.goal}' {outcome}."
-        if not any(
-            i.source_run_id == run.id and i.text == text
-            for i in self.knowledge.memory.items_in(PROJECT, run.project_id)
-        ):
-            await self.knowledge.note(run.project_id, PROJECT, text, run.id)
+        store = self.projects.store
+        with store.lock_run("finishing:" + run.id) if store else nullcontext():
+            if store:
+                try:
+                    store.get_run(run.id)
+                except KeyError:
+                    return  # Deleted after terminal status was committed.
+            try:
+                self.projects.complete_run(run)
+                await self.summarize_run(run)
+            except Exception:
+                logging.getLogger(__name__).exception("run completion bookkeeping failed for run %s", run.id)
+            try:
+                await self.summarize_memory(run)
+            except Exception:
+                logging.getLogger(__name__).exception("memory summarizer failed for run %s", run.id)
+
+    async def summarize_memory(self, run: Run) -> None:
+        import copy
+        import json
+
+        from agentlab.core.config import AppConfig
+        from agentlab.core.memory.summarizer import MemoryOps, apply_ops
+        from agentlab.core.schemas import normalize_text
+
+        svc, store = self.session_services, self.projects.store
+        if not svc or not store or run.status not in {RunStatus.DONE, RunStatus.CANCELLED}:
+            return
+        with store.lock_run("summarizer:" + run.id):
+            if any(r.get("run_id") == run.id for r in store.records("summarization")):
+                return
+            attempt: dict[str, Any] = {"run_id": run.id, "project_id": run.project_id, "status": "started"}
+            store.put_record("summarization", run.id, attempt)
+            try:
+                checkpoint = store.checkpoint(run.id) or {}
+                cfg = AppConfig.model_validate(checkpoint["config"]) if checkpoint.get("config") else svc.cfg
+                # The summarizer is a new post-run stage; old checkpoints contain its obsolete prompt.
+                cfg = cfg.model_copy(update={"frozen_prompts": {
+                    **cfg.frozen_prompts, "summarizer": svc.cfg.prompt("summarizer")}})
+                roles = set(cfg.agents)
+                feedback = [svc.blobs.get(a.content_ref)[:20000] for a in store.artifacts(run.id, "feedback")]
+                feedback += [e.payload for e in store.events(run.id)
+                             if e.type == "approval.decided" and e.payload.get("feedback")]
+                findings: dict[tuple[str, str, str], dict[str, Any]] = {}
+                last_review: dict[str, int] = {}
+                for it in store.iterations(run.id):
+                    for verdict in it.verdicts:
+                        role = verdict.reviewer_id.split("@")[0]
+                        last_review[role] = it.n
+                        for finding in verdict.findings:
+                            if finding.severity not in {Severity.BLOCKING, Severity.MAJOR}:
+                                continue
+                            key = (role, finding.file, normalize_text(finding.issue))
+                            entry = findings.setdefault(key, {"role": role, "finding": finding.model_dump(mode="json"),
+                                                              "iterations": []})
+                            entry["iterations"].append(it.n)
+                for entry in findings.values():
+                    entry["recurring"] = len(set(entry["iterations"])) > 1
+                    entry["resolution"] = ("absent_from_later_review" if
+                        max(entry["iterations"]) < last_review[entry["role"]] else "unresolved_or_unverified")
+                query = json.dumps({"feedback": feedback, "findings": list(findings.values())}, ensure_ascii=False)
+                existing: list[MemoryItem] = []
+                for ns in [GLOBAL, PROJECT, *(agent_ns(r) for r in roles)]:
+                    hits = await self.knowledge.memory.search(run.project_id, [ns], query, 6, use_vectors=False)
+                    existing.extend(h.item for h in hits)
+                inp = AgentInput(run_id=run.id, iteration=0, goal="Extract durable run lessons",
+                                 context={"feedback": feedback, "findings": list(findings.values()),
+                                          "outcome": run.status, "termination": run.paused_reason,
+                                          "approval_history": [e.payload for e in store.events(run.id)
+                                                               if e.type == "approval.requested"],
+                                          "roles": sorted(roles), "existing_memory": [
+                                              i.model_dump(exclude={"embedding"}) for i in existing]})
+                def started(data: dict[str, Any]) -> str:
+                    identifier = new_id()
+                    store.put_record("summarizer_call", identifier,
+                                     {**data, "id": identifier, "run_id": run.id, "project_id": run.project_id,
+                                      "status": "in_flight"})
+                    return identifier
+
+                def finished(identifier: str, data: dict[str, Any]) -> None:
+                    previous = next(a for a in store.records("summarizer_call") if a["id"] == identifier)
+                    store.put_record("summarizer_call", identifier, {**previous, **data})
+
+                budget_run = Run(goal=inp.goal, workspace=run.workspace, project_id=run.project_id,
+                                 budget_cents=25, max_iter=1)
+                guard = BudgetGuard(budget_run, 0.8, lambda _: None)
+                ctx = RunContext(budget_run, check_budget=guard.check,
+                                 record_usage=UsageRecorder(
+                                     store, "summarization", run.id, run.project_id, guard.record),
+                                 reserve_budget=guard.reserve, release_budget=guard.release,
+                                 usage_transaction=store.transaction,
+                                 attempt_started=started, attempt_finished=finished)
+                runtime = svc.runtime(checkpoint.get("options", {}).get("runtime"), cfg)
+                result = await runtime.run_agent("summarizer", inp, MemoryOps, ctx)
+                commit_result_usage(ctx, result)
+                attempt["operations"] = result.output.model_dump(mode="json")
+                # Keep the memory cache consistent if persistence of any version fails.
+                memory = self.knowledge.memory
+                before = copy.deepcopy(memory._items)
+                persisted = copy.deepcopy(getattr(memory, "_persisted", None))
+                try:
+                    with store.transaction():
+                        attempt["applied"] = await apply_ops(memory, run.project_id, run.id,
+                                                             roles, existing, result.output)
+                        attempt["status"] = "completed"
+                        store.put_record("summarization", run.id, attempt)
+                except Exception:
+                    attempt["applied"] = []
+                    memory._items = before
+                    if persisted is not None and isinstance(memory, PersistentMemoryStore):
+                        memory._persisted = persisted
+                    raise
+            except Exception as exc:
+                attempt["status"] = "failed"
+                attempt["error_type"] = type(exc).__name__
+                store.put_record("summarization", run.id, attempt)
+                raise
 
     async def summarize_run(self, run: Run) -> None:
         if run.thread_id and self.projects.store:

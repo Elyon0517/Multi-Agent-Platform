@@ -40,6 +40,21 @@ class InMemoryStore:
         self._approvals: dict[str, list[Approval]] = defaultdict(list)
         self._events: dict[str, list[Event]] = defaultdict(list)
 
+    def delete_project(self, project_id: str) -> None:
+        with self.transaction():
+            runs = {r.id for r in self._runs.values() if r.project_id == project_id}
+            planning = {row.get("id") for (kind, _), row in self._records.items()
+                        if kind == "planning" and row.get("project_id") == project_id and row.get("id")}
+            for field in ("_runs", "_iterations", "_steps", "_artifacts", "_approvals", "_events", "_checkpoints"):
+                data = getattr(self, field)
+                for identifier in runs:
+                    data.pop(identifier, None)
+            self._records = {(kind, key): row for (kind, key), row in self._records.items()
+                             if not (row.get("project_id") == project_id or row.get("run_id") in runs
+                                     or row.get("planning_id") in planning
+                                     or (kind == "project" and key == project_id)
+                                     or (kind.startswith("dispatch_") and key in runs))}
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         with self._lock:

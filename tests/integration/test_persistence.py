@@ -580,10 +580,12 @@ def test_new_revision_upgrades_existing_project_schemas_atomically(database_url,
         c.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier(schema_name(base, "before_one"), "alembic_version")))
     scripts = tmp_path / "alembic"
     shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/alembic", scripts)
+    from alembic.script import ScriptDirectory
+    head = ScriptDirectory(str(scripts)).get_current_head()
     revision = scripts / "versions/schema_regression.py"
-    revision.write_text("""from alembic import op
+    revision.write_text(f"""from alembic import op
 revision = "schema_regression"
-down_revision = "usage_monitor"
+down_revision = "{head}"
 def upgrade():
     op.execute("ALTER TABLE run ADD COLUMN regression_marker text")
 """)
@@ -689,9 +691,11 @@ def test_project_upgrade_head_preserves_base_schema(database_url, tmp_path):
                 command.upgrade(config, "head")  # replay all shipped revisions in project scope
                 assert base_structure(c, base) == before
                 assert base_data() == rows_before
-            (scripts / "versions/unsafe_base.py").write_text("""from alembic import op
+            from alembic.script import ScriptDirectory
+            head = ScriptDirectory(str(scripts)).get_current_head()
+            (scripts / "versions/unsafe_base.py").write_text(f"""from alembic import op
 revision = "unsafe_base"
-down_revision = "usage_monitor"
+down_revision = "{head}"
 def upgrade():
     op.execute("ALTER TABLE run_directory ADD COLUMN unsafe_marker text")
 """)
@@ -921,3 +925,89 @@ def test_monitor_sql_and_memory_aggregation_preserve_paid_usage_after_rollback(s
     assert total.total.cost_cents == pytest.approx(0.7)
     assert total.total.models == ['model-a', 'model-b']
     assert total.reviewers.unmetered_calls == 1
+
+
+async def test_p6_project_deletion_store_parity(store, tmp_path):
+    from agentlab.core.memory.store import MemoryItem, MemoryKind, PersistentMemoryStore
+    from agentlab.core.monitor import UsageRecorder
+    from agentlab.core.schemas import Usage
+    from agentlab.services import MemoryHooks, ProjectService
+    from tests.unit.test_memory_project import _svc
+
+    svc = _svc(tmp_path)
+    svc.store = store
+    svc.projects = ProjectService(store)
+    svc.knowledge.memory = PersistentMemoryStore(store)
+    svc.hooks = MemoryHooks(svc.knowledge, svc.projects)
+    svc.hooks.session_services = svc
+    project = svc.projects.create("delete me", "goal", str(tmp_path))
+    other = svc.projects.create("keep", "goal", str(tmp_path))
+    run = Run(project_id=project.id, goal="done", workspace=str(tmp_path), status=RunStatus.DONE)
+    store.create_run(run)
+    store.put_record("thread", "p6-thread", {"id": "p6-thread", "project_id": project.id, "title": "", "messages": []})
+    await svc.knowledge.memory.add([
+        MemoryItem(project_id=None, namespace="global", kind=MemoryKind.NOTE, text="shared"),
+        MemoryItem(project_id=project.id, namespace="project", kind=MemoryKind.NOTE, text="delete"),
+        MemoryItem(project_id=project.id, namespace="agent:coder", kind=MemoryKind.NOTE, text="delete"),
+        MemoryItem(project_id=other.id, namespace="project", kind=MemoryKind.NOTE, text="keep"),
+    ], embed=False)
+    # A second process/cache must also stop returning deleted project memories.
+    second_memory = PersistentMemoryStore(store)
+    UsageRecorder(store, "run", run.id, project.id)(Usage(tokens_in=7).for_call("coder", "fake", "fake"))
+    svc.delete_project(project.id)
+    assert [p.id for p in svc.projects.list()] == [other.id]
+    assert not store.list_runs() and not store.records("thread")
+    assert {i["text"] for i in store.records("memory")} == {"shared", "keep"}
+    assert not second_memory.items_in("project", project.id)
+    assert not second_memory.items_in("agent:coder", project.id)
+    assert len(second_memory.items_in("global")) == 1
+    assert store.usage_entries()[0]["project_id"] == project.id
+    if hasattr(store, "_query"):
+        assert not store._query("SELECT 1 FROM project_schema WHERE project_id=%s", (project.id,))
+        assert not store._query("SELECT 1 FROM run_directory WHERE run_id=%s", (run.id,))
+        from agentlab.db.isolation import schema_name
+        base = store._query("SELECT current_schema() AS name")[0]["name"]
+        assert not store._query("SELECT 1 FROM pg_namespace WHERE nspname=%s", (schema_name(base, project.id),))
+
+
+async def test_p6_summarizer_versions_and_ledger_store_parity(store, tmp_path, monkeypatch):
+    from agentlab.adapters.runtime.fake import FakeRuntime
+    from agentlab.core.memory.store import PersistentMemoryStore
+    from agentlab.core.memory.summarizer import MemoryOp, MemoryOps
+    from agentlab.services import MemoryHooks, ProjectService
+    from tests.unit.test_memory_project import _svc
+
+    svc = _svc(tmp_path)
+    svc.store = store
+    svc.projects = ProjectService(store)
+    svc.knowledge.memory = PersistentMemoryStore(store)
+    svc.hooks = MemoryHooks(svc.knowledge, svc.projects)
+    svc.hooks.session_services = svc
+    project = svc.projects.create("summarize", "goal", str(tmp_path))
+
+    def summary(inp):
+        operations = []
+        for namespace in ["global", "project", "agent:coder"]:
+            old = next((i for i in inp.context["existing_memory"] if i["namespace"] == namespace), None)
+            operations.append(MemoryOp(action="update" if old else "add", namespace=namespace,
+                                       target_id=old["id"] if old else None, text="Remember docstrings " + namespace))
+        return MemoryOps(operations=operations)
+
+    monkeypatch.setattr(type(svc), "runtime", lambda *args: FakeRuntime({"summarizer": summary}))
+    for _ in range(2):
+        run = Run(project_id=project.id, goal="goal", workspace=str(tmp_path), status=RunStatus.DONE)
+        store.create_run(run)
+        store.append_event(Event(run_id=run.id, type="approval.decided", actor="human",
+                                 payload={"feedback": "Remember docstrings"}))
+        await svc.hooks.on_finished(run)
+    assert len(store.usage_entries()) == 2
+    assert all(e["role"] == "summarizer" and e["source"] == "summarization" for e in store.usage_entries())
+    rows = store.records("memory")
+    assert len(rows) == 6 and sum(r["valid_to"] is None for r in rows) == 3
+    assert sum(r["superseded_by"] is not None for r in rows) == 3
+    assert all(r["status"] == "completed" for r in store.records("summarization"))
+    svc.delete_project(project.id)
+    retained = store.records("memory")
+    assert len(retained) == 2 and all(r["namespace"] == "global" for r in retained)
+    assert len(svc.knowledge.memory.items_in("global")) == 1
+    assert len(store.usage_entries()) == 2

@@ -1407,6 +1407,8 @@
     "decodeFailed": "could not decode this image — the file may be corrupt or misnamed"
   },
   "lab": {
+    "deleteProject": "Delete project",
+    "deleteProjectConfirm": "Delete project “{{name}}”? Project records, memories and snapshots will be permanently removed. Workspace files, global memories and usage history will be kept.",
     "runs": "runs",
     "project": "project",
     "tasks": "tasks",

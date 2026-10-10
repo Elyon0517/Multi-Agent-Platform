@@ -149,7 +149,8 @@ def recover_call(store: Store, source: str, ref_id: str, project_id: str | None,
     usage = Usage.model_validate(attempt.get("usage") or {})
     UsageRecorder(store, source, ref_id, project_id).preserve(
         usage.for_call(
-            attempt.get("role", {"turn": "root", "planning": "project-planner"}.get(source, "unknown")),
+            attempt.get("role", {"turn": "root", "planning": "project-planner",
+                                 "summarization": "summarizer"}.get(source, "unknown")),
             attempt.get("alias", "unknown"),
             attempt.get("model", "unknown"),
             attempt["id"],
@@ -188,3 +189,12 @@ def recover_interrupted_calls(store: Store) -> None:
                     recover_call(store, "planning", plan["id"], plan.get("project_id"), attempt)
     except RunBusy:
         pass
+
+    for attempt in store.records("summarizer_call"):
+        if attempt.get("status") != "in_flight":
+            continue
+        try:
+            with store.lock_run("summarizer:" + attempt["run_id"]), store.transaction():
+                recover_call(store, "summarization", attempt["run_id"], attempt.get("project_id"), attempt)
+        except RunBusy:
+            continue

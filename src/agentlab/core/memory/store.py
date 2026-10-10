@@ -226,7 +226,12 @@ class PersistentMemoryStore(InMemoryMemoryStore):
         self._persisted = {i.id: i.model_dump_json() for i in self._items.values()}
 
     def _refresh(self) -> None:
-        for data in self.store.records("memory"):
+        rows = self.store.records("memory")
+        present = {row["id"] for row in rows}
+        for key in set(self._persisted) - present:
+            self._items.pop(key, None)
+            self._persisted.pop(key, None)
+        for data in rows:
             item = MemoryItem.model_validate(data)
             local = self._items.get(item.id)
             if local is None or self._persisted.get(item.id) == local.model_dump_json():
