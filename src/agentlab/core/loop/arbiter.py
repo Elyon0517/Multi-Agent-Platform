@@ -29,9 +29,18 @@ def dedupe_and_rank(findings: list[Finding]) -> list[Finding]:
 def detect_contradictions(findings: list[Finding]) -> list[Conflict]:
     # Only opposing, explicitly identified requirements constitute a contradiction.
     groups: dict[tuple[str, int | None, str], list[Finding]] = defaultdict(list)
+    inverses = {"remove-validation": "add-validation", "remove-lock": "add-lock",
+                "preserve-interface": "change-interface", "remove-test": "add-test",
+                "preserve-algorithm": "change-algorithm"}
     for finding in findings:
-        if finding.subject and finding.stance:
-            groups[(finding.file, finding.line, finding.subject.strip().lower())].append(finding)
+        if finding.severity.is_hard and finding.subject and finding.stance:
+            subject = finding.subject
+            if subject in inverses:
+                finding = finding.model_copy(update={
+                    "subject": inverses[subject],
+                    "stance": "forbid" if finding.stance == "require" else "require",
+                })
+            groups[(finding.file, finding.line, finding.subject)].append(finding)
     conflicts = []
     for (file, line, _), group in groups.items():
         if any(a.reviewer_id != b.reviewer_id and a.stance != b.stance for a in group for b in group):
@@ -47,7 +56,7 @@ def arbitrate(verdicts: list[Verdict], veto_confidence: float) -> ArbiterDecisio
     if not verdicts or any(v.verdict == "BLOCK" and not any(f.severity.is_hard for f in v.findings)
                            for v in verdicts):
         return ArbiterDecision(action=ArbiterAction.ESCALATE, reason="inconsistent_verdict")
-    if conflicts := detect_contradictions(_all_findings(verdicts)):
+    if conflicts := detect_contradictions(hard):
         return ArbiterDecision(action=ArbiterAction.ESCALATE, reason="reviewer_conflict", conflicts=conflicts)
     if not hard:
         return ArbiterDecision(action=ArbiterAction.SIGNOFF)

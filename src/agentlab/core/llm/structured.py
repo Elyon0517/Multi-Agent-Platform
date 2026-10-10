@@ -83,7 +83,8 @@ class StructuredCaller:
         usage = Usage()
         schema = output_type.model_json_schema()
         for _ in range(self._cfg.retry.structured_output_repair.max_repairs + 1):
-            prompt_chars = len(system) + len(json.dumps(schema)) + sum(len(m["content"]) for m in messages)
+            prompt_chars = (len(system.encode()) + len(json.dumps(schema).encode())
+                            + sum(len(m["content"].encode()) for m in messages) + 256)
             estimate = estimate_cents(alias_cfg, prompt_chars)
 
             def check_attempt(estimate: float = estimate) -> None:
@@ -97,7 +98,9 @@ class StructuredCaller:
                 nonlocal usage
                 try:
                     completion = await self._chat(model=alias_cfg.model, system=system, messages=list(messages),
-                                                  temperature=route.temperature, schema=schema)
+                                                  temperature=route.temperature, schema=schema,
+                                                  max_output_tokens=alias_cfg.max_output_tokens,
+                                                  output_token_parameter=alias_cfg.output_token_parameter)
                     charged = Usage(tokens_in=completion.tokens_in, tokens_out=completion.tokens_out,
                                     cost_cents=alias_cfg.cost_cents(completion.tokens_in, completion.tokens_out))
                 except LlmError as exc:

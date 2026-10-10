@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import re
 import subprocess
@@ -18,40 +19,48 @@ class GitWorkspace:
         self.root = root.resolve()
         self._secrets = secrets
         self._baseline: dict[str, str] = {}
+        self._excluded: set[str] = set()
 
     def _resolve(self, rel: str) -> Path:
         path = (self.root / rel).resolve()
-        if not path.is_relative_to(self.root) or ".git" in path.relative_to(self.root).parts:
+        if not path.is_relative_to(self.root):
             raise WorkspaceEscape(rel)
-        if self._sensitive(rel):
+        if self._sensitive(rel) or self._sensitive(str(path.relative_to(self.root))):
             raise WorkspaceEscape("secret or reserved path")
         return path
 
     @staticmethod
     def _sensitive(rel: str) -> bool:
-        parts = Path(rel).parts
+        parts = Path(rel.casefold()).parts
         return any(part.startswith(".env") or part in {
-            ".git", ".agentlab", ".netrc", ".npmrc", "id_rsa", "id_ed25519", "node_modules", "__pycache__"
-        }
-                   for part in parts) or any(word in Path(rel).name.lower()
-                   for word in ("secret", "credential", "private", ".pem", ".key"))
+            ".git", ".agentlab", ".netrc", ".npmrc", "credentials.json", "secrets.json",
+            "id_rsa", "id_ed25519", "node_modules", "__pycache__"
+        } for part in parts) or Path(rel.casefold()).suffix in {".pem", ".key"}
 
     def _snapshot(self) -> dict[str, str]:
         result = subprocess.run(["git", "-C", str(self.root), "ls-files", "-z", "--cached", "--others",
-                                 "--exclude-standard"], capture_output=True, check=True, env=scrubbed_env())
+                                 "--exclude-standard"], capture_output=True, check=True, env=scrubbed_env(), timeout=30)
         snapshot = {}
+        excluded: set[str] = set()
         for rel in sorted(set(result.stdout.decode().split("\0"))):
             if not rel or self._sensitive(rel) or (self.root / rel).is_symlink():
+                excluded.add(rel)
                 continue
             try:
                 path = self._resolve(rel)
-                if not path.is_file() or path.stat().st_size > 100_000:
+                if not path.is_file():
+                    continue
+                if path.stat().st_size > 100_000:
+                    excluded.add(rel)
                     continue
                 text = path.read_text()
                 if "\0" not in text and not self._secret_text(text):
                     snapshot[rel] = text
+                else:
+                    excluded.add(rel)
             except (OSError, UnicodeError, WorkspaceEscape):
-                continue
+                excluded.add(rel)
+        self._excluded = excluded
         return snapshot
 
     def _secret_text(self, text: str) -> bool:
@@ -61,6 +70,7 @@ class GitWorkspace:
 
     def begin_run(self) -> None:
         self._baseline = self._snapshot()
+        self._baseline_excluded = self._excluded.copy()
 
     def read(self, path: str) -> str:
         return self._resolve(path).read_text()
@@ -68,6 +78,8 @@ class GitWorkspace:
     def apply_edits(self, edits: list[FileEdit]) -> list[str]:
         if any(len(edit.content.encode()) > 100_000 for edit in edits):
             raise ValueError("edit exceeds reviewable file size")
+        if any(self._secret_text(edit.content) for edit in edits):
+            raise WorkspaceEscape("edit contains secret material")
         targets = [(self._resolve(e.path), e) for e in edits]
         for path, edit in targets:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +104,7 @@ class GitWorkspace:
             if any(part.startswith(".") or part in {"node_modules", "dist", "venv", "__pycache__"}
                    for part in parts):
                 continue
-            if any(word in Path(rel).name.lower() for word in ("secret", "credential", "private", ".pem", ".key")):
+            if self._sensitive(rel):
                 continue
             candidate = self.root / rel
             if candidate.is_symlink():
@@ -114,18 +126,19 @@ class GitWorkspace:
     async def ensure_repo(self) -> None:
         if not (self.root / ".git").exists():
             await self._git("init", "-q")
-            paths = list(self._snapshot())
+            paths = list(await asyncio.to_thread(self._snapshot))
             if paths:
                 await self._git("add", "--", *paths)
             await self._git("-c", "user.name=agentlab", "-c", "user.email=agentlab@local",
                             "commit", "-q", "--allow-empty", "-m", "agentlab baseline")
 
     async def diff(self) -> str:
-        current = self._snapshot()
+        current = await asyncio.to_thread(self._snapshot)
+        excluded = self._excluded | getattr(self, "_baseline_excluded", set())
         return "".join(
             "".join(difflib.unified_diff(self._baseline.get(path, "").splitlines(keepends=True),
                                        current.get(path, "").splitlines(keepends=True),
                                        fromfile=f"a/{path}", tofile=f"b/{path}"))
             for path in sorted(self._baseline.keys() | current.keys())
-            if self._baseline.get(path) != current.get(path)
+            if path not in excluded and self._baseline.get(path) != current.get(path)
         )

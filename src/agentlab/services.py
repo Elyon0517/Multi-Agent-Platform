@@ -100,7 +100,7 @@ class ProjectService:
             result = await runtime.run_agent(PROJECT_PLANNER, inp, ProjectPlan, ctx)
             if not result.usage_recorded:
                 guard.record(result.usage)
-            guard.check()
+            attempt["budget_overrun"] = run.cost_cents > run.budget_cents
             project.phases = result.output.to_phases()
             attempt["status"] = "completed"
             return project

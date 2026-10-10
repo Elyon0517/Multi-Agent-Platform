@@ -9,6 +9,8 @@ gateway:
 aliases:
   root:
     model: gpt-6-astra
+    max_output_tokens: 16384
+    output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
     ctx_window: 400000
@@ -16,6 +18,8 @@ aliases:
     cost_out_per_1m_cents: 2000
   strong:
     model: gpt-6-astra
+    max_output_tokens: 16384
+    output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
     ctx_window: 400000
@@ -23,6 +27,8 @@ aliases:
     cost_out_per_1m_cents: 2000
   strong-alt:
     model: gpt-6-astra
+    max_output_tokens: 16384
+    output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
     ctx_window: 400000
@@ -30,6 +36,8 @@ aliases:
     cost_out_per_1m_cents: 2000
   cheap:
     model: gpt-6-astra
+    max_output_tokens: 16384
+    output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
     ctx_window: 400000

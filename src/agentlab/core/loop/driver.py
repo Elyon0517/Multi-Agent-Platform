@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel
 
-from agentlab.core.budget import BudgetExceeded, BudgetGuard
+from agentlab.core.budget import BudgetExceeded, BudgetGuard, estimate_cents
 from agentlab.core.config import AppConfig
 from agentlab.core.llm.retry import ParallelFailure
+from agentlab.core.llm.structured import render_user_message
 from agentlab.core.loop.arbiter import arbitrate
 from agentlab.core.loop.convergence import gate_fingerprints, is_oscillating, review_fingerprints
 from agentlab.core.loop.hooks import NoHooks, RunHooks
@@ -67,6 +69,7 @@ class Driver:
         self.runtime_factory: Callable[[], AgentRuntime] | None = None
         self.hooks: RunHooks = hooks or NoHooks()
         self._finished: set[str] = set()
+        self._completed_agents: dict[tuple[str, str, int, str], AgentResult[Any]] = {}
         self._handlers: dict[S, Callable[[Run], Awaitable[None]]] = {
             S.PLANNING: self._planning, S.CODING: self._coding, S.GATING: self._gating,
             S.REVIEWING: self._reviewing, S.ARBITRATING: self._arbitrating,
@@ -118,6 +121,8 @@ class Driver:
         if max_iter is not None and not 1 <= max_iter <= 50:
             raise ValueError("max_iter must be between 1 and 50")
         if decision == "approve":
+            if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
+                raise ValueError("feedback is required to resolve reviewer disagreement")
             if approval.reason == "budget_exceeded":
                 required = approval.payload.get("required_budget_cents")
                 if budget_cents is None or budget_cents <= run.budget_cents or (
@@ -249,15 +254,31 @@ class Driver:
         files = await self.workspace.context_files()
         inputs = {r: inp.model_copy(update={"context": {**inp.context, "files": files,
                                                        **await self._context(run, r, inp)}}) for r in roles}
+        def cache_key(role: str) -> tuple[str, str, int, str]:
+            return (run.id, run.status.value, inp.iteration,
+                    role + hashlib.sha256(inputs[role].model_dump_json().encode()).hexdigest())
+
+        pending = {r: inputs[r] for r in roles if cache_key(r) not in self._completed_agents}
+        estimates = {
+            r: estimate_cents(self.cfg.models.aliases[self.cfg.model_policy.roles[r].primary],
+                              len(self.cfg.prompt(r).encode()) + len(render_user_message(i).encode())
+                              + len(json.dumps(out.model_json_schema()).encode()) + 256)
+            for r, i in pending.items()
+        }
+        guard.check(sum(estimates.values()))
         failure: Exception | None = None
         try:
-            if len(roles) == 1:
-                results = [await self.runtime.run_agent(roles[0], inputs[roles[0]], out, ctx)]
+            if not pending:
+                results = []
+            elif len(pending) == 1:
+                role = next(iter(pending))
+                results = [await self.runtime.run_agent(role, pending[role], out, ctx)]
             else:
-                results = await self.runtime.run_parallel(inputs, out, ctx)
+                results = await self.runtime.run_parallel(pending, out, ctx)
         except ParallelFailure as exc:
             results, failure = exc.results, exc.cause
         for r in results:
+            self._completed_agents[cache_key(r.role)] = r
             if not r.usage_recorded:
                 guard.record(r.usage)
             self.store.add_step(Step(
@@ -273,9 +294,14 @@ class Driver:
                        cumulative_tokens_out=run.tokens_out)
         self.store.save_run(run)
         if failure is not None:
+            if isinstance(failure, BudgetExceeded):
+                remaining = sum(estimates[r] for r in pending if cache_key(r) not in self._completed_agents)
+                raise BudgetExceeded("budget needed for remaining agents",
+                                     max(run.cost_cents + remaining, failure.required_budget_cents or 0))
             raise failure
-        guard.check()
-        return results
+        # Deliver paid outputs even if actual usage exceeded the estimate.
+        # The next stage checks its entire batch before making any paid calls.
+        return [self._completed_agents.pop(cache_key(r)) for r in roles]
 
     def _input(self, run: Run, **extra: Any) -> AgentInput:
         plan = self._latest_text(run, "plan")

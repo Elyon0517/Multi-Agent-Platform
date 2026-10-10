@@ -147,7 +147,7 @@ Gate 分两档：`fast`（每轮）/ `full`（进入 WAITING_HUMAN 前一次）�
 三条硬规则：
 1. Reviewer 之间互相不可见（并行、独立调用）。
 2. 不投票：任一 reviewer 报 `blocking` 且 `confidence > 0.7` → 直接退回 Coder。
-3. Arbiter 不自行裁决真冲突：两 reviewer 对同一 subject 提出 require / forbid 相反要求 → 打包双方论点升级给人；同一行的不同问题或不同严重程度不算矛盾。
+3. Arbiter 不自行裁决真冲突：两 reviewer 的 hard finding 对同一固定动作 subject 提出 require / forbid 相反要求 → 打包双方论点升级给人；同一行的不同问题或不同严重程度不算矛盾。
 
 Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化修复指令、检测矛盾。不做：判断谁对、忽略低 confidence 的 blocking、自行降级 severity、为收敛强行拍板。**Arbiter 是确定性代码**（`core/loop/arbiter.py`），LLM 仅可选用于生成修复指令的自然语言措辞。
 
@@ -220,7 +220,7 @@ embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`me
 三道闸：
 1. LiteLLM virtual key（每 project 一把）—— `max_budget` / `rpm_limit` / 模型白名单（S2 起）。
 2. 应用层熔断中间件（ADK `before_model_callback` / raw runtime 调用前）—— 估算成本，超 run 预算直接短路，run 置 `WAITING_HUMAN`。
-3. per-run 软预算 —— `run.budget_cents`，80% 告警，100% 暂停。
+3. per-run 软预算 —— `run.budget_cents`，80% 告警，实际 usage 达到预算后，在下一批付费调用前暂停；已返回的成功结果先保存。
 
 明确不做：用"检查 agent"判断要不要熔断。
 
@@ -512,7 +512,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - diff 相对 run 起始文本快照计算，不修改 Git index，过滤秘密文件/已识别密钥文本，排除开始前的用户改动。同一 workspace 的并发用户修改仍需 worktree 隔离（§16.4）。
 - memory 使用退役与 superseded_by 保留旧版本；chunk 严守长度上限；模型 schema 使用合法 JSON。
 - SQL 增补 project.goal/phases、global nullable project_id、memory document/note/source；兼容迁移 0002 已在本地数据库应用。
-- 当前验收：后端 99 项、前端 17 项；类型、lint 与构建通过。修复后真实模型 smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
+- 上一批验收：后端 99 项、前端 17 项；类型、lint 与构建通过。修复后真实模型 smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
 
 ### 16.2 已知缺口（P0 中有配置或骨架，但尚未接线）
 
@@ -698,3 +698,16 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | ADR-022 | 控制台做精简版（8 标签），不整体移植 CommandCenterPanel | 2026-10-09 | 用户选择；原版大半依赖 PTY / 触发器 |
 | ADR-023 | API key 由 UI 写入本地 `.env`（chmod 600），后端只回 mask | 2026-10-09 | 用户选择 .env；最简单且已在 .gitignore |
 | ADR-024 | memory 故障降级为关键词检索，hook 异常不改变 run 结果 | 2026-10-09 | 实测：网关不可达时 embedding 报错曾导致 run 卡死 |
+
+
+### 可靠性复核补充（2026-10-09）
+
+- workspace 路径对原始路径和 resolve 后路径 casefold，禁止大小写别名写入 `.env*` / `.git` 等保留路径；密钥后缀精确匹配 `.pem` / `.key`，普通 private/secret 文件名允许编辑。
+- 快照区分不存在与被过滤：基线或当前被过滤的文件不生成删除 diff。Git 快照有 30 秒超时；异步 diff、初始化和 API 创建快照移到工作线程。
+- 成功输出即使实际费用超估算也交给 handler；下一批调用按完整预估预检，输入按 UTF-8 字节保守估算。部分 reviewer 成功结果缓存并只重跑缺失项，不重复记账；缓存仍随内存运行态，重启恢复由 P2 实现。
+- 项目规划成功但实际超预算时保留 plan，`/project-planning` 账目记录 `budget_overrun`；调用前仍检查预算。价格和 token 预估不等于网关结算保证。
+- minor/nit 不参与冲突判断。subject 为 schema 中固定动作词表，仅对明确相同动作的相反 stance 升级；未识别的矛盾不声称自动语义识别。reviewer_conflict / inconsistent_verdict 批准须提供反馈。
+- 模型别名可配置 `max_output_tokens`（当前 16384）和 `output_token_parameter`（`max_tokens` 或 `max_completion_tokens`）。大文件完整替换需按网关能力提高输出上限与预算；100KB 是文件写入上限，并不保证所有模型一次能够输出。finish_reason=length 明确暂停并记账，不回灌截断 JSON 重试。
+- reviewer 子调用取消会作为 agent_cancelled 暂停并保留其他结果，不可将部分 verdict 当成完整评审；外层任务取消仍传播取消信号。
+
+本次复核验收：后端 120 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。

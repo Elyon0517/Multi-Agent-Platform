@@ -72,7 +72,7 @@ async def test_budget_pauses_and_resumes(cfg: AppConfig, tmp_path: Path) -> None
     run = await d.run(d.create("fix add", budget_cents=0.15).id)
     assert run.paused_reason == "budget_exceeded"
     paused_at = d.store.pending_approval(run.id).on_approve  # type: ignore[union-attr]
-    run = d.decide(run.id, "approve", budget_cents=100)
+    run = d.decide(run.id, "approve", budget_cents=200)
     assert run.status == paused_at
     run = await d.run(run.id)
     assert run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "signoff"
@@ -96,12 +96,12 @@ async def test_reject_feeds_back_to_coder(cfg: AppConfig, tmp_path: Path) -> Non
 async def test_reviewer_conflict_escalates(cfg: AppConfig, tmp_path: Path) -> None:
     def rev(sev: Severity, issue: str) -> Script:
         return lambda _: Verdict(reviewer_id="x", verdict="REQUEST_CHANGES", findings=[
-            Finding(severity=sev, category="correctness", file="calc.py", line=2, issue=issue, confidence=0.6, subject="lock",
-                    stance="require" if sev.is_hard else "forbid")])
+            Finding(severity=sev, category="correctness", file="calc.py", line=2, issue=issue, confidence=0.6, subject="add-lock",
+                    stance="require" if issue == "must lock" else "forbid")])
 
     d = await make_driver(cfg, tmp_path, {
         "correctness-reviewer": rev(Severity.MAJOR, "must lock"),
-        "arch-reviewer": rev(Severity.NIT, "lock harmful"),
+        "arch-reviewer": rev(Severity.MAJOR, "lock harmful"),
     })
     run = await d.run(d.create("fix add").id)
     assert run.paused_reason == "reviewer_conflict"

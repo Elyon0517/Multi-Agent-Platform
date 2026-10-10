@@ -21,6 +21,8 @@ class GatewayCfg(Strict):
 
 class AliasCfg(Strict):
     model: str
+    max_output_tokens: int = Field(default=16384, ge=1)
+    output_token_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     supports_tools: bool = True
     structured_output: Literal["native", "json_mode", "react"] = "native"
     ctx_window: int

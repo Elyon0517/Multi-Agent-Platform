@@ -53,7 +53,9 @@ class Finding(Strict):
     suggestion: str = ""
     confidence: float = Field(ge=0.0, le=1.0)
     reviewer_id: str = ""
-    subject: str = ""
+    subject: Literal["", "add-validation", "remove-validation", "add-lock", "remove-lock",
+                     "change-interface", "preserve-interface", "add-test", "remove-test",
+                     "change-algorithm", "preserve-algorithm"] = ""
     stance: Literal["require", "forbid"] | None = None
 
     def fingerprint(self) -> str:

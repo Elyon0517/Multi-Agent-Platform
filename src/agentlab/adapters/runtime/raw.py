@@ -41,15 +41,17 @@ class OpenAICompatChat:
 
     async def __call__(
         self, *, model: str, system: str, messages: list[dict[str, str]], temperature: float,
-        schema: dict[str, object],
+        schema: dict[str, object], max_output_tokens: int = 16384,
+        output_token_parameter: str = "max_tokens",
     ) -> Completion:
         system_msg = {"role": "system", "content":
                       f"{system}\n\nRespond with JSON matching:\n{json.dumps(schema, ensure_ascii=False)}"}
         payload: list[Any] = [system_msg, *messages]
+        token_options: dict[str, Any] = {output_token_parameter: max_output_tokens}
         try:
             resp = await self._client.chat.completions.create(
                 model=model, temperature=temperature, messages=payload, response_format={"type": "json_object"},
-                max_tokens=4096,
+                **token_options,
             )
         except openai.OpenAIError as e:
             raise classify(e) from e
@@ -57,8 +59,10 @@ class OpenAICompatChat:
         text = message.content if message else None
         usage = resp.usage
         refusal = (message and message.refusal) or (resp.choices and resp.choices[0].finish_reason == "content_filter")
-        if refusal or not text:
-            error = NonRetryable("content_policy_refusal") if refusal else Retryable("empty_response")
+        truncated = bool(resp.choices and resp.choices[0].finish_reason == "length")
+        if refusal or truncated or not text:
+            error = (NonRetryable("content_policy_refusal") if refusal else
+                     NonRetryable("output_truncated") if truncated else Retryable("empty_response"))
             error.tokens_in = usage.prompt_tokens if usage else 0
             error.tokens_out = usage.completion_tokens if usage else 0
             raise error
@@ -104,6 +108,11 @@ class RawRuntime:
         outcomes = await asyncio.gather(*(self.run_agent(r, i, output_type, ctx) for r, i in inputs.items()),
                                         return_exceptions=True)
         results = [result for result in outcomes if not isinstance(result, BaseException)]
+        for outcome in outcomes:
+            if isinstance(outcome, asyncio.CancelledError):
+                raise ParallelFailure(NonRetryable("agent_cancelled"), results)
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
         errors = [result for result in outcomes if isinstance(result, Exception)]
         if errors:
             raise ParallelFailure(errors[0], results)
