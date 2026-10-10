@@ -1,5 +1,5 @@
 role: root
 output: root_turn
 prompt: prompts/root.md
-tool_grants: [file_list, file_read, file_search, memory_search, run_status]
+tool_grants: [file_list, file_read, file_search, git_status, git_log, git_branch, git_diff, git_show, memory_search, run_status]
 kind: worker

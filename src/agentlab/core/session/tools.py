@@ -35,6 +35,19 @@ class SessionTools:
                 tool_spec("file_list", "List project source files", {}),
                 tool_spec("file_read", "Read a project source file", {"path": text}),
                 tool_spec("file_search", "Search project source text", {"query": text}),
+                tool_spec("git_status", "Read working tree status", {}),
+                tool_spec("git_branch", "List local and remote branches", {}),
+                tool_spec("git_log", "Read up to 30 commits; empty ref means HEAD", {"ref": text}),
+                tool_spec(
+                    "git_diff",
+                    "Read diff for path; empty path lists changed files; ref may be empty",
+                    {"ref": text, "path": text},
+                ),
+                tool_spec(
+                    "git_show",
+                    "Read file at ref; empty path lists tree files; empty ref means HEAD",
+                    {"ref": text, "path": text},
+                ),
             ]
         return specs
 
@@ -72,6 +85,8 @@ class SessionTools:
                 for r in runs[-5:]
             ]
         assert self.workspace is not None
+        if name.startswith("git_"):
+            return {"text": await self.workspace.inspect_git(name[4:], **args)}
         if name == "file_read":
             return {"path": args["path"], "text": self.workspace.read_source(args["path"])}
         files = await self.workspace.source_files()

@@ -266,7 +266,7 @@ class StructuredCaller:
                             if ctx.record_tool:
                                 ctx.record_tool({**entry, "status": "failed", "error": type(exc).__name__})
                             raise
-                        value = {"error": type(exc).__name__}
+                        value = {"error": getattr(exc, "kind", type(exc).__name__)}
                     result_text = json.dumps(value, ensure_ascii=False)
                     if len(result_text.encode("utf-8")) > 16384:
                         value = {

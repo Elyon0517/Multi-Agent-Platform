@@ -405,3 +405,44 @@ async def test_each_approval_gets_its_own_summary(tmp_path):
     await hooks.summarize_run(run)
     summaries = [m for m in get_thread(svc.store, thread.id, "p").messages if m.kind == "summary"]
     assert [m.payload["approval_id"] for m in summaries] == [first.id, second.id]
+
+
+async def test_root_read_only_git_and_missing_files(tmp_path):
+    import subprocess
+
+    from agentlab.adapters.workspace import GitWorkspace, WorkspaceNotFound
+
+    svc = services(tmp_path)
+    ws = tmp_path / "git-project"
+    ws.mkdir()
+    workspace = GitWorkspace(ws)
+    await workspace.ensure_repo()
+    tools = SessionTools(workspace, svc.knowledge, svc.store, "p", "t")
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(ws), *args], check=True, capture_output=True).stdout
+
+    git("checkout", "-b", "module-branch")
+    (ws / "module.py").write_text("VALUE = 42\n")
+    git("add", "module.py")
+    git("-c", "user.name=test", "-c", "user.email=test@local", "commit", "-m", "add module")
+    git("checkout", "-b", "without-module", "HEAD~1")
+    before = git("status", "--porcelain")
+    with pytest.raises(WorkspaceNotFound) as error:
+        await tools.execute("file_read", {"path": "module.py"})
+    assert error.value.kind == "not_found"
+    assert "module-branch" in (await tools.execute("git_branch", {}))["text"]
+    assert "add module" in (await tools.execute("git_log", {"ref": "module-branch"}))["text"]
+    assert "module.py" in (await tools.execute("git_show", {"ref": "module-branch", "path": ""}))["text"]
+    assert "VALUE = 42" in (await tools.execute("git_show", {"ref": "module-branch", "path": "module.py"}))["text"]
+    assert "VALUE = 42" in (await tools.execute("git_diff", {"ref": "module-branch", "path": "module.py"}))["text"]
+    await tools.execute("git_status", {})
+    for ref in ["--output=/tmp/escape", "HEAD:module.py", "HEAD; touch bad"]:
+        with pytest.raises(ValueError):
+            await tools.execute("git_show", {"ref": ref, "path": "module.py"})
+    for path in [".env", "../outside", ".git/config"]:
+        with pytest.raises(PermissionError):
+            await tools.execute("git_show", {"ref": "module-branch", "path": path})
+    assert git("status", "--porcelain") == before
+    assert git("branch", "--show-current").strip() == b"without-module"
+    workspace.close()
