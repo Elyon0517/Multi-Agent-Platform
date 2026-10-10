@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeFloorAgents } from './activity';
+import { activeFloorAgents, floorAgentLabel } from './activity';
 import type { Agent } from '@/store/store';
 const agent = (id: string, status: Agent['status'] = 'idle'): Agent => ({
   id, name: id, status, character: 'jim', accent: 'sky', description: '', action: '', progress: 0,
@@ -18,4 +18,13 @@ describe('actual floor activity', () => {
     agents[0].status = 'success';
     expect(activeFloorAgents(agents, false).map(a => a.id)).toEqual(['correctness-reviewer', 'arch-reviewer']);
   });
+});
+
+it('labels floor agents by name rather than their current action', () => {
+  const agents = [agent('coder', 'working'), agent('correctness-reviewer', 'thinking')];
+  agents[0].action = 'iteration 1';
+  agents[1].action = 'gpt-6.1-sol';
+  expect(agents.map(floorAgentLabel)).toEqual(agents.map(a => a.name));
+  expect(floorAgentLabel({ id: 'researcher', name: '' })).toBe('researcher');
+  expect(floorAgentLabel({ id: 'arch-reviewer', name: 'Architecture' })).toBe('Architecture Reviewer');
 });

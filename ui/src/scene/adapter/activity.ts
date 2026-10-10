@@ -8,3 +8,9 @@ export function activeFloorAgents(agents: Agent[], rootBusy: boolean): Agent[] {
   }
   return active;
 }
+
+/** Stable overhead identity, independent of iteration, model or tool activity. */
+export function floorAgentLabel(agent: Pick<Agent, 'id' | 'name'>): string {
+  const name = agent.name.trim() || agent.id;
+  return agent.id.endsWith('-reviewer') && !/reviewer/i.test(name) ? `${name} Reviewer` : name;
+}
