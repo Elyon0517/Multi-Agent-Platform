@@ -1,207 +1,245 @@
+<div align="center">
+
 # Multi-Agent Platform
 
-Local multi-agent convergence loop with objective gates, independent model reviews, and human signoff.
+**One conversation. A reviewed team. Your final say.**
 
-Repository: `multi-agent-platform`. The Python package, CLI, and `AGENTLAB_*` settings retain their existing names for compatibility.
+Chat with a Root agent about your local repository. Questions get answered directly; coding work goes to a
+Planner → Coder → Gate → three independent reviewers → human signoff loop, visualized as a pixel office.
 
-Workflow:
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/) [![Node](https://img.shields.io/badge/node-22-339933)](https://nodejs.org/) [![Status](https://img.shields.io/badge/status-alpha-orange)](docs/DISCOVERY.md) [![Stars](https://img.shields.io/github/stars/Elyon0517/multi-agent-platform?style=flat)](https://github.com/Elyon0517/multi-agent-platform/stargazers)
 
+Find this useful? Give it a star ⭐
+
+[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [Testing](#testing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
+
+</div>
+
+```mermaid
+flowchart LR
+  You((You)) <--> Root[Root conversation]
+  Root -- answer / clarify --> You
+  Root -- task --> Planner --> Coder --> Gate{Gate<br/>optional}
+  Gate -- fail --> Coder
+  Gate --> R1[Correctness reviewer]
+  Gate --> R2[Architecture reviewer]
+  Gate --> R3[Test/style reviewer]
+  R1 & R2 & R3 --> Arbiter
+  Arbiter -- changes requested --> Coder
+  Arbiter -- signoff --> Human{{Human signoff}}
+  Human --> Summarizer[Summarizer → memory]
 ```
-Task -> [Root dispatch in auto mode] -> Planner -> Coder -> [objective Gate] -> [LLM review panel x3] -> Arbiter -> Human -> Done
-```
 
-Design doc (source of truth): [`docs/DISCOVERY.md`](docs/DISCOVERY.md). Phases and progress: section 16.
+## What it does
 
-## Current status
+- **One entry point.** Every message goes to Root, which decides whether to answer (read-only file, git, memory
+  and web search tools), ask a clarifying question, or hand a task to the team.
+- **Convergence, not a single shot.** Planner and Coder iterate until three reviewers on different models report
+  no blocking or major findings, or the loop escalates to you.
+- **Deterministic control.** Budgets, retries, convergence, oscillation detection, routing and approvals are
+  plain Python, never delegated to a model.
+- **Human signoff.** Nothing completes without you. The signoff card shows the goal and acceptance criteria,
+  automated check results (or "no automated tests were run") and any remaining findings.
+- **Memory that learns.** Global, project and per-agent memory; a summarizer turns your feedback and review
+  findings into versioned lessons. Upload documents (PDF / Markdown / text) for retrieval-augmented answers.
+- **Local first.** Your repository stays on your machine. Embeddings and reranking run on local CPU models by
+  default; only LLM calls leave the machine.
+- **Observable.** A live pixel office, run timelines, Gate diagnostics and a per-agent token Monitor.
 
-P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and knowledge/project services. P2 PostgreSQL persistence and CLI resume are implemented. The real gateway and Docker Python gate are connected; project-specific auto/manual scheduling and persistent conversations are now connected to the UI.
+## Architecture
 
-Verified on 2026-10-10: 185 backend tests (including 19 persistence integration cases), 19 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runs, projects, memory versions, model attempts and recovery checkpoints persist when PostgreSQL is configured. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
+| Layer | Responsibility | Where |
+|---|---|---|
+| UI | Conversation, office floor, run timeline, approvals, memory, Monitor | `ui/` (React, Vite, Pixi.js) |
+| API | REST + SSE event stream, single source for every view | `src/agentlab/api/` (FastAPI) |
+| Root session | Intent routing (answer / clarify / task), read-only tools, streamed replies | `src/agentlab/core/session/` |
+| Loop driver | State machine, convergence, oscillation, arbiter, budget guard, checkpoints | `src/agentlab/core/loop/` |
+| Model access | Role → alias → model routing, retry and fallback, structured output repair | `src/agentlab/core/llm/`, `config/model_policy.yaml` |
+| Runtimes | OpenAI-compatible gateway, Anthropic Messages API, offline fake runtime | `src/agentlab/adapters/runtime/` |
+| Gate and sandbox | Optional objective checks (built-in Python gate), Docker or local sandbox | `src/agentlab/adapters/gates/`, `docker/` |
+| Storage | PostgreSQL with one schema per project, content-addressed blobs, Git snapshots | `src/agentlab/adapters/store/`, `.agentlab/` |
+| Memory | Hybrid retrieval (BM25 + vectors + rerank), summarizer, versioned items | `src/agentlab/core/memory/` |
 
-Execution failures pause for human intervention. Only reviewed signoff plus the full gate can be approved as complete; budget pauses require an explicit increase. The console approval panel accepts budget and iteration limits. SSE resumes from Last-Event-ID and deduplicates replayed usage. Diffs are based on the run-start snapshot without changing the Git index. Alembic adopts the existing bootstrap SQL and applies subsequent migrations automatically.
+**Run states.** `PLANNING → CODING → GATING → REVIEWING → ARBITRATING → WAITING_HUMAN → DONE`. Projects without a
+matching Gate skip `GATING`. Failures, budget limits, conflicts and oscillation all pause in `WAITING_HUMAN`; only
+signoff can complete a run.
 
-## Layout
+**Design principles.**
 
-| Path | What |
+1. Anything deterministic stays out of the model: budgets, convergence, retries and routing are code.
+2. Configuration is code: agents, prompts, routing, budgets and gates live in strictly validated YAML under `config/`.
+3. Cheap checks first: when a Gate exists, build, type, lint and tests run before any reviewer token is spent.
+4. Everything is replayable: steps, prompts, responses, artifacts and events are persisted and content-addressed.
+
+**Repository layout.**
+
+| Path | Contents |
 |---|---|
-| `config/` | Everything tunable: models, role routing, retry, budget, agents, prompts, gates, policies. Strictly validated on load. |
-| `src/agentlab/core/` | Framework-free deterministic logic: state machine, convergence, oscillation, arbiter, routing, budget, retry. |
-| `src/agentlab/adapters/` | Swappable implementations of `core/ports.py`: runtimes (fake/raw/adk), sandbox (local/docker), gates, store. |
-| `src/agentlab/api/` | FastAPI daemon + SSE event stream consumed by the UI. |
-| `src/agentlab/cli/` | `agentlab` CLI. |
-| `ui/` | React + Pixi Office Floor (ported from munder-difflin), run views. Optional. |
-| `scripts/showcase.py` | Scripted, offline visual acceptance for the Office lifecycle, routing, failures and approvals. |
+| `config/` | Models, role routing, retry, budget, agent definitions, prompts, gates, policies |
+| `src/agentlab/core/` | Framework-free logic: loop, routing, budget, memory, Root session, Monitor |
+| `src/agentlab/adapters/` | Swappable implementations of `core/ports.py`: runtimes, sandboxes, gates, stores |
+| `src/agentlab/api/`, `src/agentlab/cli/` | FastAPI daemon and the `agentlab` CLI |
+| `src/agentlab/db/` | Alembic migrations and per-project schema isolation |
+| `ui/` | Web console |
+| `evals/`, `tests/`, `scripts/` | Regression tasks and scorecards, unit and integration tests, showcase and smoke scripts |
+| `docs/` | [`DISCOVERY.md`](docs/DISCOVERY.md) (design and roadmap), [`ACCEPTANCE.md`](docs/ACCEPTANCE.md) |
 
-## Quickstart
+## Setup
+
+### Prerequisites
+
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/)
+- Node.js 22 and npm
+- Docker for PostgreSQL (on macOS without Docker Desktop: `colima start --cpu 4 --memory 8`)
+- An OpenAI-compatible LLM gateway; optionally an Anthropic-compatible endpoint for Claude
+
+### 1. Try it offline (no keys, no database)
 
 ```bash
 uv sync
 uv run agentlab config-check
 uv run agentlab demo
-uv run pytest
 ```
 
-## Scripted Office acceptance (offline)
+`demo` runs the full loop with scripted model replies and an in-memory store.
 
-The [acceptance checklist](docs/ACCEPTANCE.md) also covers offline cross-provider
-handoffs and opt-in real-provider validation.
-
-Use [`scripts/showcase.py`](scripts/showcase.py) to watch seven scripted acceptance
-scenarios. It runs the real API, Driver, local demo Gate (pytest), model routing
-and SSE stream. Provider replies are replaced with fixed scripts, so no real
-model is called and no model fees are incurred. Model labels come from
-`config/models.yaml`; they identify the configured route, not a live provider response.
-This complements automated tests; it does not replace real-model or Docker Gate validation.
-
-Stop `agentlab serve` before starting: the showcase owns port **8765**. From the
-repository root, run this in one terminal:
+### 2. Configure models
 
 ```bash
-uv sync
-uv run python scripts/showcase.py
+cp .env.example .env
 ```
 
-In a second terminal:
+| Variable | Purpose |
+|---|---|
+| `AGENTLAB_LLM_BASE_URL`, `AGENTLAB_LLM_API_KEY` | OpenAI-compatible gateway used by GPT aliases |
+| `AGENTLAB_ANTHROPIC_BASE_URL`, `AGENTLAB_ANTHROPIC_API_KEY` | Anthropic Messages API used by Claude aliases (`/v1` suffix optional) |
+| `AGENTLAB_DATABASE_URL` | PostgreSQL connection; leave empty for a disposable in-memory store |
+| `AGENTLAB_EMBEDDING_BASE_URL` | Optional remote `/embeddings` service; empty uses local CPU models |
+
+Aliases are defined in `config/models.yaml` and assigned to roles in `config/model_policy.yaml`; code only refers
+to aliases, so switching models is a YAML change. Keys can also be entered in the console's **settings** tab
+(masked, stored in `.env`). Check every alias:
 
 ```bash
-cd ui
-npm ci
-npm run dev
+uv run agentlab ping
 ```
 
-Open **[http://localhost:5173/?follow=1](http://localhost:5173/?follow=1)**. The UI
-automatically selects each new run, and the script prints its name and what to
-watch. Root stays seated; overhead labels identify agents. Active workers enter
-and completed or interrupted workers leave. By default the script makes approval
-decisions automatically after briefly showing each approval banner.
+If you use an API relay, Claude aliases need the relay's base URL and a key from a group that allows direct API
+calls; keys restricted to a specific client are rejected.
 
-| Scenario | Expected behavior | Final status |
-|---|---|---|
-| S1 Happy path | Planner → Coder/tool → Gate → three independent reviewers, leaving one by one → approval; duplicate workspace run returns 409 | DONE |
-| S2 Gate/review rework | Gate failure brings Coder back; architecture feedback requests a docstring before signoff | DONE |
-| S3 Claude outage | Planner retries and falls back to GPT; Coder uses Claude | DONE |
-| S4 Budget pause | Reviewers leave on pause, then return after the budget increase | DONE |
-| S5 Conflicting reviews | Arbitration escalates; human feedback resolves the conflict | DONE |
-| S6 Workspace escape | Coder's outside-path edit is rejected; the run is aborted and workers leave | CANCELLED |
-| S7 Oscillation | Repeated incorrect diff triggers escalation; the run is aborted | CANCELLED |
-
-Useful options:
-
-```bash
-uv run python scripts/showcase.py --only S2,S5   # selected scenarios
-uv run python scripts/showcase.py --speed 2     # faster playback
-uv run python scripts/showcase.py --manual      # decide approvals in the UI
-```
-
-If another service needs port 8765, use an alternate port and restart the UI dev
-server with the matching proxy target:
-
-```bash
-# Terminal 1, repository root
-uv run python scripts/showcase.py --port 8766
-# Terminal 2, ui directory
-AGENTLAB_API_TARGET=http://127.0.0.1:8766 npm run dev
-```
-
-After the seven scenarios, the API stays running so you can inspect runs and
-artifacts. Press **Ctrl+C** in the showcase terminal to stop it, and Ctrl+C in the
-UI terminal to stop Vite. Showcase runs use disposable in-memory records; sample
-workspaces are created under `~/.agentlab-workspaces/showcase-*`.
-
-Run the automated lifecycle regressions separately:
-
-```bash
-cd ui
-npm test -- src/scene/adapter/floorLifecycle.test.ts
-```
-
-## Persistence and recovery
-
-Set `AGENTLAB_DATABASE_URL=postgresql+psycopg://agentlab:agentlab@localhost:5432/agentlab` in `.env`, then start PostgreSQL. `AGENTLAB_STORE_BACKEND=auto` selects PostgreSQL when the URL is present; `memory` is available for disposable runs. PostgreSQL dependencies are included in the normal install.
+### 3. Start the database and the server
 
 ```bash
 docker compose up -d postgres
 uv run agentlab db-upgrade
-uv run agentlab status
-uv run agentlab show RUN_ID
-uv run agentlab resume RUN_ID
-uv run agentlab decide RUN_ID approve --budget-cents 1000
+uv run agentlab serve            # http://127.0.0.1:8765
 ```
 
-All projects, including existing projects and default runs, use their own `proj_<id>` PostgreSQL schema. Global knowledge and routing metadata stay in `public`. `db-upgrade` performs a transactional, content/count-verified migration and preserves the previous data in read-only `legacy_projects`; it does not automatically delete that backup. Stop older application processes before upgrading and back up both PostgreSQL and `.agentlab/`. The one-time script can also be run with `uv run python -m agentlab.db.isolation`. New projects use the same storage path. Each schema tracks its Alembic version; upgrades advance the base and all registered project schemas in one transaction, rolling all of them back on failure. Export a schema with `pg_dump -n proj_<id>`; restoring a complete project additionally requires the vector extension, routing registration, and its blob/snapshot files.
-
-Physical schemas support project export and deletion boundaries. Access control remains application-level filtering by project ID and role: the shared database account can read all schemas, and memory is loaded into one process before scoped retrieval.
-
-Pending approvals survive restart and are not automatically approved. Only signoff completes a run. If a process dies before a request returns usage, resume pauses with `interrupted_call`; approving explicitly authorizes retry, which may be billed again by the gateway. Returned usage and valid paid outputs are restored without reissuing their calls. Keep both PostgreSQL data and `.agentlab/` (blobs and isolated Git objects); a database backup alone cannot recover the baseline. Abort/terminal runs release their snapshot objects; paused runs retain them until explicitly aborted or completed.
-
-Workspaces must point to a Git repository root. A monorepo package directory is rejected without initializing an embedded repository. Coder writes inside nested repositories/submodules remain forbidden; run an independent project at their root.
-
-Integration tests use a disposable schema, never the application's tables:
+### 4. Start the console
 
 ```bash
-AGENTLAB_TEST_DATABASE_URL=postgresql://agentlab:agentlab@localhost:5432/agentlab uv run pytest
+cd ui
+npm ci
+npm run dev                      # http://localhost:5173
 ```
 
-Without this variable, PostgreSQL integration cases are skipped; the in-memory contract and workspace boundary tests still run. Real recovery validation on 2026-10-10 killed the worker after a paid planner result, resumed through the CLI and Docker FULL Gate, and reached signoff with one planner step (`6b2e0c696274`, estimated 5.4875 cents).
+The dev server proxies `/api` to `127.0.0.1:8765`; set `AGENTLAB_API_TARGET` to use another port.
 
-## Real gateway and Docker validation
+### 5. Optional: Python Gate image
 
 ```bash
-colima start --cpu 4 --memory 8
 docker build -t agentlab/gate-python:latest docker/gate-python
-docker compose up -d postgres
-uv run agentlab ping
-uv run agentlab smoke --trials 3
 ```
 
-`smoke` uses fresh copies of `evals/tasks/py-fix-add`, verifies failing baseline tests, and stops at human signoff. Reports stay in `.agentlab/smoke/`. Docker is the default sandbox; the offline demo continues to use a local sandbox. Python gate dependencies must be baked into the image; dependency installation and network-backed vulnerability auditing are not yet supported by the offline gate. Configure `AGENTLAB_DATABASE_URL` to use PostgreSQL. Smoke workspaces live under `~/.agentlab-workspaces/` so Colima can mount them.
+Python projects then run FAST checks each round and FULL checks before signoff, in an offline, read-only
+container. Other languages run without a Gate and are marked as untested at signoff.
 
-The interface supports English / 简体中文 through the top selector or Settings, with a saved browser preference.
+## Usage
 
-## Plugging in your LLM gateway
+1. **New project** (left sidebar): name, goal and a local Git repository root. **Choose folder…** opens the macOS
+   folder picker. The project planner drafts phases and steps; model and budget settings live in the same dialog.
+2. **Talk to Root** in the project conversation. Ask questions ("what is uncommitted on this branch?") or request
+   work ("fix calc.add so the tests pass"). Say "answer only" or "go ahead and change it" to steer.
+3. **Watch** the office, the run timeline and Gate diagnostics; progress and approvals also appear in the chat.
+4. **Decide** on the signoff card: approve, reject with feedback (the team iterates), or abort.
+5. **Memory** tab: upload documents globally or per project, test retrieval and rebuild vectors.
+   **Monitor** shows cumulative tokens and estimated cost per agent across projects.
+6. **⚙ Agent configuration** (console header) edits the current project's dispatch mode, models, budget and
+   retrieval, with YAML export and import for version control.
 
-1. `cp .env.example .env` and set `AGENTLAB_LLM_BASE_URL` + `AGENTLAB_LLM_API_KEY` (any OpenAI-compatible endpoint).
-2. Edit `config/models.yaml`: aliases map to a model id and provider. Defaults are `root`/`strong-alt` → `gpt-6.1-sol`, `strong` → `claude-opus-5-5` through the Anthropic Messages API, and `cheap` → `gpt-5.6-sol`. Planner/Coder and correctness review use Opus; architecture review uses GPT 6.1 Sol; test/style review and summaries use the cheap alias. Set `AGENTLAB_ANTHROPIC_BASE_URL` and `AGENTLAB_ANTHROPIC_API_KEY` separately in `.env` or Settings. A `/v1/` suffix is accepted. Keys are masked in Settings and excluded from workspace context. GPT gateway pricing values are provisional budget estimates; check your provider's billing before relying on them.
-3. Edit `config/model_policy.yaml` to choose which alias each role uses.
-
-Code only ever references aliases, so swapping `gpt-6.1` for something else is a YAML change.
-
-## Infra
+Useful CLI commands:
 
 ```bash
-colima start --cpu 4 --memory 8
-docker compose up -d postgres
-docker compose --profile gateway up -d litellm
+uv run agentlab status                 # durable run state
+uv run agentlab show RUN_ID            # timeline, artifacts, pending approval
+uv run agentlab resume RUN_ID          # continue after a restart or kill -9
+uv run agentlab decide RUN_ID approve  # resolve an approval from the terminal
 ```
+
+## Testing
+
+```bash
+# Backend: unit tests, lint and types
+uv run pytest -q
+uv run ruff check src tests
+uv run mypy src
+
+# PostgreSQL integration tests (use a disposable schema, never application tables)
+AGENTLAB_TEST_DATABASE_URL=postgresql://agentlab:agentlab@localhost:5432/agentlab uv run pytest -q tests/integration
+
+# Frontend: tests, generated API types, typecheck and production build
+npm --prefix ui test
+npm --prefix ui run check:api
+npm --prefix ui run build
+```
+
+After changing the API, regenerate the frontend types with `npm --prefix ui run gen:api`. CI runs the backend and
+frontend jobs above on pull requests and pushes to `main`.
+
+**Visual acceptance, offline.** `scripts/showcase.py` drives seven scripted scenarios through the real API,
+driver and event stream with fixed model replies: happy path, Gate and review rework, provider outage fallback,
+budget pause, conflicting reviews, workspace escape and oscillation.
+
+```bash
+uv run python scripts/showcase.py          # owns port 8765; stop agentlab serve first
+npm --prefix ui run dev                    # then open http://localhost:5173/?follow=1
+```
+
+Options: `--only S2,S5`, `--speed 2`, `--manual` (decide approvals yourself), `--port 8766` together with
+`AGENTLAB_API_TARGET=http://127.0.0.1:8766`.
+
+**With real models** (small cost):
+
+```bash
+uv run agentlab smoke --trials 3                  # fixed Python repair task in Docker, stops at signoff
+uv run agentlab eval                              # regression tasks + Root conversations, CI scorecard
+AGENTLAB_LIVE=1 uv run pytest -q -s tests/live    # cross-provider handoff
+uv run python scripts/check_local_memory.py       # local embedding upload and search
+```
+
+See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full checklist and expected results.
+
+## Limitations
+
+- Alpha software for personal, local use; the API binds to `127.0.0.1` and has no authentication.
+- The built-in Gate covers Python only; custom check commands are planned.
+- Vector ranking runs in Python; pgvector SQL indexes are planned.
+- Project schemas separate data for export and deletion; access control is application-level filtering.
+- The ADK runtime, LiteLLM virtual keys and external MCP tools are not implemented yet.
+
+See the roadmap in [`docs/DISCOVERY.md`](docs/DISCOVERY.md) §16.
 
 ## Credits
 
-See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md). The Office Floor visualization is adapted from
-[munder-difflin](https://github.com/chaitanyagiri/munder-difflin) (MIT). Pixel art tilesets by
-[LimeZu](https://limezu.itch.io/).
+The office visualization is adapted from [munder-difflin](https://github.com/chaitanyagiri/munder-difflin) (MIT).
+Pixel art tilesets by [LimeZu](https://limezu.itch.io/), used under a purchased licence that does not permit
+redistribution; they are planned to be replaced before any public release. Fonts are under the SIL OFL. Full
+notices: [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md).
 
-## Projects, conversations and memory
+---
 
-Create a project with an existing, independent repository root. Choose **Root assigns models and tasks** or **Manually assign every agent** in the project form. The console edits future-run settings and exports/imports a YAML profile for Git version control. Automatic dispatch is validated and persisted; manual bindings have no fallback. The default reviewers use three distinct model IDs across the GPT gateway and Anthropic. Automatic dispatch prefers these defaults; existing manual project bindings and saved run checkpoints retain their own allocation.
+<div align="center">
 
-The left sidebar selects a project and its conversations. Submitting a goal starts a run in the selected conversation. Finish or abort an unfinished run before starting another in the same workspace; use separate worktrees for parallel projects. Switching projects resets approval, tasks, telemetry, agent activity and private retrieval context. At signoff, the approval card and conversation summary show a saved, deterministic report of the goal and planner acceptance criteria, FULL Gate status (or no automatic tests), and findings remaining in the final review. Inspect the actual diff in the run artifacts before approving.
+If this project helps you, please consider giving it a star ⭐
 
-Memory has explicit global sharing, project-private documents and project × role notes. With no embedding URL, FastEmbed runs multilingual MiniLM embeddings (384 dimensions, ~220 MB) and the Chinese/English BGE base reranker (~1 GB) on CPU in background threads. Models download on first use into `.agentlab/models` and are reused offline; startup does not download anything. New projects default to hybrid retrieval, using vectors and reranking without credentials. Explicit keyword/off settings on existing projects are preserved. Global document uploads generate vectors automatically.
-
-An optional `AGENTLAB_EMBEDDING_BASE_URL` in Settings or `.env` overrides embedding with an OpenAI-compatible `/embeddings` service; keys are optional for Ollama. Remote model/dimensions/version and local model/dimensions/version are separate entries in `config/models.yaml`. Reranking stays local and can be disabled with `rerank_enabled: false`. If the remote service fails, embedding retries locally, with a 60-second cooldown before retrying the remote service. If local inference also fails, keyword search continues; reranker failures preserve the fused ranking.
-
-After switching models, use the global and project reindex buttons separately. Existing IDs, history and pinned text are preserved. Retrieval never mixes models, versions or dimensions; the Memory panel reports how many vectors match the active model. Vector ranking currently runs in Python over persisted JSON payloads; pgvector SQL indexes are still planned. Run `uv run python scripts/check_local_memory.py` for a real CPU upload/search API smoke; this downloads models if the cache is empty.
-
-The DISCOVERY §16.4 table records implemented UX paths, verification and remaining decisions. New dispatch has fake and PostgreSQL recovery coverage; real-provider dispatch and vector retrieval still require separate smoke acceptance.
-
-
-Gate is optional: Python projects use the configured FAST checks and require FULL
-checks before human signoff. Projects without a matching Gate go directly from
-Coder to the review panel; signoff explicitly says no automated tests were run.
-TypeScript, Java and C++ Gate images are no longer planned. Custom host check
-commands are deferred.
-
-The run view lists Gate diagnostics by file/line, code and message, with failure
-output available below each check. API types are generated from FastAPI, not
-maintained separately. Run `npm --prefix ui run gen:api` after changing the API;
-`npm --prefix ui run check:api` verifies the generated types are current.
+</div>

@@ -93,7 +93,7 @@ cd ui && npm run dev
 - run 进入 `WAITING_HUMAN` 时，仍在 `thinking` / `working` 的 agent 会回到 idle 并离开 Office；已完成 agent 的模型名与审批等待状态保留。`floorLifecycle.test.ts` 的四项测试均通过。
 - 人物头顶显示 agent 名称（Root、Planner、Coder、各类 Reviewer），迭代次数与模型信息保留在详情中。
 
-可视化脚本的完整启动、备用端口和停止步骤见 [README](../README.md#scripted-office-acceptance-offline)。
+可视化脚本的完整启动、备用端口和停止步骤见 [README](../README.md#testing)。
 
 ## Monitor 用量验收（v1.7）
 
