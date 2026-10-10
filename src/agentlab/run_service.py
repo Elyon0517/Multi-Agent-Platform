@@ -6,7 +6,6 @@ from pathlib import Path
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from agentlab.adapters.gates.config_gate import NoGateDetected
 from agentlab.bootstrap import MissingGatewayConfig, Services
 from agentlab.core.loop.driver import Driver
 from agentlab.core.ports import RunBusy, execution_error_reason
@@ -75,7 +74,7 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
         driver = svc.driver(ws, body.runtime, body.language, body.project_id)
         if conversation:
             driver.recovery_options["conversation"] = [m.model_dump(mode="json") for m in conversation.messages[-20:]]
-    except (MissingGatewayConfig, NoGateDetected) as e:
+    except MissingGatewayConfig as e:
         raise HTTPException(400, f"{type(e).__name__}: {e}") from e
 
     def record_conversation(run: Run) -> None:

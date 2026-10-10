@@ -1014,3 +1014,12 @@ env.py 实际读取 migration_scope；项目范围执行前后比较基础 schem
 - 清除项目快照、事件订阅、driver 与记忆缓存、项目独占 blob；其他 run 与全局/其他项目对话所引用的共享 blob 保留。另一个持久化记忆缓存刷新后也不会返回已删除项目条目。
 - 验证：结构化 summarizer fake 覆盖反馈分层、跨 run update、退役、越权/保护、失败降级与计量；项目删除在内存与本地 PostgreSQL Store 上均通过。真实模型归纳质量尚未做在线评测。
 - 最终验证：226 项 Python unit、32 项持久化测试（含真实 PostgreSQL）、27 项 Vitest、UI production build、Ruff、mypy 均通过。新增 `p6_summarizer` 迁移扩展 usage ledger 的来源约束；既有项目 schema 升级与 base schema 隔离回归通过。
+
+
+### Gate 可选、P4 收尾与 Summarizer 质量回归（2026-10-10）
+
+- 本节取代原 §4 / P5 多语言 Gate 计划：仅保留内置 Python Gate；TS / Java / C++ YAML 与镜像计划、CTest 和 Maven/Gradle 的待定问题取消。无匹配 Gate 时 CODING 直接进入 REVIEWING，仍需 reviewer 收敛与人工终审，不产生伪造的 Gate pass。
+- signoff 的 `automated_checks` 明确区分 `passed` / `not_run`；终审卡片、对话审批与总结标注「未经过自动测试」。checkpoint 保留 gate=None，内存 / Postgres 恢复后行为一致。项目自定义本机检查命令暂不实现。
+- P4 收尾完成：run API 返回完整 FAST / FULL 检查报告；UI 按 file:line / code / message 显示诊断与失败日志尾部，pytest 解析包含断言位置。核心前端 API 模型与请求类型来自 FastAPI OpenAPI，`gen:api` 本地生成、`check:api` 检测类型漂移。
+- 新增三项 summarizer 质量用例：重复问题版本化合并、个人偏好进入 global、项目约定留在 project；另检验 pinned/document 不变。沿用生产 on_finished hook；fake 标明 blind spots，raw 调用真实配置网关。固定回归是合成反馈/findings，不涉及完整编码任务。
+- 真实网关评测 3/3，通过结果保存在 `evals/memory-scorecard-real.json`；fake 全基线为 18/18（blind spots=18）。验证覆盖 231 项 Python unit、34 项持久化测试（含 PostgreSQL）、29 项 Vitest；UI production build、Ruff、mypy 与 OpenAPI 类型漂移检查通过。

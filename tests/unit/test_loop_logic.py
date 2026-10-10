@@ -12,7 +12,7 @@ from tests.conftest import finding, iteration, verdict
 
 class TestStates:
     @pytest.mark.parametrize("src,dst", [
-        (S.PLANNING, S.CODING), (S.CODING, S.GATING), (S.GATING, S.REVIEWING), (S.GATING, S.CODING),
+        (S.PLANNING, S.CODING), (S.CODING, S.REVIEWING), (S.CODING, S.GATING), (S.GATING, S.REVIEWING), (S.GATING, S.CODING),
         (S.REVIEWING, S.ARBITRATING), (S.ARBITRATING, S.CODING), (S.ARBITRATING, S.WAITING_HUMAN),
         (S.WAITING_HUMAN, S.DONE), (S.WAITING_HUMAN, S.CODING), (S.WAITING_HUMAN, S.CANCELLED),
         (S.CODING, S.WAITING_HUMAN), (S.REVIEWING, S.CANCELLED),
@@ -21,7 +21,7 @@ class TestStates:
         assert can_transition(src, dst)
 
     @pytest.mark.parametrize("src,dst", [
-        (S.PLANNING, S.REVIEWING), (S.CODING, S.REVIEWING), (S.GATING, S.DONE),
+        (S.PLANNING, S.REVIEWING), (S.GATING, S.DONE),
         (S.DONE, S.CODING), (S.CANCELLED, S.PLANNING), (S.REVIEWING, S.DONE),
     ])
     def test_illegal(self, src: S, dst: S) -> None:

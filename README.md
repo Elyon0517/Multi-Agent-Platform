@@ -189,3 +189,15 @@ The left sidebar selects a project and its conversations. Submitting a goal star
 Memory has explicit global sharing, project-private documents and project × role notes. Keyword retrieval works without embedding credentials and is the default. To use hybrid retrieval, provide `AGENTLAB_EMBEDDING_BASE_URL` and `AGENTLAB_EMBEDDING_API_KEY` in Settings or `.env`, and configure the embedding model/dimensions/version in `config/models.yaml`. Test the endpoint, select hybrid in project settings, then reindex existing project/agent chunks and shared knowledge separately. Readiness requires an actual successful embedding call; failure degrades to keyword retrieval. Vector ranking currently runs in Python over persisted payloads; pgvector HNSW and physical per-project schemas are pending.
 
 The DISCOVERY §16.4 table records implemented UX paths, verification and remaining decisions. New dispatch has fake and PostgreSQL recovery coverage; real-provider dispatch and vector retrieval still require separate smoke acceptance.
+
+
+Gate is optional: Python projects use the configured FAST checks and require FULL
+checks before human signoff. Projects without a matching Gate go directly from
+Coder to the review panel; signoff explicitly says no automated tests were run.
+TypeScript, Java and C++ Gate images are no longer planned. Custom host check
+commands are deferred.
+
+The run view lists Gate diagnostics by file/line, code and message, with failure
+output available below each check. API types are generated from FastAPI, not
+maintained separately. Run `npm --prefix ui run gen:api` after changing the API;
+`npm --prefix ui run check:api` verifies the generated types are current.

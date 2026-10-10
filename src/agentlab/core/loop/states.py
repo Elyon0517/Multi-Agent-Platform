@@ -12,7 +12,7 @@ TERMINAL = frozenset({S.DONE, S.CANCELLED})
 
 TRANSITIONS: dict[S, frozenset[S]] = {
     S.PLANNING: frozenset({S.CODING}),
-    S.CODING: frozenset({S.GATING}),
+    S.CODING: frozenset({S.GATING, S.REVIEWING}),
     S.GATING: frozenset({S.REVIEWING, S.CODING}),
     S.REVIEWING: frozenset({S.ARBITRATING}),
     S.ARBITRATING: frozenset({S.CODING, S.WAITING_HUMAN}),

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { PixelPanel } from '@/components/PixelPanel';
+import { GateDiagnostics } from './GateDiagnostics';
 import type { RunDetail } from '@/api/client';
 
 export function RunTimeline({ detail }: { detail: RunDetail }) {
@@ -25,6 +26,7 @@ export function RunTimeline({ detail }: { detail: RunDetail }) {
           ))}
         </tbody>
       </table>
+      <GateDiagnostics reports={detail.gate_reports} />
     </PixelPanel>
   );
 }

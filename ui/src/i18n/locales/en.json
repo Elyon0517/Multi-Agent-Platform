@@ -1407,6 +1407,13 @@
     "decodeFailed": "could not decode this image — the file may be corrupt or misnamed"
   },
   "lab": {
+    "untestedSignoff": "No automated tests were run. Review the changes before approving.",
+    "gateDiagnostics": "Gate diagnostics",
+    "gatePassed": "Passed",
+    "gateFailed": "Failed",
+    "diagnosticCode": "Code",
+    "diagnosticMessage": "Message",
+    "gateLog": "Check output",
     "deleteProject": "Delete project",
     "deleteProjectConfirm": "Delete project “{{name}}”? Project records, memories and snapshots will be permanently removed. Workspace files, global memories and usage history will be kept.",
     "runs": "runs",

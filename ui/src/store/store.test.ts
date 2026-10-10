@@ -3,6 +3,7 @@ import { useStore } from './store';
 import type { LabEvent, Run } from '@/api/client';
 
 const run: Run = {
+  thread_id: null, workspace: "/tmp/test", language: null, policy: "auto", iteration_base: 0,
   id: 'r', goal: 'g', status: 'CODING', project_id: 'p', max_iter: 5,
   budget_cents: 100, cost_cents: 10, tokens_in: 100, tokens_out: 20,
   paused_reason: null, created_at: '2026-10-09T00:00:00Z',

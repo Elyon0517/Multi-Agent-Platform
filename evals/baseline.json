@@ -133,5 +133,100 @@
       "intent": "clarify",
       "reply": "你想检查哪个函数？"
     }
+  ],
+  "memory_cases": [
+    {
+      "id": "memory-repeat-merge",
+      "feedback": [
+        "本项目约定：所有 public API 都必须有 docstring。评审再次发现缺少 docstring，请记住。",
+        "同样的问题又出现了。本项目 public API 必须有 docstring，合并已有经验。"
+      ],
+      "seed": [
+        {
+          "namespace": "project",
+          "kind": "semantic",
+          "text": "Public API functions in this project require docstrings."
+        }
+      ],
+      "finding": {
+        "severity": "major",
+        "category": "arch",
+        "file": "api.py",
+        "issue": "Public API function lacks a docstring",
+        "confidence": 1
+      },
+      "fake_operations": [
+        {
+          "action": "add",
+          "namespace": "project",
+          "text": "Public API functions must have docstrings. Check this project convention before review.",
+          "merge": true
+        }
+      ],
+      "expect": [
+        {
+          "name": "one_lesson",
+          "pattern": "docstring|文档字符串",
+          "namespace": "project",
+          "count": 1
+        }
+      ],
+      "require_update": true
+    },
+    {
+      "id": "memory-user-preference",
+      "feedback": [
+        "请记住我的沟通偏好，适用于所有项目：回复简短，先给结论，不要冗长解释。"
+      ],
+      "seed": [
+        {
+          "namespace": "project",
+          "kind": "note",
+          "text": "Pinned project convention: keep API docs.",
+          "pinned": true
+        },
+        {
+          "namespace": "project",
+          "kind": "document",
+          "text": "Private document: internal deployment topology and credentials."
+        }
+      ],
+      "fake_operations": [
+        {
+          "action": "add",
+          "namespace": "global",
+          "text": "The user prefers concise replies, with the conclusion first."
+        }
+      ],
+      "expect": [
+        {
+          "name": "preference_global",
+          "pattern": "简短|简洁|结论|concise|brief|short|conclusion",
+          "namespace": "global",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "memory-project-convention",
+      "feedback": [
+        "仅本项目的 public API 要提供 docstring。这是项目约定，不是我的个人偏好，不要带到其他项目。"
+      ],
+      "fake_operations": [
+        {
+          "action": "add",
+          "namespace": "project",
+          "text": "This project requires docstrings for public APIs."
+        }
+      ],
+      "expect": [
+        {
+          "name": "convention_project",
+          "pattern": "docstring|文档字符串",
+          "namespace": "project",
+          "count": 1
+        }
+      ]
+    }
   ]
 }

@@ -8,10 +8,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agentlab.core.ports import RunContext, Store
-from agentlab.core.schemas import Usage, utcnow
+from agentlab.core.schemas import Strict, Usage, utcnow
 
 
-class UsageSummary(BaseModel):
+class UsageSummary(Strict):
     role: str
     calls: int = 0
     unmetered_calls: int = 0

@@ -301,6 +301,9 @@ class MemoryHooks:
                 "approval.requested": f"任务等待你的审批:{p.get('reason', '确认结果')}。",
                 "approval.decided": f"已收到审批决定:{p.get('decision', '已处理')}。",
             }[event.type]
+            if (event.type == "approval.requested"
+                    and event.payload.get("payload", {}).get("automated_checks") == "not_run"):
+                text += " 未经过自动测试。"
             payload = dict(event.payload)
             if event.type == "approval.requested":
                 approval = store.pending_approval(run.id)
@@ -519,6 +522,9 @@ class MemoryHooks:
                         reply, sources = turn.reply, turn.sources
                     except Exception:
                         pass
+                checkpoint = store.checkpoint(run.id) or {}
+                if checkpoint.get("options", {}).get("gate", "unknown") is None and "未经过自动测试" not in reply:
+                    reply = reply[:19970] + "\n\n未经过自动测试。"
                 message = append_message(
                     store,
                     run.thread_id,

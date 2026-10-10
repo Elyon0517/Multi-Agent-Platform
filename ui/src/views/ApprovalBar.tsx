@@ -29,6 +29,8 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
   };
   return (
     <div aria-busy={busy}>
+      {approval.reason === 'signoff' && approval.payload.automated_checks === 'not_run' &&
+        <p role="status"><strong>{t('lab.untestedSignoff')}</strong></p>}
       <BlockedBanner
         reason={{
           summary: approval.reason,

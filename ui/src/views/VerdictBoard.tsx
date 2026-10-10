@@ -1,10 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { PixelPanel } from '@/components/PixelPanel';
-import { api, type RunDetail } from '@/api/client';
-
-interface Finding { severity: string; category: string; file: string; line: number | null; issue: string; confidence: number }
-interface Verdict { reviewer_id: string; verdict: string; findings: Finding[] }
+import { api, type RunDetail, type Verdict } from '@/api/client';
 
 export function VerdictBoard({ detail }: { detail: RunDetail }) {
   const { t } = useTranslation();

@@ -37,9 +37,15 @@ def _regex_parser(pattern: re.Pattern[str]) -> Parser:
     return parse
 
 
+def _pytest_parser(text: str) -> list[Diagnostic]:
+    located = _regex_parser(_FILE_LINE)(text)
+    summaries = _regex_parser(_PYTEST)(text)
+    return (located + summaries)[:MAX_DIAGNOSTICS]
+
+
 PARSERS: dict[str, Parser] = {
     "tsc": _regex_parser(_TSC),
-    "pytest": _regex_parser(_PYTEST),
+    "pytest": _pytest_parser,
 }
 DEFAULT_PARSER = _regex_parser(_FILE_LINE)
 
@@ -81,15 +87,7 @@ class ConfigGate:
         return GateResult(language=self.language, mode=mode, passed=True, steps=steps)
 
 
-class NoGateDetected(LookupError):
-    pass
-
-
-def resolve_gate(gates: list[ConfigGate], workspace: Path, language: str | None = None) -> ConfigGate:
+def resolve_gate(gates: list[ConfigGate], workspace: Path, language: str | None = None) -> ConfigGate | None:
     if language:
-        match = next((g for g in gates if g.language == language), None)
-    else:
-        match = next((g for g in gates if g.detect(workspace)), None)
-    if match is None:
-        raise NoGateDetected(language or str(workspace))
-    return match
+        return next((g for g in gates if g.language == language), None)
+    return next((g for g in gates if g.detect(workspace)), None)

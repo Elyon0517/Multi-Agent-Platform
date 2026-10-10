@@ -202,14 +202,14 @@ class Services:
         if (runtime or self.settings.runtime) == "fake":
             from agentlab.demo import demo_gate_cfg
 
-            gate = ConfigGate(demo_gate_cfg(), LocalSandbox())
+            gate = resolve_gate([ConfigGate(demo_gate_cfg(), LocalSandbox())], ws.root, language)
         else:
             gate = resolve_gate(self.gates(), ws.root, language)
         driver = Driver(cfg, self.store, self.blobs, self.bus, self.runtime(runtime, cfg), gate, ws, self.hooks)
         driver.recovery_options = {
             "runtime": runtime or self.settings.runtime,
             "sandbox": self.settings.sandbox,
-            "gate": gate.cfg.model_dump(mode="json"),
+            "gate": gate.cfg.model_dump(mode="json") if gate else None,
             "project_settings": project.settings.model_dump(mode="json") if project and project.settings else None,
         }
         driver.runtime_factory = lambda: self.runtime(runtime, driver.cfg)
@@ -247,7 +247,8 @@ class Services:
         sandbox = DockerSandbox(default_image="python:3.12-slim") if options["sandbox"] == "docker" else LocalSandbox()
         if options["runtime"] == "fake":
             sandbox = LocalSandbox()
-        gate = ConfigGate(GateCfg.model_validate(options["gate"]), sandbox, lambda text: self.blobs.put(text)[0])
+        gate = (ConfigGate(GateCfg.model_validate(options["gate"]), sandbox, lambda text: self.blobs.put(text)[0])
+                if options.get("gate") else None)
         runtime = FakeRuntime({}) if run.status in {"WAITING_HUMAN", "DONE", "CANCELLED"} else runtime_factory()
         driver = Driver(cfg, self.store, self.blobs, self.bus, runtime, gate, workspace, self.hooks)
         driver.runtime_factory = lambda: runtime_factory(driver.cfg)

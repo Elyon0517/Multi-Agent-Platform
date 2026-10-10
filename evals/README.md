@@ -1,7 +1,7 @@
 # Regression baseline
 
 Run `uv run agentlab eval --output evals/results/latest.json` for the deterministic
-baseline: ten fixed Python repairs plus the five DISCOVERY §2.5 conversation cases.
+baseline: ten fixed Python repairs, five DISCOVERY §2.5 conversation cases, and three memory quality cases.
 Each repair first runs the full Python Gate and requires failure specifically at `test`;
 a failure at typecheck, lint or format is reported as `failure_kind: fixture`, before any
 model call. Fake mode also uses the full Gate rather than the pytest-only demo Gate.
@@ -47,3 +47,23 @@ cleanup allows up to 30 seconds plus bounded process cleanup.
 Fake runs use the host venv's mypy/ruff/pytest; raw runs use the Gate image's pinned
 versions. If only raw fails, compare those versions before attributing it to a
 model regression.
+
+
+Run only the summarizer quality cases with:
+
+```bash
+uv run agentlab eval --manifest evals/memory.json --runtime raw --output evals/results/memory.json
+```
+
+These synthetic inputs go through the production `MemoryHooks.on_finished` stage:
+repeated docstring findings must merge into one active project lesson with version
+history; user communication preferences must go to global; project conventions
+must remain project-scoped. Pinned entries and documents must remain unchanged.
+Scorecards preserve the memory versions, proposed/applied operations and model-call
+usage. There is no code execution or full coding run in this suite. Each summarizer
+invocation uses its independent 25c budget; the repeat case has two invocations.
+
+`--runtime fake` verifies the eval wiring and rubric using fixture-specific outputs,
+and adds a blind spot to every case; it does not demonstrate semantic quality.
+The sanitized `memory-scorecard-real.json` records the real gateway run on 2026-10-10:
+3/3 scenarios passed. This small regression suite is not a general quality benchmark.

@@ -183,6 +183,8 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
             await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
             from agentlab.evaluation.fixtures import require_test_failure
 
+            if driver.gate is None:
+                raise RuntimeError("Python smoke evaluation requires a configured Gate")
             await require_test_failure(driver.gate, workspace, GateMode.FAST)
             typer.echo(f"Trial {index + 1}/{trials}: baseline tests fail; starting real model loop", err=True)
             run = await driver.run(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,9 +13,10 @@ from sse_starlette.sse import EventSourceResponse
 from agentlab.adapters.store.memory import NotFound
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
+from agentlab.core.conversation import Message, RootTurn
 from agentlab.core.loop.driver import Decision, Driver
 from agentlab.core.ports import RunBusy
-from agentlab.core.schemas import Approval, Artifact, Event, Iteration, Run, Step
+from agentlab.core.schemas import Approval, Artifact, ArtifactKind, Event, GateResult, Iteration, Run, Step
 from agentlab.run_service import CreateRun
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,17 @@ class MessageBody(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
 
 
+class SendMessageResult(BaseModel):
+    message: Message
+    turn: RootTurn
+    run: Run | None
+
+
+class ArtifactContent(BaseModel):
+    kind: ArtifactKind
+    content: str
+
+
 class DecideBody(BaseModel):
     decision: Decision
     feedback: str | None = None
@@ -32,8 +44,17 @@ class DecideBody(BaseModel):
     max_iter: int | None = None
 
 
+class RosterEntry(BaseModel):
+    role: str
+    kind: Literal["worker", "reviewer", "deterministic"]
+    alias: str
+    model: str
+    ctx_window: int
+
+
 class RunDetail(BaseModel):
     run: Run
+    gate_reports: list[GateResult]
     iterations: list[Iteration]
     steps: list[Step]
     artifacts: list[Artifact]
@@ -94,7 +115,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def health() -> dict[str, Any]:
         return {"ok": True, "agents": sorted(svc.cfg.agents)}
 
-    @app.get("/roster")
+    @app.get("/roster", response_model=list[RosterEntry])
     def roster(project_id: str | None = None, run_id: str | None = None) -> list[dict[str, str | int]]:
         cfg = svc.cfg
         if project_id:
@@ -141,7 +162,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         spawn(driver, run.id)
         return run
 
-    @app.post("/projects/{project_id}/threads/{thread_id}/messages")
+    @app.post("/projects/{project_id}/threads/{thread_id}/messages", response_model=SendMessageResult)
     async def send_message(project_id: str | None, thread_id: str, body: MessageBody) -> dict[str, Any]:
         from agentlab.core.conversation import Message
         from agentlab.core.schemas import EventType
@@ -226,7 +247,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         svc.store.put_record("thread", thread.id, thread.model_dump(mode="json"))
         return thread
 
-    @app.post("/threads/{thread_id}/messages")
+    @app.post("/threads/{thread_id}/messages", response_model=SendMessageResult)
     async def global_message(thread_id: str, body: MessageBody) -> dict[str, Any]:
         return await send_message(None, thread_id, body)
 
@@ -263,13 +284,20 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def run_detail(run_id: str) -> RunDetail:
         return RunDetail(
             run=get_run(run_id),
+            gate_reports=[GateResult.model_validate_json(svc.blobs.get(a.content_ref))
+                          for a in svc.store.artifacts(run_id, "gate")],
             iterations=svc.store.iterations(run_id),
             steps=svc.store.steps(run_id),
             artifacts=svc.store.artifacts(run_id),
             pending_approval=svc.store.pending_approval(run_id),
         )
 
-    @app.get("/artifacts/{run_id}/{artifact_id}")
+    @app.get("/runs/{run_id}/events/history", response_model=list[Event])
+    def event_history(run_id: str) -> list[Event]:
+        get_run(run_id)
+        return svc.store.events(run_id)
+
+    @app.get("/artifacts/{run_id}/{artifact_id}", response_model=ArtifactContent)
     def artifact_content(run_id: str, artifact_id: str) -> dict[str, str]:
         art = next((a for a in svc.store.artifacts(run_id) if a.id == artifact_id), None)
         if art is None:

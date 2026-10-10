@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -12,14 +12,31 @@ from pydantic import BaseModel, Field
 
 from agentlab.bootstrap import MissingGatewayConfig, Services
 from agentlab.core.budget import BudgetExceeded
+from agentlab.core.config import AliasCfg
 from agentlab.core.conversation import Conversation
 from agentlab.core.memory.documents import UnsupportedDocument
 from agentlab.core.memory.store import GLOBAL, PROJECT, Hit, MemoryItem, agent_ns
 from agentlab.core.ports import RunBusy
 from agentlab.core.project import Project, ProjectPhase, StepStatus
-from agentlab.core.project_config import ProjectSettings, project_config, validate_settings
+from agentlab.core.project_config import Binding, ProjectSettings, project_config, validate_settings
 from agentlab.core.schemas import Strict
 from agentlab.secrets import EDITABLE, SettingView
+from agentlab.services import DocumentSummary
+
+
+class ModelCatalog(BaseModel):
+    aliases: dict[str, AliasCfg]
+    roles: dict[str, Binding]
+    root_alias: str
+
+
+class MemoryStatus(BaseModel):
+    items: int
+    embedded: int
+    embedding_model: str | None
+    embedding_ready: bool
+    embedding_configured: bool
+    last_error: str | None
 
 
 class ProfileLoader(yaml.SafeLoader):
@@ -40,7 +57,7 @@ class SettingsBody(BaseModel):
 
 
 class NoteBody(BaseModel):
-    scope: str
+    scope: Literal["global", "project", "agent"]
     text: str = Field(min_length=1, max_length=20000)
     project_id: str | None = None
     role: str | None = None
@@ -93,7 +110,7 @@ def build_router(svc: Services) -> APIRouter:
         if role and role not in svc.cfg.agents:
             raise HTTPException(422, "unknown agent role")
 
-    @r.get("/models")
+    @r.get("/models", response_model=ModelCatalog)
     def models() -> dict[str, Any]:
         return {
             "aliases": {a: c.model_dump(mode="json") for a, c in svc.cfg.models.aliases.items()},
@@ -174,12 +191,12 @@ def build_router(svc: Services) -> APIRouter:
         svc.knowledge.memory.last_error = None
         return svc.setting_views()
 
-    @r.get("/knowledge")
+    @r.get("/knowledge", response_model=list[DocumentSummary])
     def list_docs(project_id: str | None = None) -> list[dict[str, Any]]:
         validate_scope(project_id)
         return [d.__dict__ for d in svc.knowledge.documents(project_id)]
 
-    @r.post("/knowledge")
+    @r.post("/knowledge", response_model=DocumentSummary)
     async def upload(file: UploadFile, project_id: str | None = None) -> dict[str, Any]:
         validate_scope(project_id)
         data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -232,19 +249,19 @@ def build_router(svc: Services) -> APIRouter:
         )
         return [h.model_copy(update={"item": h.item.model_copy(update={"embedding": None})}) for h in hits]
 
-    @r.post("/memory/probe")
+    @r.post("/memory/probe", response_model=MemoryStatus)
     async def probe_embedding() -> dict[str, object]:
         await svc.knowledge.memory._embed(["embedding connectivity test"])
         return svc.knowledge.memory.stats()
 
-    @r.post("/knowledge/reindex")
+    @r.post("/knowledge/reindex", response_model=MemoryStatus)
     async def reindex_global() -> dict[str, object]:
         if not svc.knowledge.memory._can_embed():
             raise HTTPException(422, "configure the separate embedding URL and API key first")
         await svc.knowledge.memory.add(svc.knowledge.memory.items_in(GLOBAL))
         return svc.knowledge.memory.stats()
 
-    @r.post("/projects/{project_id}/knowledge/reindex")
+    @r.post("/projects/{project_id}/knowledge/reindex", response_model=MemoryStatus)
     async def reindex(project_id: str) -> dict[str, object]:
         validate_scope(project_id)
         settings = svc.projects.get(project_id).settings
@@ -261,7 +278,7 @@ def build_router(svc: Services) -> APIRouter:
         await svc.knowledge.memory.add(items)
         return svc.knowledge.memory.stats()
 
-    @r.get("/memory/status")
+    @r.get("/memory/status", response_model=MemoryStatus)
     def memory_status() -> dict[str, object]:
         return svc.knowledge.memory.stats()
 

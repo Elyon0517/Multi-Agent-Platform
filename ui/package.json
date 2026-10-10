@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "gen:api": "openapi-typescript http://127.0.0.1:8765/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false",
+    "check:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false --check"
   },
   "dependencies": {
     "i18next": "^26.3.6",

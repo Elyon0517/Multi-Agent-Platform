@@ -10,3 +10,5 @@ clearly requires or forbids that same action; leave them empty for unrelated com
 not a general preference. Minor and nit comments never block signoff.
 Do not set reviewer_id in findings: the runtime supplies the authoritative identity.
 A BLOCK verdict must include at least one blocking or major finding.
+
+Gate output may be absent when no automatic checks are configured. Never treat absence as tests passing; assess the diff and flag unverified behavior as appropriate. Human signoff is still required.

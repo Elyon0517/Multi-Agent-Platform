@@ -1011,3 +1011,28 @@ async def test_p6_summarizer_versions_and_ledger_store_parity(store, tmp_path, m
     assert len(retained) == 2 and all(r["namespace"] == "global" for r in retained)
     assert len(svc.knowledge.memory.items_in("global")) == 1
     assert len(store.usage_entries()) == 2
+
+
+async def test_optional_gate_checkpoint_restore_store_parity(store, tmp_path):
+    from agentlab.core.memory.store import PersistentMemoryStore
+    from agentlab.demo import seed_demo_workspace
+    from agentlab.services import ProjectService
+    from tests.unit.test_memory_project import _svc
+
+    svc = _svc(tmp_path)
+    svc.store = store
+    svc.projects = ProjectService(store)
+    svc.hooks.projects = svc.projects
+    svc.knowledge.memory = PersistentMemoryStore(store)
+    project = svc.projects.create("any-language", "fix", str(tmp_path / "workspace"))
+    workspace = seed_demo_workspace(Path(project.workspace))
+    driver = svc.driver(workspace, "fake", "go", project.id)
+    await driver.workspace.ensure_repo()
+    run = await driver.run((await driver.create_async("Fix public add", project_id=project.id)).id)
+    assert run.status == RunStatus.WAITING_HUMAN
+    assert store.checkpoint(run.id)["options"]["gate"] is None
+    restored = svc.restore_driver(run.id)
+    assert restored.gate is None
+    assert store.pending_approval(run.id).payload["automated_checks"] == "not_run"
+    restored.decide(run.id, "approve")
+    assert (await restored.run(run.id)).status == RunStatus.DONE

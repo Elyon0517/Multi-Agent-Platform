@@ -1,0 +1,378 @@
+{
+  "run_id": "baseline",
+  "passed": true,
+  "verdict": "PASS",
+  "score": 3,
+  "total": 3,
+  "hard_error_count": 0,
+  "soft_warning_count": 0,
+  "blind_spot_count": 0,
+  "categories": {
+    "memory-repeat-merge": true,
+    "memory-user-preference": true,
+    "memory-project-convention": true
+  },
+  "checks": [
+    {
+      "name": "memory-repeat-merge",
+      "passed": true,
+      "severity": "hard",
+      "gate": "memory-repeat-merge",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "memory-user-preference",
+      "passed": true,
+      "severity": "hard",
+      "gate": "memory-user-preference",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "memory-project-convention",
+      "passed": true,
+      "severity": "hard",
+      "gate": "memory-project-convention",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    }
+  ],
+  "runtime": "raw",
+  "task_timeout_s": 120.0,
+  "scorecards": [
+    {
+      "run_id": "memory-repeat-merge",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 4,
+      "total": 4,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 0,
+      "categories": {
+        "invocation": true,
+        "one_lesson": true,
+        "versioned_merge": true,
+        "protected": true
+      },
+      "checks": [
+        {
+          "name": "invocation",
+          "passed": true,
+          "severity": "hard",
+          "gate": "invocation",
+          "source_type": "runtime",
+          "detail": "Production on_finished hook"
+        },
+        {
+          "name": "one_lesson",
+          "passed": true,
+          "severity": "hard",
+          "gate": "one_lesson",
+          "source_type": "memory",
+          "detail": "1 active matches in ['project']"
+        },
+        {
+          "name": "versioned_merge",
+          "passed": true,
+          "severity": "hard",
+          "gate": "versioned_merge",
+          "source_type": "memory",
+          "detail": "Old version retired with superseded_by"
+        },
+        {
+          "name": "protected",
+          "passed": true,
+          "severity": "hard",
+          "gate": "protected",
+          "source_type": "runtime",
+          "detail": "Pinned/document bytes preserved"
+        }
+      ],
+      "memory_evidence": [
+        {
+          "id": "4fa453885012",
+          "project_id": "c6bd3e226562",
+          "namespace": "project",
+          "kind": "semantic",
+          "text": "Public API functions in this project require docstrings.",
+          "source": "eval-seed",
+          "source_run_id": null,
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:37.350550+00:00",
+          "valid_to": "2026-10-10T17:45:44.374159+00:00",
+          "superseded_by": "40d47df264e3"
+        },
+        {
+          "id": "40d47df264e3",
+          "project_id": "c6bd3e226562",
+          "namespace": "project",
+          "kind": "semantic",
+          "text": "All public API functions in this project must have docstrings. This requirement has been missed in review more than once, so explicitly verify public API docstring coverage before submission.",
+          "source": "summarizer",
+          "source_run_id": "b4f2f4bc2dc7",
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:44.374152+00:00",
+          "valid_to": "2026-10-10T17:45:50.463144+00:00",
+          "superseded_by": "efcaef4db464"
+        },
+        {
+          "id": "efcaef4db464",
+          "project_id": "c6bd3e226562",
+          "namespace": "project",
+          "kind": "semantic",
+          "text": "All public API functions in this project must have docstrings. This requirement has repeatedly been missed, so explicitly audit every public/exported API function for docstring coverage before submission.",
+          "source": "summarizer",
+          "source_run_id": "542faa2e0ed5",
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:50.463137+00:00",
+          "valid_to": null,
+          "superseded_by": null
+        }
+      ],
+      "operations": [
+        {
+          "run_id": "b4f2f4bc2dc7",
+          "project_id": "c6bd3e226562",
+          "status": "completed",
+          "operations": {
+            "operations": [
+              {
+                "action": "update",
+                "namespace": "project",
+                "target_id": "4fa453885012",
+                "text": "All public API functions in this project must have docstrings. This requirement has been missed in review more than once, so explicitly verify public API docstring coverage before submission."
+              }
+            ]
+          },
+          "applied": [
+            "40d47df264e3"
+          ]
+        },
+        {
+          "run_id": "542faa2e0ed5",
+          "project_id": "c6bd3e226562",
+          "status": "completed",
+          "operations": {
+            "operations": [
+              {
+                "action": "update",
+                "namespace": "project",
+                "target_id": "40d47df264e3",
+                "text": "All public API functions in this project must have docstrings. This requirement has repeatedly been missed, so explicitly audit every public/exported API function for docstring coverage before submission."
+              }
+            ]
+          },
+          "applied": [
+            "efcaef4db464"
+          ]
+        }
+      ],
+      "semantic_model_evaluated": true
+    },
+    {
+      "run_id": "memory-user-preference",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 3,
+      "total": 3,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 0,
+      "categories": {
+        "invocation": true,
+        "preference_global": true,
+        "protected": true
+      },
+      "checks": [
+        {
+          "name": "invocation",
+          "passed": true,
+          "severity": "hard",
+          "gate": "invocation",
+          "source_type": "runtime",
+          "detail": "Production on_finished hook"
+        },
+        {
+          "name": "preference_global",
+          "passed": true,
+          "severity": "hard",
+          "gate": "preference_global",
+          "source_type": "memory",
+          "detail": "1 active matches in ['global']"
+        },
+        {
+          "name": "protected",
+          "passed": true,
+          "severity": "hard",
+          "gate": "protected",
+          "source_type": "runtime",
+          "detail": "Pinned/document bytes preserved"
+        }
+      ],
+      "memory_evidence": [
+        {
+          "id": "e6d7c37287d5",
+          "project_id": "e69344b2f806",
+          "namespace": "project",
+          "kind": "note",
+          "text": "Pinned project convention: keep API docs.",
+          "source": "eval-seed",
+          "source_run_id": null,
+          "pinned": true,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:50.463642+00:00",
+          "valid_to": null,
+          "superseded_by": null
+        },
+        {
+          "id": "36564f31a566",
+          "project_id": "e69344b2f806",
+          "namespace": "project",
+          "kind": "document",
+          "text": "Private document: internal deployment topology and credentials.",
+          "source": "eval-seed",
+          "source_run_id": null,
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:50.463649+00:00",
+          "valid_to": null,
+          "superseded_by": null
+        },
+        {
+          "id": "cfc247c32e5c",
+          "project_id": null,
+          "namespace": "global",
+          "kind": "semantic",
+          "text": "沟通偏好：回复简短，先给结论，避免冗长解释。",
+          "source": "summarizer",
+          "source_run_id": "389fbd622be1",
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:55.069543+00:00",
+          "valid_to": null,
+          "superseded_by": null
+        }
+      ],
+      "operations": [
+        {
+          "run_id": "389fbd622be1",
+          "project_id": "e69344b2f806",
+          "status": "completed",
+          "operations": {
+            "operations": [
+              {
+                "action": "add",
+                "namespace": "global",
+                "target_id": null,
+                "text": "沟通偏好：回复简短，先给结论，避免冗长解释。"
+              }
+            ]
+          },
+          "applied": [
+            "cfc247c32e5c"
+          ]
+        }
+      ],
+      "semantic_model_evaluated": true
+    },
+    {
+      "run_id": "memory-project-convention",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 3,
+      "total": 3,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 0,
+      "categories": {
+        "invocation": true,
+        "convention_project": true,
+        "protected": true
+      },
+      "checks": [
+        {
+          "name": "invocation",
+          "passed": true,
+          "severity": "hard",
+          "gate": "invocation",
+          "source_type": "runtime",
+          "detail": "Production on_finished hook"
+        },
+        {
+          "name": "convention_project",
+          "passed": true,
+          "severity": "hard",
+          "gate": "convention_project",
+          "source_type": "memory",
+          "detail": "1 active matches in ['project']"
+        },
+        {
+          "name": "protected",
+          "passed": true,
+          "severity": "hard",
+          "gate": "protected",
+          "source_type": "runtime",
+          "detail": "Pinned/document bytes preserved"
+        }
+      ],
+      "memory_evidence": [
+        {
+          "id": "03cd74115b6d",
+          "project_id": "92fa8e31ebb3",
+          "namespace": "project",
+          "kind": "semantic",
+          "text": "项目约定：仅 public API 需要提供 docstring；不要将此约定推广到其他项目。",
+          "source": "summarizer",
+          "source_run_id": "032f052524e9",
+          "pinned": false,
+          "embedding_model": null,
+          "embedding_version": null,
+          "embedding_dimensions": null,
+          "created_at": "2026-10-10T17:45:58.109457+00:00",
+          "valid_to": null,
+          "superseded_by": null
+        }
+      ],
+      "operations": [
+        {
+          "run_id": "032f052524e9",
+          "project_id": "92fa8e31ebb3",
+          "status": "completed",
+          "operations": {
+            "operations": [
+              {
+                "action": "add",
+                "namespace": "project",
+                "target_id": null,
+                "text": "项目约定：仅 public API 需要提供 docstring；不要将此约定推广到其他项目。"
+              }
+            ]
+          },
+          "applied": [
+            "03cd74115b6d"
+          ]
+        }
+      ],
+      "semantic_model_evaluated": true
+    }
+  ],
+  "evaluated_date": "2026-10-10",
+  "eval_scope": "Synthetic feedback and findings through the production on_finished hook; no full coding loop."
+}

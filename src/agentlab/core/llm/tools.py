@@ -29,7 +29,7 @@ class WorkerTools:
         role: str,
         grants: list[str],
         workspace: Workspace,
-        gate: GateAdapter,
+        gate: GateAdapter | None,
         memory_search: Callable[[str], Awaitable[dict[str, Any]]],
     ) -> None:
         self.role, self.grants, self.workspace, self.gate = role, grants, workspace, gate
@@ -52,7 +52,9 @@ class WorkerTools:
         return [
             spec
             for name, spec in specs.items()
-            if name in self.grants and (self.role == "coder" or name not in {"workspace_write", "gate_run"})
+            if name in self.grants
+            and (name != "gate_run" or self.gate is not None)
+            and (self.role == "coder" or name not in {"workspace_write", "gate_run"})
         ]
 
     async def execute(self, name: str, args: dict[str, Any]) -> Any:
@@ -70,6 +72,7 @@ class WorkerTools:
         if name == "workspace_write":
             return {"paths": self.workspace.apply_edits([FileEdit(**args)])}
         if name == "gate_run":
+            assert self.gate is not None
             result = await self.gate.run(self.workspace.root, GateMode.FAST)
             return result.model_dump(mode="json")
         return await self.memory_search(args["query"][:4000])

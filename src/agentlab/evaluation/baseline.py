@@ -81,6 +81,7 @@ async def evaluate(manifest: Path, runtime: str = "fake", task_timeout_s: float 
                 from agentlab.adapters.gates.config_gate import resolve_gate
 
                 driver.gate = resolve_gate(svc.gates(), workspace, "python")
+                assert driver.gate is not None
                 driver.recovery_options["gate"] = driver.gate.cfg.model_dump(mode="json")
                 scripts = demo_scripts()
                 scripts["planner"] = lambda inp: Plan(
@@ -105,6 +106,7 @@ async def evaluate(manifest: Path, runtime: str = "fake", task_timeout_s: float 
                         path: (workspace / path).read_bytes()
                         for path in await cast(GitWorkspace, driver.workspace).source_files()
                     }
+                    assert driver.gate is not None
                     baseline_result = await require_test_failure(driver.gate, workspace)
                     run = await driver.create_async(task["goal"])
                     run = await driver.run(run.id)
@@ -330,6 +332,12 @@ async def evaluate(manifest: Path, runtime: str = "fake", task_timeout_s: float 
                 (results_dir / (case["id"] + ".json")).write_text(
                     json.dumps(cards[-1], ensure_ascii=False, indent=2) + "\n"
                 )
+        from agentlab.evaluation.memory import evaluate_memory_case
+
+        for case in data.get("memory_cases", []):
+            card = await evaluate_memory_case(svc, case, runtime, task_timeout_s)
+            cards.append(card)
+            (results_dir / (case["id"] + ".json")).write_text(json.dumps(card, ensure_ascii=False, indent=2) + "\n")
     checks = [check(card["run_id"], card["passed"], card["verdict"], "scorecard") for card in cards]
     report = {
         **scorecard("baseline", checks, sum(c["blind_spot_count"] for c in cards)),

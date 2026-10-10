@@ -83,7 +83,7 @@ class Driver:
         blobs: BlobStore,
         bus: EventBus,
         runtime: AgentRuntime,
-        gate: GateAdapter,
+        gate: GateAdapter | None,
         workspace: Workspace,
         hooks: RunHooks | None = None,
     ) -> None:
@@ -302,7 +302,7 @@ class Driver:
                     },
                     "instruction": (
                         "Assign each worker a model alias and task. Keep all reviewers independent; "
-                        "never skip gates or approvals. "
+                        "Use configured gates when available; never skip human approvals. "
                         "When tier-eligible reviewer models contain at least two distinct model IDs, "
                         "assign correctness-reviewer and arch-reviewer different model IDs. "
                         "Different aliases for the same model ID do not count."
@@ -349,14 +349,23 @@ class Driver:
         self.workspace.apply_edits(res.output.edits)
         diff = await self.workspace.diff()
         with self._atomic():
-            self._save_artifact(run, "diff", diff, "coder", to="gate")
-            self._advance(run, S.GATING)
+            self._save_artifact(run, "diff", diff, "coder", to="gate" if self.gate else "reviewers")
+            if self.gate is None:
+                self.store.add_iteration(Iteration(run_id=run.id, n=len(self.store.iterations(run.id)) + 1,
+                                                   phase=S.REVIEWING,
+                                                   diff_hash=hashlib.sha256(diff.encode()).hexdigest()))
+                self._advance(run, S.REVIEWING)
+            else:
+                self._advance(run, S.GATING)
 
     async def _gating(self, run: Run) -> None:
+        if self.gate is None:
+            raise RuntimeError("GATING requires a configured gate")
         diff = self._latest_text(run, "diff") or ""
         self._emit(run, EventType.STEP_STARTED, actor="gate", role="gate")
         gr = await self.gate.run(self.workspace.root, GateMode.FAST)
         with self._atomic():
+            self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="coder")
             self._emit(run, EventType.GATE_FINISHED, actor="gate", passed=gr.passed, failed_at=gr.failed_at)
             it = Iteration(
                 run_id=run.id,
@@ -370,7 +379,6 @@ class Driver:
             if is_oscillating(self._round_iterations(run)):
                 self._escalate(run, "oscillation_detected", {"iteration": it.n})
             elif not gr.passed:
-                self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="coder")
                 self._advance(run, S.CODING)
             else:
                 self._advance(run, S.REVIEWING)
@@ -419,14 +427,18 @@ class Driver:
             await self._final_gate(run, d)
 
     async def _final_gate(self, run: Run, d: ArbiterDecision) -> None:
-        gr = await self.gate.run(self.workspace.root, GateMode.FULL)
-        self._emit(run, EventType.GATE_FINISHED, actor="gate", passed=gr.passed, mode="full")
-        if not gr.passed:
+        if self.gate is not None:
+            gr = await self.gate.run(self.workspace.root, GateMode.FULL)
             with self._atomic():
-                self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="coder")
-                self._advance(run, S.CODING)
-            return
-        self._escalate(run, "signoff", {"diff_ref": self._latest(run, "diff").content_ref}, on_approve=S.DONE)
+                self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="human")
+                self._emit(run, EventType.GATE_FINISHED, actor="gate", passed=gr.passed, mode="full")
+                if not gr.passed:
+                    self._advance(run, S.CODING)
+                    return
+        self._escalate(run, "signoff", {
+            "diff_ref": self._latest(run, "diff").content_ref,
+            "automated_checks": "passed" if self.gate is not None else "not_run",
+        }, on_approve=S.DONE)
 
     async def _agent(self, run: Run, role: str, inp: AgentInput, out: type[T]) -> AgentResult[T]:
         return (await self._agents(run, [role], inp, out))[0]
