@@ -956,7 +956,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - [x] 网关 URL / key 与模型 id 已配置，P1 已验证；更多模型由用户后续补充。
 - [x] ~~网关是否提供 embedding 端点？~~ v1.9 改为本地默认 embedding，远程接口可选（ADR-030）
 - [x] ~~C++ Gate 的 GTest 发现策略；Java 项目 Maven 与 Gradle 优先级~~ v1.9 取消多语言 Gate，不再需要（ADR-029）
-- [ ] （v1.9）本地 embedding / rerank 的具体模型与库：实现时按中文效果、模型大小与 Apple Silicon 兼容性实测后确定
+- [x] （v1.9）本地 embedding / rerank 模型与库已确定并实测：FastEmbed 0.7.4，multilingual MiniLM（384 维）+ BAAI/bge-reranker-base；Apple Silicon CPU 上传与检索 smoke 通过（§7.4）
 - [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
 - [x] （v1.6）`agentlab ping --search` 实测 Responses `web_search` 可用；Chat 无搜索证据，不启用
 - [x] （v1.6）root 每轮默认最多 8 次工具调用、使用默认单轮预算（用户确认）
