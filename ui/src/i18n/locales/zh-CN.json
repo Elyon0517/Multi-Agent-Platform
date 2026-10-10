@@ -1513,6 +1513,7 @@
     "requiredBudget": "所需预算：{{value}} 美分",
     "interruptedCall": "上次请求在确认 usage 前中断，结算状态未知。批准将重试缺失调用；网关可能已对中断请求计费。可选择终止。",
     "agentConfiguration": "Agent 配置",
+    "selectProjectHint": "请在左侧选择项目，或点击「新建项目」创建。",
     "dispatchMode": "分配模式",
     "autoDispatch": "Root 自动分配模型和任务",
     "manualDispatch": "完全手动分配模型和任务",

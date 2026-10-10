@@ -42,6 +42,8 @@ export function ProjectConfigEditor({
   }, [catalog, value, onChange]);
   if (!catalog || !value) return <Muted>{error || '…'}</Muted>;
   const update = (patch: Partial<ProjectSettings>) => onChange({ ...value, ...patch });
+  // The backend treats an empty list as the whole catalog, so show it that way.
+  const allowed = value.allowed_aliases.length ? value.allowed_aliases : Object.keys(catalog.aliases);
   const modelSelect = (alias: string, change: (alias: string) => void, id: string) => (
     <select id={`${prefix}-${id}`} style={inputStyle} value={alias} onChange={(e) => change(e.target.value)}>
       {Object.entries(catalog.aliases).map(([a, c]) => (
@@ -75,13 +77,13 @@ export function ProjectConfigEditor({
               <label key={alias} style={{ display: 'block' }}>
                 <input
                   type="checkbox"
-                  disabled={value.allowed_aliases.length === 1 && value.allowed_aliases.includes(alias)}
-                  checked={value.allowed_aliases.includes(alias)}
+                  disabled={allowed.length === 1 && allowed.includes(alias)}
+                  checked={allowed.includes(alias)}
                   onChange={(e) =>
                     update({
                       allowed_aliases: e.target.checked
-                        ? [...value.allowed_aliases, alias]
-                        : value.allowed_aliases.filter((a) => a !== alias),
+                        ? [...allowed, alias]
+                        : allowed.filter((a) => a !== alias),
                     })
                   }
                 />

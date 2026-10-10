@@ -18,6 +18,8 @@ import { AgentDetail } from '@/views/AgentDetail';
 import { ActivityView } from '@/views/ActivityView';
 import { KnowledgeView } from '@/views/KnowledgeView';
 import { ProjectView } from '@/views/ProjectView';
+import { ProjectDialogs } from '@/views/ProjectDialogs';
+import { Icon } from '@/components/Icon';
 import { MonitorView } from '@/views/MonitorView';
 import { SettingsView } from '@/views/SettingsView';
 import { Status, errorText } from '@/views/ui';
@@ -149,6 +151,13 @@ export function App() {
               {i18n.t(`lab.${t.label}`)}
             </PixelButton>
           ))}
+          {activeProjectId && (
+            <span style={{ marginLeft: 'auto' }}>
+              <PixelButton size="sm" variant="secondary" onClick={() => useStore.getState().openProjectDialog('config')}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="gear" /> {t('lab.agentConfiguration')}</span>
+              </PixelButton>
+            </span>
+          )}
         </nav>
         <div style={{ overflow: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: tab === 'chat' ? 'flex' : 'none', flex: 1, minHeight: 0 }}><ConversationView /></div>
@@ -172,7 +181,7 @@ export function App() {
               {detail?.run.id === activeRunId && <ArtifactViewer key={`artifact:${detail.run.id}`} detail={detail} />}
             </>
           )}
-          {tab === 'project' && <ProjectView runtime={runtime} onRunStarted={(id) => void openRun(id)} />}
+          {tab === 'project' && <ProjectView onRunStarted={(id) => void openRun(id)} />}
           {tab === 'tasks' && <TasksKanban />}
           {tab === 'human' && <AskMeTab />}
           {tab === 'memory' && <KnowledgeView key={activeProjectId ?? 'global'} />}
@@ -182,6 +191,7 @@ export function App() {
         </div>
       </aside>
       <TaskDetailOverlay />
+      <ProjectDialogs runtime={runtime} />
     </div>
   );
 }

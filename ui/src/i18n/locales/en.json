@@ -1513,6 +1513,7 @@
     "requiredBudget": "Required: {{value}} cents",
     "interruptedCall": "The previous request was interrupted before usage was confirmed. Approve to retry the missing calls; the gateway may have charged the interrupted request. Abort to stop.",
     "agentConfiguration": "Agent configuration",
+    "selectProjectHint": "Select a project in the left sidebar, or create one with “New project”.",
     "dispatchMode": "Dispatch mode",
     "autoDispatch": "Root assigns models and tasks",
     "manualDispatch": "Manually assign every agent",

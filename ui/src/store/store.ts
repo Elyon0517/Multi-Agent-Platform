@@ -97,6 +97,9 @@ interface LabState {
 
   select: (id: string | null) => void;
   requestCommandCenterTab: (tab: ConsoleTab) => void;
+  /** Project creation and agent configuration open as dialogs, keeping the console for the Root chat. */
+  projectDialog: 'new' | 'config' | null;
+  openProjectDialog: (dialog: 'new' | 'config' | null) => void;
   openTaskDetail: (id: string) => void;
   closeTaskDetail: () => void;
   setRoster: (roster: RosterEntry[]) => void;
@@ -193,6 +196,8 @@ export const useStore = create<LabState>((set, get) => {
 
     select: (id) => set({ selectedId: id }),
     requestCommandCenterTab: (tab) => set({ commandCenterTab: tab }),
+    projectDialog: null,
+    openProjectDialog: (dialog) => set({ projectDialog: dialog }),
     openTaskDetail: (id) => set({ taskDetailId: id }),
     closeTaskDetail: () => set({ taskDetailId: null }),
 

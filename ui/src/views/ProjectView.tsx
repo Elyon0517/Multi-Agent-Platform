@@ -1,12 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Project, type ProjectSettings, type ProjectStep, type StepStatus } from '@/api/client';
+import { api, type Project, type ProjectStep, type StepStatus } from '@/api/client';
 import { PixelPanel } from '@/components/PixelPanel';
-import { PixelButton } from '@/components/PixelButton';
 import { useStore } from '@/store/store';
-import { Field, Muted, Status, errorText, inputStyle } from '@/views/ui';
-
-import { ProjectConfigEditor } from './ProjectConfigEditor';
+import { Muted, Status, errorText } from '@/views/ui';
 
 const DOT: Record<StepStatus, string> = {
   todo: 'var(--cth-ink-300)', doing: 'var(--cth-sky)', done: 'var(--cth-mint)', blocked: 'var(--cth-coral)',
@@ -18,158 +15,63 @@ function phaseStatus(steps: ProjectStep[]): StepStatus {
   return steps.some((s) => s.status !== 'todo') ? 'doing' : 'todo';
 }
 
-function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; runtime?: string }) {
-  const { t } = useTranslation();
-  const [settings, setSettings] = useState<ProjectSettings | null>(null);
-  const [name, setName] = useState('');
-  const [goal, setGoal] = useState('');
-  const [workspace, setWorkspace] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
-  const pickFolder = async () => {
-    setPicking(true); setError(null);
-    try {
-      const { path } = await api.pickFolder();
-      if (path) setWorkspace(path);
-    } catch (e) { setError(String(e)); }
-    finally { setPicking(false); }
-  };
-
-  const create = async () => {
-    if (!name.trim() || !goal.trim() || !workspace.trim()) { setError(t('lab.nameGoalAndWorkspaceAreRequired')); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      onCreated(await api.createProject({ name, goal, workspace, runtime, settings: settings ?? undefined }));
-      setName(''); setGoal('');
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <PixelPanel title={t('lab.newProject')}>
-      <form onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <Field id="p-name" label={t('lab.name')}><input id="p-name" style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id="p-goal" label={t('lab.goal')} hint={t('lab.theProjectPlannerRootModelBreaksThisIntoPhasesAndSteps')}>
-          <textarea id="p-goal" rows={3} style={inputStyle} value={goal} onChange={(e) => setGoal(e.target.value)} />
-        </Field>
-        <Field id="p-ws" label={t('lab.workspacePathGitRepo')}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input id="p-ws" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={workspace} placeholder="/Users/…/my-repo" onChange={(e) => setWorkspace(e.target.value)} />
-            <PixelButton size="sm" variant="secondary" disabled={picking} onClick={() => void pickFolder()}>{t('lab.chooseFolder')}</PixelButton>
-          </div>
-        </Field>
-        <ProjectConfigEditor value={settings} onChange={setSettings} />
-        <PixelButton disabled={busy || !settings} onClick={() => void create()}>{busy ? t('lab.planning') : t('lab.createPlan')}</PixelButton>
-        <Status error={error} />
-      </form>
-    </PixelPanel>
-  );
-}
-
-export function ProjectView({ runtime, onRunStarted }: { runtime?: string; onRunStarted: (runId: string) => void }) {
+/** Read-only plan of the current project: what will be done and the result of each run.
+ *  Work is started from the Root conversation; creation and configuration live in dialogs. */
+export function ProjectView({ onRunStarted }: { onRunStarted: (runId: string) => void }) {
   const { t } = useTranslation();
   const activeProjectId = useStore((s) => s.activeProjectId);
-  const setActiveProject = useStore((s) => s.setActiveProject);
   const runs = useStore((s) => s.runs);
-  const [editedSettings, setEditedSettings] = useState<ProjectSettings | null>(null);
-  const [profile, setProfile] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const project = projects.find((p) => p.id === activeProjectId) ?? null;
 
-  useEffect(() => { setEditedSettings(project?.settings ?? null); setSaved(false); setProfile(''); }, [project?.id]);
-
-  const refresh = useCallback(() => { api.projects().then(setProjects).catch((e) => setError(errorText(e))); }, []);
-  useEffect(refresh, [refresh]);
+  const refresh = useCallback(() => {
+    if (!activeProjectId) { setProject(null); return; }
+    api.project(activeProjectId).then(setProject).catch((e) => setError(errorText(e)));
+  }, [activeProjectId]);
   useEffect(refresh, [refresh, runs]);
 
-  const startStep = async (step: ProjectStep) => {
-    if (!project) return;
-    setError(null);
-    try {
-      const run = await api.createRun({ goal: step.title, runtime, workspace: project.workspace,
-        project_id: project.id, step_id: step.id });
-      onRunStarted(run.id);
-      refresh();
-    } catch (e) {
-      setError(errorText(e));
-    }
-  };
+  if (!activeProjectId) return <PixelPanel title={t('lab.project')}><Muted>{t('lab.selectProjectHint')}</Muted></PixelPanel>;
+  if (!project) return <Status error={error} />;
 
-  const setStatus = async (step: ProjectStep, status: StepStatus) => {
-    if (!project) return;
-    try { const next = await api.patchStep(project.id, step.id, status);
-    setProjects((ps) => ps.map((p) => (p.id === next.id ? next : p))); } catch (e) { setError(errorText(e)); }
-  };
-
-  const done = project?.phases.flatMap((p) => p.steps).filter((s) => s.status === 'done').length ?? 0;
-  const total = project?.phases.flatMap((p) => p.steps).length ?? 0;
+  const steps = project.phases.flatMap((p) => p.steps);
+  const done = steps.filter((s) => s.status === 'done').length;
+  const statusOf = (id: string) => runs.find((r) => r.id === id)?.status;
 
   return (
-    <>
-      <PixelPanel title={t('lab.projects')}>
-        {projects.length === 0 && <Muted>{t('lab.noProjectsYet')}</Muted>}
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {projects.map((p) => (
-            <li key={p.id}>
-              <button type="button" onClick={() => setActiveProject(p.id)} aria-current={p.id === activeProjectId}
-                style={{ all: 'unset', cursor: 'pointer', fontWeight: p.id === activeProjectId ? 700 : 400, fontSize: 13 }}>
-                {p.name}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </PixelPanel>
-      {project && (
-        <PixelPanel title={`${project.name} · ${done}/${total}`}>
-          <Muted>{project.goal}</Muted>
-          <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}
-            style={{ height: 8, background: 'var(--cth-cream-300)', margin: '6px 0 10px' }}>
-            <div style={{ height: '100%', width: `${total ? (done / total) * 100 : 0}%`, background: 'var(--cth-mint)' }} />
-          </div>
-          {project.phases.map((phase, pi) => (
-            <section key={phase.id} style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: '0 0 4px', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span aria-hidden style={{ width: 8, height: 8, background: DOT[phaseStatus(phase.steps)] }} />
-                P{pi + 1} · {phase.title}
-              </h3>
-              <ol style={{ margin: 0, paddingLeft: 18 }}>
-                {phase.steps.map((step) => (
-                  <li key={step.id} style={{ fontSize: 12, marginBottom: 4 }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span aria-label={step.status} style={{ width: 8, height: 8, background: DOT[step.status], flexShrink: 0 }} />
-                      <span style={{ flex: 1, textDecoration: step.status === 'done' ? 'line-through' : undefined }}>{step.title}</span>
-                      {step.status !== 'done' && step.status !== 'doing' && (
-                        <PixelButton size="sm" onClick={() => void startStep(step)}>{t('lab.run')}</PixelButton>
-                      )}
-                      {step.status !== 'done' && (
-                        <PixelButton size="sm" variant="secondary" onClick={() => void setStatus(step, 'done')}>{t('lab.markDone')}</PixelButton>
-                      )}
-                    </div>
-                    {step.run_ids.length > 0 && (
-                      <div style={{ color: 'var(--cth-ink-500)', fontSize: 11 }}>
-                        {t('lab.runLinks')} {step.run_ids.map((id) => (
-                          <button key={id} type="button" onClick={() => onRunStarted(id)}
-                            style={{ all: 'unset', cursor: 'pointer', textDecoration: 'underline', marginRight: 6 }}>{id}</button>
-                        ))}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </section>
-          ))}
-        </PixelPanel>
-      )}
-      {project && <PixelPanel title={t('lab.agentConfiguration')}><ProjectConfigEditor value={editedSettings} onChange={setEditedSettings} /><PixelButton disabled={!editedSettings} onClick={() => { if (editedSettings) void api.updateProjectSettings(project.id, editedSettings).then(() => { setSaved(true); refresh(); }).catch(e => setError(errorText(e))); }}>{t('lab.save')}</PixelButton>{saved && <Muted>{t('lab.configurationSaved')}</Muted>}<details><summary>{t('lab.yamlProfile')}</summary><textarea aria-label={t('lab.yamlProfile')} style={inputStyle} rows={8} value={profile} onChange={e => setProfile(e.target.value)} /><PixelButton size="sm" onClick={() => { void api.projectProfile(project.id).then(setProfile).catch(e => setError(errorText(e))); }}>{t('lab.exportYaml')}</PixelButton><PixelButton size="sm" disabled={!profile.trim()} onClick={() => { void api.importProjectProfile(project.id, profile).then(p => { setEditedSettings(p.settings ?? null); setSaved(true); refresh(); }).catch(e => setError(errorText(e))); }}>{t('lab.applyYaml')}</PixelButton></details></PixelPanel>}
-      <Status error={error} />
-      <NewProject runtime={runtime} onCreated={(p) => { setProjects((ps) => [...ps, p]); setActiveProject(p.id); }} />
-    </>
+    <PixelPanel title={`${project.name} · ${done}/${steps.length}`}>
+      <Muted>{project.goal}</Muted>
+      <div role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={done}
+        style={{ height: 8, background: 'var(--cth-cream-300)', margin: '6px 0 10px' }}>
+        <div style={{ height: '100%', width: `${steps.length ? (done / steps.length) * 100 : 0}%`, background: 'var(--cth-mint)' }} />
+      </div>
+      {project.phases.map((phase, pi) => (
+        <section key={phase.id} style={{ marginBottom: 10 }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span aria-hidden style={{ width: 8, height: 8, background: DOT[phaseStatus(phase.steps)] }} />
+            P{pi + 1} · {phase.title}
+          </h3>
+          <ol style={{ margin: 0, paddingLeft: 18 }}>
+            {phase.steps.map((step: ProjectStep) => (
+              <li key={step.id} style={{ fontSize: 12, marginBottom: 4 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                  <span aria-label={step.status} style={{ width: 8, height: 8, background: DOT[step.status], flexShrink: 0 }} />
+                  <span style={{ flex: 1, textDecoration: step.status === 'done' ? 'line-through' : undefined }}>{step.title}</span>
+                </div>
+                {step.run_ids.length > 0 && (
+                  <div style={{ color: 'var(--cth-ink-500)', fontSize: 11 }}>
+                    {t('lab.runLinks')} {step.run_ids.map((id) => (
+                      <button key={id} type="button" onClick={() => onRunStarted(id)}
+                        style={{ all: 'unset', cursor: 'pointer', textDecoration: 'underline', marginRight: 6 }}>
+                        {id}{statusOf(id) ? ` · ${statusOf(id)}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+    </PixelPanel>
   );
 }

@@ -9,7 +9,7 @@ import { Status } from './ui';
 import { conversationTitle, hasConversationContent } from './conversationNavigation';
 export function ProjectSidebar() {
   const { t } = useTranslation();
-  const { activeProjectId, activeThreadId, setActiveProject, setActiveThread, requestCommandCenterTab, runs } = useStore();
+  const { activeProjectId, activeThreadId, setActiveProject, setActiveThread, requestCommandCenterTab, openProjectDialog, runs } = useStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Conversation[]>([]);
   const [globalThreads, setGlobalThreads] = useState<Conversation[]>([]);
@@ -71,7 +71,7 @@ export function ProjectSidebar() {
     <nav className="project-navigation" aria-label={t('lab.projects')}>
       <div className="sidebar-actions">
         <PixelButton size="sm" disabled={creating} onClick={() => void newChat(null)}>{t('lab.newConversation')}</PixelButton>
-        <PixelButton size="sm" variant="secondary" onClick={() => requestCommandCenterTab('project')}>{t('lab.newProject')}</PixelButton>
+        <PixelButton size="sm" variant="secondary" onClick={() => openProjectDialog('new')}>{t('lab.newProject')}</PixelButton>
       </div>
       <h2>{t('lab.projects')}</h2>
       {projects.length === 0 && <p className="sidebar-empty">{t('lab.noProjects', { defaultValue: 'No projects yet' })}</p>}
@@ -79,7 +79,7 @@ export function ProjectSidebar() {
         <div key={project.id}>
           <div className="sidebar-project-row">
             <button className="sidebar-item sidebar-project" type="button" aria-current={project.id === activeProjectId ? 'page' : undefined}
-              onClick={() => { setActiveProject(project.id); requestCommandCenterTab('project'); }}>▣ {project.name}</button>
+              onClick={() => { setActiveProject(project.id); requestCommandCenterTab('chat'); }}>▣ {project.name}</button>
             <button className="sidebar-icon-button" type="button" title={t('lab.deleteProject')}
               aria-label={`${t('lab.deleteProject')}: ${project.name}`} onClick={() => void deleteProject(project)}>
               <Icon name="trash" />
