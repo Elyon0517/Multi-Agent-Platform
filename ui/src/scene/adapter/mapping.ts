@@ -75,7 +75,7 @@ export interface Translation {
   runStatus?: RunStatus;
 }
 
-export function translate(e: LabEvent): Translation {
+export function translate(e: LabEvent, agents: ReadonlyArray<{ id: string; status: StatusKind }> = []): Translation {
   const p = e.payload;
   switch (e.type) {
     case 'step.started': {
@@ -109,7 +109,11 @@ export function translate(e: LabEvent): Translation {
     case 'run.status': {
       const dst = p.dst as RunStatus;
       const idle: AgentPatch[] = dst === 'DONE' || dst === 'CANCELLED'
-        ? Object.keys(SEATS).map((id) => ({ id, status: 'idle' as StatusKind, action: '' })) : [];
+        ? Object.keys(SEATS).map((id) => ({ id, status: 'idle' as StatusKind, action: '' }))
+        : dst === 'WAITING_HUMAN'
+          ? agents.filter((a) => a.status === 'thinking' || a.status === 'working')
+            .map((a) => ({ id: a.id, status: 'idle' as StatusKind, action: '' }))
+          : [];
       return { patches: idle, handoffs: [], runStatus: dst };
     }
     default:

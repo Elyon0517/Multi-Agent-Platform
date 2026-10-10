@@ -213,7 +213,7 @@ export const useStore = create<LabState>((set, get) => {
 
     applyEvent: (e) => {
       if (e.run_id !== get().activeRunId || e.seq <= get().lastEventSeq) return;
-      const { patches, handoffs, runStatus } = translate(e);
+      const { patches, handoffs, runStatus } = translate(e, get().agents);
       const folded = foldTelemetry(get().telemetry, e);
       const recent = stepSummary(e);
       set((s) => {
