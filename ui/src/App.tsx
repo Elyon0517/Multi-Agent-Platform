@@ -1,3 +1,5 @@
+import { LANGUAGES, setLanguage } from '@/i18n';
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api, type RunDetail } from '@/api/client';
 import { useStore, type ConsoleTab } from '@/store/store';
@@ -21,11 +23,12 @@ import { Status, errorText } from '@/views/ui';
 
 const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
-  { key: 'human', label: 'ask me' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
+  { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
   { key: 'activity', label: 'activity' }, { key: 'settings', label: 'settings' },
 ];
 
 export function App() {
+  const { t, i18n } = useTranslation();
   const { activeRunId, runs, setRoster, setRuns, setActiveRun, applyEvent, commandCenterTab: tab,
     requestCommandCenterTab: setTab, selectedId, activeProjectId } = useStore();
   const [goal, setGoal] = useState('make test_add pass');
@@ -70,27 +73,30 @@ export function App() {
       <main style={{ display: 'grid', gridTemplateRows: 'auto 1fr auto auto', gap: 8, minHeight: 0 }}>
         <PixelPanel title="Agent Converge">
           <form onSubmit={(e) => { e.preventDefault(); void start(); }} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label htmlFor="goal" style={{ position: 'absolute', left: -9999 }}>Goal</label>
+            <label htmlFor="goal" style={{ position: 'absolute', left: -9999 }}>{t('lab.goal')}</label>
             <input id="goal" value={goal} onChange={(e) => setGoal(e.target.value)}
               style={{ flex: 1, fontFamily: 'var(--cth-font-mono)', padding: 6 }} />
             <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', whiteSpace: 'nowrap' }}>
-              <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} /> demo (offline)
+              <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} /> {t('lab.demoOffline')}
             </label>
-            <PixelButton onClick={() => void start()}>Run</PixelButton>
+            <select aria-label={t('lab.language')} value={i18n.resolvedLanguage ?? 'en'} onChange={(e) => setLanguage(e.target.value)}>
+              {LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+            </select>
+            <PixelButton onClick={() => void start()}>{t('lab.run')}</PixelButton>
           </form>
           <Status error={error} />
         </PixelPanel>
-        <section aria-label="Office floor" style={{ position: 'relative', minHeight: 0 }}>
+        <section aria-label={t('lab.officeFloor')} style={{ position: 'relative', minHeight: 0 }}>
           <OfficeFloor />
         </section>
         {detail?.pending_approval && <ApprovalBar runId={detail.run.id} approval={detail.pending_approval} />}
         <AgentStrip />
       </main>
       <aside style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 8, minHeight: 0 }}>
-        <nav role="tablist" aria-label="Console" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <nav role="tablist" aria-label={t('lab.console')} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {TABS.map((t) => (
             <PixelButton key={t.key} size="sm" variant={t.key === tab ? 'primary' : 'secondary'} onClick={() => setTab(t.key)}>
-              {t.label}
+              {i18n.t(`lab.${t.label}`)}
             </PixelButton>
           ))}
         </nav>
@@ -98,7 +104,7 @@ export function App() {
           {selectedId && <AgentDetail />}
           {tab === 'runs' && (
             <>
-              <PixelPanel title="Runs">
+              <PixelPanel title={t('lab.runs')}>
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                   {runs.map((r) => (
                     <li key={r.id}>

@@ -98,6 +98,7 @@ function detectLanguage(): string {
 
 /** Switch language now and persist the choice for next launch. */
 export function setLanguage(lng: string): void {
+  if (!SUPPORTED.includes(lng)) return;
   void i18n.changeLanguage(lng);
   try { window.localStorage.setItem(STORAGE_KEY, lng); } catch { /* best-effort */ }
 }
@@ -123,3 +124,10 @@ void i18n
   });
 
 export default i18n;
+
+function updateDocumentLanguage(lng: string): void {
+  document.documentElement.lang = lng;
+  document.documentElement.dir = directionFor(lng);
+}
+i18n.on('languageChanged', updateDocumentLanguage);
+updateDocumentLanguage(i18n.resolvedLanguage ?? 'en');

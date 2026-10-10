@@ -14,9 +14,9 @@ Design doc (source of truth): [`docs/DISCOVERY.md`](docs/DISCOVERY.md). Phases a
 
 ## Current status
 
-P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and in-memory knowledge/project services. Next: P1 real gateway + Docker gate validation, then P2 persistence and resume.
+P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and in-memory knowledge/project services. The real gateway and Docker Python gate are connected. Next: P2 persistence and resume, followed by project-specific scheduling modes.
 
-Verified on 2026-10-09: 71 backend tests, 14 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runtime/project/memory state is not yet persisted. Real-model convergence and Docker gates remain unverified.
+Verified on 2026-10-09: 75 backend tests, 14 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runtime/project/memory state is not yet persisted. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
 
 ## Layout
 
@@ -37,6 +37,20 @@ uv run agentlab config-check
 uv run agentlab demo
 uv run pytest
 ```
+
+## Real gateway and Docker validation
+
+```bash
+colima start --cpu 4 --memory 8
+docker build -t agentlab/gate-python:latest docker/gate-python
+docker compose up -d postgres
+uv run agentlab ping
+uv run agentlab smoke --trials 3
+```
+
+`smoke` uses fresh copies of `evals/tasks/py-fix-add`, verifies failing baseline tests, and stops at human signoff. Reports stay in `.agentlab/smoke/`. Docker is the default sandbox; the offline demo continues to use a local sandbox. Python gate dependencies must be baked into the image; dependency installation and network-backed vulnerability auditing are not yet supported by the offline gate. PostgreSQL is deployed, but application persistence is still pending.
+
+The interface supports English / 简体中文 through the top selector or Settings, with a saved browser preference.
 
 ## Plugging in your LLM gateway
 

@@ -1,3 +1,5 @@
+import { LANGUAGES, setLanguage } from '@/i18n';
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api, type SettingView } from '@/api/client';
 import { PixelPanel } from '@/components/PixelPanel';
@@ -13,6 +15,7 @@ const LABELS: Record<string, { label: string; hint: string; placeholder: string 
 };
 
 export function SettingsView() {
+  const { t, i18n } = useTranslation();
   const [views, setViews] = useState<SettingView[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState(false);
@@ -30,7 +33,7 @@ export function SettingsView() {
       setViews(await api.saveSettings(values));
       setDrafts({});
       setReveal(false);
-      setOk('Saved. New runs use these values.');
+      setOk(t('lab.savedNewRunsUseTheseValues'));
     } catch (e) {
       setError(errorText(e));
     }
@@ -38,33 +41,40 @@ export function SettingsView() {
 
   return (
     <>
-      <PixelPanel title="LLM gateway">
+      <PixelPanel title={t('lab.language')}>
+        <Field id="interface-language" label={t('lab.language')} hint={t('lab.languageHint')}>
+          <select id="interface-language" style={inputStyle} value={i18n.resolvedLanguage ?? 'en'} onChange={(e) => setLanguage(e.target.value)}>
+            {LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+          </select>
+        </Field>
+      </PixelPanel>
+      <PixelPanel title={t('lab.llmGateway')}>
         <form onSubmit={(e) => { e.preventDefault(); void save(); }} autoComplete="off">
           {views.map((v) => {
             const meta = LABELS[v.key] ?? { label: v.key, hint: '', placeholder: '' };
             const id = `setting-${v.key}`;
             return (
-              <Field key={v.key} id={id} label={meta.label}
-                hint={`${meta.hint}${v.is_set ? ` Current: ${v.display}` : ' Not set.'}`}>
+              <Field key={v.key} id={id} label={v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.gatewayBaseUrl') : v.key === 'AGENTLAB_LLM_API_KEY' ? t('lab.apiKey') : meta.label}
+                hint={`${v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.openaiCompatibleEndpointEGHttpsGatewayV1') : t('lab.savedToTheLocalEnvChmod600NeverSentBackToTheBrowser')} ${v.is_set ? t('lab.current', { value: v.display }) : t('lab.notSet')}`}>
                 <input id={id} style={inputStyle} spellCheck={false} autoComplete="off"
                   type={v.secret && !reveal ? 'password' : 'text'}
-                  placeholder={v.secret ? (v.is_set ? v.display : meta.placeholder) : (v.display || meta.placeholder)}
+                  placeholder={v.secret ? (v.is_set ? v.display : t('lab.pasteANewKeyToReplace')) : (v.display || meta.placeholder)}
                   value={drafts[v.key] ?? ''}
                   onChange={(e) => setDrafts((d) => ({ ...d, [v.key]: e.target.value }))} />
               </Field>
             );
           })}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <PixelButton onClick={() => void save()}>Save</PixelButton>
+            <PixelButton onClick={() => void save()}>{t('lab.save')}</PixelButton>
             <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
               <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />
-              show what I'm typing
+              {t('lab.showWhatIMTyping')}
             </label>
           </div>
           <Status error={error} ok={ok} />
         </form>
       </PixelPanel>
-      <PixelPanel title="Office">
+      <PixelPanel title={t('lab.office')}>
         <OfficeThemePicker />
       </PixelPanel>
     </>

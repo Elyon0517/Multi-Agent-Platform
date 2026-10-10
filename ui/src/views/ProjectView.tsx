@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Project, type ProjectStep, type StepStatus } from '@/api/client';
 import { PixelPanel } from '@/components/PixelPanel';
@@ -16,6 +17,7 @@ function phaseStatus(steps: ProjectStep[]): StepStatus {
 }
 
 function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; runtime?: string }) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [workspace, setWorkspace] = useState('');
@@ -23,7 +25,7 @@ function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; r
   const [error, setError] = useState<string | null>(null);
 
   const create = async () => {
-    if (!name.trim() || !goal.trim() || !workspace.trim()) { setError('name, goal and workspace are required'); return; }
+    if (!name.trim() || !goal.trim() || !workspace.trim()) { setError(t('lab.nameGoalAndWorkspaceAreRequired')); return; }
     setBusy(true);
     setError(null);
     try {
@@ -37,16 +39,16 @@ function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; r
   };
 
   return (
-    <PixelPanel title="New project">
+    <PixelPanel title={t('lab.newProject')}>
       <form onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <Field id="p-name" label="Name"><input id="p-name" style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field id="p-goal" label="Goal" hint="The project-planner (root model) breaks this into phases and steps.">
+        <Field id="p-name" label={t('lab.name')}><input id="p-name" style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field id="p-goal" label={t('lab.goal')} hint={t('lab.theProjectPlannerRootModelBreaksThisIntoPhasesAndSteps')}>
           <textarea id="p-goal" rows={3} style={inputStyle} value={goal} onChange={(e) => setGoal(e.target.value)} />
         </Field>
-        <Field id="p-ws" label="Workspace path (git repo)">
+        <Field id="p-ws" label={t('lab.workspacePathGitRepo')}>
           <input id="p-ws" style={inputStyle} value={workspace} placeholder="/Users/…/my-repo" onChange={(e) => setWorkspace(e.target.value)} />
         </Field>
-        <PixelButton disabled={busy} onClick={() => void create()}>{busy ? 'planning…' : 'Create & plan'}</PixelButton>
+        <PixelButton disabled={busy} onClick={() => void create()}>{busy ? t('lab.planning') : t('lab.createPlan')}</PixelButton>
         <Status error={error} />
       </form>
     </PixelPanel>
@@ -54,6 +56,7 @@ function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; r
 }
 
 export function ProjectView({ runtime, onRunStarted }: { runtime?: string; onRunStarted: (runId: string) => void }) {
+  const { t } = useTranslation();
   const activeProjectId = useStore((s) => s.activeProjectId);
   const setActiveProject = useStore((s) => s.setActiveProject);
   const runs = useStore((s) => s.runs);
@@ -89,8 +92,8 @@ export function ProjectView({ runtime, onRunStarted }: { runtime?: string; onRun
 
   return (
     <>
-      <PixelPanel title="Projects">
-        {projects.length === 0 && <Muted>No projects yet.</Muted>}
+      <PixelPanel title={t('lab.projects')}>
+        {projects.length === 0 && <Muted>{t('lab.noProjectsYet')}</Muted>}
         <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {projects.map((p) => (
             <li key={p.id}>
@@ -122,15 +125,15 @@ export function ProjectView({ runtime, onRunStarted }: { runtime?: string; onRun
                       <span aria-label={step.status} style={{ width: 8, height: 8, background: DOT[step.status], flexShrink: 0 }} />
                       <span style={{ flex: 1, textDecoration: step.status === 'done' ? 'line-through' : undefined }}>{step.title}</span>
                       {step.status !== 'done' && step.status !== 'doing' && (
-                        <PixelButton size="sm" onClick={() => void startStep(step)}>run</PixelButton>
+                        <PixelButton size="sm" onClick={() => void startStep(step)}>{t('lab.run')}</PixelButton>
                       )}
                       {step.status !== 'done' && (
-                        <PixelButton size="sm" variant="secondary" onClick={() => void setStatus(step, 'done')}>mark done</PixelButton>
+                        <PixelButton size="sm" variant="secondary" onClick={() => void setStatus(step, 'done')}>{t('lab.markDone')}</PixelButton>
                       )}
                     </div>
                     {step.run_ids.length > 0 && (
                       <div style={{ color: 'var(--cth-ink-500)', fontSize: 11 }}>
-                        runs: {step.run_ids.map((id) => (
+                        {t('lab.runLinks')} {step.run_ids.map((id) => (
                           <button key={id} type="button" onClick={() => onRunStarted(id)}
                             style={{ all: 'unset', cursor: 'pointer', textDecoration: 'underline', marginRight: 6 }}>{id}</button>
                         ))}

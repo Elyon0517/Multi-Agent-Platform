@@ -115,3 +115,21 @@ async def test_workspace_escape_blocked(tmp_path: Path) -> None:
     for bad in ("../x.py", ".git/config", "/etc/passwd"):
         with pytest.raises(WorkspaceEscape):
             ws.apply_edits([FileEdit(path=bad, content="x")])
+
+
+async def test_agents_receive_current_source_after_each_edit(cfg: AppConfig, tmp_path: Path) -> None:
+    scripts = demo_scripts()
+    seen: dict[str, list[str]] = {}
+
+    def capture(role: str) -> Script:
+        def script(inp: AgentInput) -> BaseModel:
+            seen.setdefault(role, []).append(inp.context["files"]["calc.py"])
+            return scripts[role](inp)
+        return script
+
+    d = await make_driver(cfg, tmp_path, {role: capture(role) for role in scripts})
+    run = await d.run(d.create("fix add").id)
+    assert run.paused_reason == "signoff"
+    assert "return a - b" in seen["coder"][0]
+    assert "return a * b" in seen["coder"][1]
+    assert all("return a + b" in text for text in seen["correctness-reviewer"])

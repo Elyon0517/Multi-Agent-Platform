@@ -1,18 +1,20 @@
+import { useTranslation } from 'react-i18next';
 import { PixelPanel } from '@/components/PixelPanel';
 import type { RunDetail } from '@/api/client';
 
 export function RunTimeline({ detail }: { detail: RunDetail }) {
+  const { t } = useTranslation();
   const { run, steps } = detail;
   return (
-    <PixelPanel title={`Run ${run.id} · ${run.status}`}>
+    <PixelPanel title={t('lab.runTitle', { id: run.id, status: run.status })}>
       <p style={{ margin: '0 0 8px' }}>
-        {run.goal} · {run.cost_cents.toFixed(2)} / {run.budget_cents.toFixed(0)}c · tokens {run.tokens_in + run.tokens_out}
-        {run.paused_reason && <strong> · paused: {run.paused_reason}</strong>}
+        {run.goal} · {run.cost_cents.toFixed(2)} / {run.budget_cents.toFixed(0)}c · {t('lab.tokens')} {run.tokens_in + run.tokens_out}
+        {run.paused_reason && <strong> · {t('lab.paused')}: {run.paused_reason}</strong>}
       </p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--cth-font-mono)', fontSize: 11 }}>
         <thead>
-          <tr><th scope="col">#</th><th scope="col">role</th><th scope="col">model</th>
-            <th scope="col">cost</th><th scope="col">attempts</th></tr>
+          <tr><th scope="col">#</th><th scope="col">{t('lab.role')}</th><th scope="col">{t('lab.model')}</th>
+            <th scope="col">{t('lab.cost')}</th><th scope="col">{t('lab.attempts')}</th></tr>
         </thead>
         <tbody>
           {steps.map((s) => (

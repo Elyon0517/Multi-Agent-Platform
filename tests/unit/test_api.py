@@ -33,3 +33,16 @@ def test_missing_gateway_is_a_clear_400(tmp_path: Path) -> None:
     with TestClient(create_app(svc)) as client:
         res = client.post("/runs", json={"goal": "x", "language": "python"})
         assert res.status_code == 400 and "AGENTLAB_LLM_BASE_URL" in res.json()["detail"]
+
+
+def test_project_run_rejects_wrong_workspace_and_unknown_step(tmp_path: Path) -> None:
+    svc = build_services(Settings(config_dir=CONFIG_DIR, data_dir=tmp_path, runtime="fake",
+                                  env_file=tmp_path / ".env", _env_file=None))  # type: ignore[call-arg]
+    project = svc.projects.create("p", "goal", str(tmp_path / "workspace"))
+    with TestClient(create_app(svc)) as client:
+        assert client.post("/runs", json={"goal": "x", "project_id": project.id,
+                                           "workspace": str(tmp_path / "other")}).status_code == 422
+        assert client.post("/runs", json={"goal": "x", "project_id": project.id,
+                                           "step_id": "missing"}).status_code == 404
+        assert client.post("/runs", json={"goal": "x", "project_id": "missing"}).status_code == 404
+        assert not svc.store.list_runs()

@@ -209,7 +209,9 @@ class Driver:
         ctx = RunContext(run=run, check_budget=guard.check)
         for role in roles:
             self._emit(run, EventType.STEP_STARTED, actor=role, role=role, iteration=inp.iteration)
-        inputs = {r: inp.model_copy(update={"context": await self._context(run, r, inp)}) for r in roles}
+        files = await self.workspace.context_files()
+        inputs = {r: inp.model_copy(update={"context": {**inp.context, "files": files,
+                                                       **await self._context(run, r, inp)}}) for r in roles}
         if len(roles) == 1:
             results = [await self.runtime.run_agent(roles[0], inputs[roles[0]], out, ctx)]
         else:

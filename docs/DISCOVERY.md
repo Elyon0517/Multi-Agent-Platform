@@ -1,6 +1,6 @@
 # Agent Converge Discovery
 
-> 状态：v1.2 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，下一步 P1 · 可持续更新
+> 状态：v1.2 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
 > 最近更新：2026-10-09
 > 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -488,6 +488,16 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] munder 补全：AgentStrip/AgentCard、AgentDetail（RecentText / ToolWaterfall / ThreadsPanel）、OfficeThemePicker、AskMeTab、TaskDetailOverlay、Activity
 - [x] 测试：pytest 71、vitest 14；浏览器实测 settings / 换主题 / project→run→ask me 反馈→approve→进度打勾全流程
 
+### 16.1c P1 实测（2026-10-09）
+- [x] Colima（4 CPU / 8 GB）启动，Postgres + pgvector healthy；应用存储仍是内存版，未接数据库。
+- [x] `agentlab ping` 四个模型别名验证 Chat Completions、JSON 与 usage；目前全部暂用 `gpt-6-astra`。费用、上下文与工具能力配置仍未核实。
+- [x] `agentlab smoke --trials 3`：3/3 从失败测试收敛到 signoff，每次 1 轮；原测试保持不变，完整 Docker Gate 通过，停在人工终审，无自动批准。
+- [x] Python 镜像预装 pytest / mypy / ruff，默认 non-root、断网、只读 rootfs；超时清理容器。字节码与检查缓存放在容器 /tmp。
+- [x] 文件上下文每次调用刷新；修正 Coder prompt 与 FileEdit 输出结构；project run 继承 workspace 并验证 project/step 归属。
+- [x] 后端 75 项测试、ruff、mypy；前端 14 项测试与生产构建通过。界面中英文选择与偏好保存已接入。
+- [!] 离线 Gate 以 compileall 替代 uv sync；目标项目依赖须预装到镜像。联网 pip-audit 暂未接入，Gate 不代表依赖安全审计。
+- [!] 对项目隔离、两种调度模式、对话侧栏的完整实现仍见 §16.4；P1 不代表这些功能已经完成。
+
 ### 16.2 已知缺口（P0 中有配置或骨架，但尚未接线）
 
 | 项 | 现状 | 归属 Phase |
@@ -500,22 +510,22 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 已配置，未强制执行 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
-| Gate 镜像 | `docker/` 为空；DockerSandbox 未实测跑过 Gate | P1（Python）/ P5（其余） |
+| Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言尚未建镜像 | P5 |
 | Gate 诊断表、成本看板 | UI 未做 | P4 |
 | `step.prompt_ref / response_ref` | 字段已有，未写入 blob | P2 |
 | UI 类型 | 手写 TS 类型，未用 openapi-typescript 生成 | P4 |
 
 ### 16.3 接下来的步骤
 
-#### P1 · S0 Walking Skeleton（下一步，半天–1 天）
+#### P1 · S0 Walking Skeleton（Python 固定任务验证完成）
 目标：真实模型 + 真实沙箱，Coder 把一个小 repo 的失败测试改绿。
 - [x] Colima 启动；`docker compose up` 起 Postgres + pgvector
-- [!] 用户提供网关：`.env` 填 `AGENTLAB_LLM_BASE_URL` / `AGENTLAB_LLM_API_KEY`；`config/models.yaml` 填真实模型 id
-- [ ] `agentlab ping`：对每个别名发一次最小请求，验证连通、JSON 输出、usage 字段
-- [ ] 用真实网关跑 `RawRuntime`，修正 prompt 格式与结构化输出问题
-- [ ] 建 `docker/gate-python` 镜像；Gate 默认走 `DockerSandbox`
-- [ ] Coder 输入加入相关文件内容（当前只给 goal / plan / diff）
-- [ ] 准备 `evals/tasks/py-fix-add` 作为第一个固定任务
+- [x] 用户提供网关：`.env` 填 `AGENTLAB_LLM_BASE_URL` / `AGENTLAB_LLM_API_KEY`；`config/models.yaml` 填真实模型 id
+- [x] `agentlab ping`：对每个别名发一次最小请求，验证连通、JSON 输出、usage 字段
+- [x] 用真实网关跑 `RawRuntime`，修正 prompt 格式与结构化输出问题
+- [x] 建 `docker/gate-python` 镜像；Gate 默认走 `DockerSandbox`
+- [x] Planner / Coder / Reviewer 输入加入当前文件内容（有大小上限，排除隐藏文件、敏感文件名、二进制与软链接）
+- [x] 准备 `evals/tasks/py-fix-add` 作为第一个固定任务
 - 演示：`agentlab run "make tests pass" -w <小repo>` 用真实模型改绿
 - 完成标准：真实模型下 3 次运行中至少 2 次自动收敛到 signoff
 
@@ -569,6 +579,33 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 #### P8 · S6 Eval（持续，P1 起就开始积累）
 - [ ] 10 个固定回归任务；`agentlab eval` 输出评分卡
 - 评分卡结构（摘自 homerail `scorecard.ts`，无需再查原 repo）：每项 check = `{name, passed, severity(hard|soft), gate, source_type, detail}`；汇总 = `{run_id, passed, verdict, score, total, hard_error_count, soft_warning_count, blind_spot_count, categories: {name: passed}}`；任一 hard 失败即 FAIL，soft 只计数；CLI 退出码 = passed ? 0 : 1，便于 CI
+
+---
+
+## 16.4 项目级调度模式与隔离要求（2026-10-09 补充）
+
+用户要求两种模式，创建 project 时选择，并能在控制台修改后用于后续 run：
+
+| 模式 | 用户配置 | 调度行为 |
+|---|---|---|
+| Root 自动分派 | root 模型、项目目标、可用模型目录与预算 | root 在允许的模型目录中选择其他 agent 的模型、分配任务；决策结构化校验并记录 |
+| 完全手动 | root 及其他 agent 的模型与任务 | 严格执行用户的角色/模型/任务绑定，root 不自行改写绑定 |
+
+模型目录为平台共享的可用 model ID 和能力/价格信息；模型与任务绑定为 project 私有配置。root 使用 supervisor 角色；project-planner 随该项目 root 配置。预算、Gate、评审收敛与危险操作审批继续由确定性代码执行。手动绑定不得被未授权 fallback 改变。创建 run 保存配置快照；控制台修改仅影响新 run。
+
+界面：左侧常驻 project 列表，展开显示该项目的对话；中央显示当前对话与 Office，右侧控制台显示当前项目的模型、任务与审批。对话需独立 thread_id 与消息历史，thread 下可有多个 run；现有 run 时间线不等同于对话。
+
+隔离：project 各自拥有 workspace、模型/任务配置、对话、运行记录、预算与记忆；agent 私有记忆按 project × role 归属。global 知识为明确共享的个人知识，项目私有文档不得进入 global。切换 project 同步切换 run、agent 状态、事件、看板、审批和检索范围；后端校验 project/thread/run/step 归属。workspace 路径重叠需要检测；并发修改同一仓库需要独立 worktree/沙箱。
+
+当前检查结果（以上是目标，尚未完整实现）：
+- `auto/manual` YAML 有配置，Driver 尚未调用 supervisor，固定状态机仍负责调度。
+- `Project` 没有模式、角色模型与任务字段；runtime/roster 使用全局模型策略。
+- 非 global 记忆检索按 project_id 过滤；global 知识有意共享。
+- `/runs` 返回全量记录；UI runs/tasks/agent 状态没有完整按项目隔离，切换 project 只改 activeProjectId。
+- `/runs` 未根据 project_id 继承 workspace：控制台不传 workspace 时会使用 demo workspace；需要先验证项目、继承路径并校验 step 归属，随后创建 run。
+- 未实现对话 thread/message 数据模型，数据仍为内存存储；Docker/workspace 边界与数据库隔离尚待验证。
+
+实施顺序：先修复项目归属/workspace/界面状态隔离，再实现项目配置与 run 快照、两种调度路径及选择界面，随后接入持久化与对话。
 
 ---
 

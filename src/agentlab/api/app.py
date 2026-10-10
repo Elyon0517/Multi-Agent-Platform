@@ -82,6 +82,18 @@ def create_app(svc: Services | None = None) -> FastAPI:
 
     @app.post("/runs", response_model=Run)
     async def create_run(body: CreateRun) -> Run:
+        if body.project_id:
+            try:
+                project = svc.projects.get(body.project_id)
+                if body.step_id:
+                    project.find_step(body.step_id)
+            except (KeyError, StopIteration) as e:
+                raise HTTPException(404, "project or step not found") from e
+            if body.workspace and Path(body.workspace).resolve() != Path(project.workspace).resolve():
+                raise HTTPException(422, "workspace must match the selected project")
+            body.workspace = project.workspace
+        elif body.step_id:
+            raise HTTPException(422, "step_id requires project_id")
         ws = Path(body.workspace) if body.workspace else seed_demo_workspace(
             Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
         try:

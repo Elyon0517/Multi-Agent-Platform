@@ -142,13 +142,17 @@ def test_global_upload_project_plan_and_run_feed_memory_and_progress(tmp_path: P
         assert up["source"] == "cv.pdf" and up["chunks"] >= 1
         assert c.post("/knowledge", files={"file": ("x.docx", b"x", "application/octet-stream")}).status_code == 422
 
+        from agentlab.demo import seed_demo_workspace
+
+        workspace = seed_demo_workspace(tmp_path / "workspace")
         project = c.post("/projects", json={"name": "calc", "goal": "Python calc library",
-                                            "workspace": str(tmp_path), "runtime": "fake"}).json()
+                                            "workspace": str(workspace), "runtime": "fake"}).json()
         assert [p["title"] for p in project["phases"]] == ["Foundation", "Polish"]
         step = project["phases"][0]["steps"][0]
 
         run = c.post("/runs", json={"goal": "Python calc add", "runtime": "fake", "language": "python",
                                     "project_id": project["id"], "step_id": step["id"]}).json()
+        assert Path(run["workspace"]) == workspace.resolve()
         assert c.get(f"/projects/{project['id']}").json()["phases"][0]["steps"][0]["status"] == "doing"
         for _ in range(100):
             if c.get(f"/runs/{run['id']}").json()["run"]["status"] == "WAITING_HUMAN":

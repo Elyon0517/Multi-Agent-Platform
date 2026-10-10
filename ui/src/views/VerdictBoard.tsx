@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { PixelPanel } from '@/components/PixelPanel';
 import { api, type RunDetail } from '@/api/client';
@@ -6,6 +7,7 @@ interface Finding { severity: string; category: string; file: string; line: numb
 interface Verdict { reviewer_id: string; verdict: string; findings: Finding[] }
 
 export function VerdictBoard({ detail }: { detail: RunDetail }) {
+  const { t } = useTranslation();
   const [verdicts, setVerdicts] = useState<Verdict[]>([]);
   const reviewIds = detail.artifacts.filter((a) => a.kind === 'review').slice(-3).map((a) => a.id).join(',');
 
@@ -17,7 +19,7 @@ export function VerdictBoard({ detail }: { detail: RunDetail }) {
 
   if (verdicts.length === 0) return null;
   return (
-    <PixelPanel title="Review panel (latest round)">
+    <PixelPanel title={t('lab.reviewPanelLatestRound')}>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${verdicts.length}, 1fr)`, gap: 6 }}>
         {verdicts.map((v) => (
           <section key={v.reviewer_id} aria-label={v.reviewer_id}>

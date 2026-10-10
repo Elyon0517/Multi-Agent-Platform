@@ -8,7 +8,7 @@ from pathlib import Path
 from agentlab.core.ports import ExecResult
 
 SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "DATABASE_URL")
-GATE_ENV = {"PYTHONDONTWRITEBYTECODE": "1"}
+GATE_ENV = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": "/tmp/agentlab-pycache"}
 
 
 def scrubbed_env() -> dict[str, str]:

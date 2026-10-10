@@ -36,6 +36,37 @@ class GitWorkspace:
             raise RuntimeError(f"git {' '.join(args)} failed: {res.stderr.strip()}")
         return res.stdout
 
+    async def context_files(self) -> dict[str, str]:
+        """Bounded source context; never include secret files, symlinks or binaries."""
+        paths = (await self._git("ls-files", "-z", "--cached", "--others", "--exclude-standard")).split("\0")
+        files: dict[str, str] = {}
+        remaining = 64_000
+        for rel in sorted(set(paths)):
+            if not rel or len(files) >= 40 or remaining <= 0:
+                continue
+            parts = Path(rel).parts
+            if any(part.startswith(".") or part in {"node_modules", "dist", "venv", "__pycache__"}
+                   for part in parts):
+                continue
+            if any(word in Path(rel).name.lower() for word in ("secret", "credential", "private", ".pem", ".key")):
+                continue
+            candidate = self.root / rel
+            if candidate.is_symlink():
+                continue
+            try:
+                path = self._resolve(rel)
+                if not path.is_file() or path.stat().st_size > 100_000:
+                    continue
+                text = path.read_text()
+            except (OSError, UnicodeError, WorkspaceEscape):
+                continue
+            if "\0" in text:
+                continue
+            limit = min(12_000, remaining)
+            files[rel] = text[:limit] + ("\n[truncated]" if len(text) > limit else "")
+            remaining -= len(files[rel])
+        return files
+
     async def ensure_repo(self) -> None:
         if not (self.root / ".git").exists():
             await self._git("init", "-q")

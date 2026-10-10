@@ -16,11 +16,13 @@ def test_generic_parser_ruff_mypy() -> None:
 
 
 def test_docker_argv_is_locked_down(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    (tmp_path / ".env").write_text("API_KEY=do-not-expose")
     argv = DockerSandbox("img").build_argv(["pytest"], tmp_path, None, network=False)
     for flag in ("--cap-drop=ALL", "--read-only", "--pids-limit"):
         assert flag in argv
     assert argv[argv.index("--network") + 1] == "none"
     assert argv[-2:] == ["img", "pytest"]
+    assert "type=bind,src=/dev/null,dst=/workspace/.env,readonly" in argv
 
 
 def test_secrets_never_reach_sandbox(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -28,3 +30,34 @@ def test_secrets_never_reach_sandbox(monkeypatch) -> None:  # type: ignore[no-un
     monkeypatch.setenv("AGENTLAB_DATABASE_URL", "postgres://x")
     env = scrubbed_env()
     assert "AGENTLAB_LLM_API_KEY" not in env and "AGENTLAB_DATABASE_URL" not in env
+
+
+async def test_source_context_excludes_secrets_binaries_and_escapes(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from agentlab.adapters.workspace import GitWorkspace
+
+    (tmp_path / "calc.py").write_text("value = 1\n")
+    (tmp_path / ".env").write_text("API_KEY=do-not-send\n")
+    (tmp_path / "credentials.json").write_text('{"key":"do-not-send"}')
+    (tmp_path / "image.png").write_bytes(b"\x00\xff")
+    outside = tmp_path.parent / "outside-context.txt"
+    outside.write_text("private content")
+    (tmp_path / "link.txt").symlink_to(outside)
+    ws = GitWorkspace(tmp_path)
+    await ws.ensure_repo()
+    assert await ws.context_files() == {"calc.py": "value = 1\n"}
+
+
+async def test_docker_timeout_removes_the_container(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from agentlab.core.ports import ExecResult
+
+    commands: list[list[str]] = []
+
+    async def execute(argv, cwd, timeout_s, env):  # type: ignore[no-untyped-def]
+        commands.append(argv)
+        return ExecResult(124, "", "", 100, timed_out=len(commands) == 1)
+
+    monkeypatch.setattr("agentlab.adapters.sandbox.docker.run_argv", execute)
+    result = await DockerSandbox("image").exec(["pytest"], tmp_path, 1)
+    name = commands[0][commands[0].index("--name") + 1]
+    assert result.timed_out
+    assert commands[1] == ["docker", "rm", "--force", name]

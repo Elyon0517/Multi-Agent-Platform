@@ -1,36 +1,40 @@
+# Initial gateway validation: all chat roles use verified gpt-6-astra.
+# Alias tiers remain routing labels; prices/context/tools below are provisional
+# estimates inherited from the prototype, not verified gateway metadata.
+# Embedding availability has not been verified.
 gateway:
   base_url_env: AGENTLAB_LLM_BASE_URL
   api_key_env: AGENTLAB_LLM_API_KEY
 
 aliases:
   root:
-    model: gpt-6.1
+    model: gpt-6-astra
     supports_tools: true
     structured_output: native
     ctx_window: 400000
     cost_in_per_1m_cents: 500
     cost_out_per_1m_cents: 2000
   strong:
-    model: gpt-5.5
+    model: gpt-6-astra
     supports_tools: true
     structured_output: native
     ctx_window: 400000
-    cost_in_per_1m_cents: 250
-    cost_out_per_1m_cents: 1000
+    cost_in_per_1m_cents: 500
+    cost_out_per_1m_cents: 2000
   strong-alt:
-    model: gpt-5.5
+    model: gpt-6-astra
     supports_tools: true
     structured_output: native
     ctx_window: 400000
-    cost_in_per_1m_cents: 250
-    cost_out_per_1m_cents: 1000
+    cost_in_per_1m_cents: 500
+    cost_out_per_1m_cents: 2000
   cheap:
-    model: gpt-5-mini
+    model: gpt-6-astra
     supports_tools: true
     structured_output: native
     ctx_window: 400000
-    cost_in_per_1m_cents: 25
-    cost_out_per_1m_cents: 200
+    cost_in_per_1m_cents: 500
+    cost_out_per_1m_cents: 2000
 
 tiers:
   root: 1

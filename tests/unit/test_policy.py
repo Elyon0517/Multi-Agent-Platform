@@ -34,10 +34,13 @@ class TestConfig:
 class TestRouting:
     def test_static(self, cfg: AppConfig) -> None:
         r = Router(cfg).resolve("supervisor")
-        assert (r.alias, r.model, r.reason) == ("root", "gpt-6.1", "static_policy")
+        assert (r.alias, r.model, r.reason) == ("root", cfg.models.aliases["root"].model, "static_policy")
 
     def test_sub_agents_use_different_model_same_gateway(self, cfg: AppConfig) -> None:
-        router = Router(cfg)
+        custom = cfg.model_copy(deep=True)
+        custom.models.aliases["root"].model = "test-root-model"
+        custom.models.aliases["cheap"].model = "test-worker-model"
+        router = Router(custom)
         assert router.resolve("supervisor").model != router.resolve("test-style-reviewer").model
 
     def test_whitelisted_override(self, cfg: AppConfig) -> None:

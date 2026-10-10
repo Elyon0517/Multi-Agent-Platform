@@ -15,4 +15,4 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     database_url: str | None = None
     runtime: str = "raw"
-    sandbox: str = "local"
+    sandbox: str = "docker"
