@@ -45,12 +45,13 @@ class FakeRuntime:
         else:
             result = self._scripts[role](inp)
         out = output_type.model_validate(result.model_dump())
+        usage = Usage(tokens_in=100, tokens_out=50, cost_cents=self._cost).for_call(role, "fake", "fake")
         return AgentResult[output_type](  # type: ignore[valid-type]
             role=role,
             output=out,
             alias="fake",
             model="fake",
-            usage=Usage(tokens_in=100, tokens_out=50, cost_cents=self._cost),
+            usage=usage,
             routing_reason="fake",
         )
 

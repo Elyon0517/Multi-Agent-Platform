@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any, Generic, Literal, TypeVar
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 
 def new_id() -> str:
@@ -226,6 +226,15 @@ class Usage(Strict):
     tokens_in: int = 0
     tokens_out: int = 0
     cost_cents: float = 0.0
+    _call: dict[str, Any] | None = PrivateAttr(default=None)
+
+    def for_call(
+        self, role: str, model_alias: str, model: str, call_id: str | None = None, metered: bool = True,
+    ) -> Usage:
+        usage = self.model_copy()
+        usage._call = {"role": role, "model_alias": model_alias, "model": model,
+                       "id": "call-" + (call_id or new_id()), "metered": metered}
+        return usage
 
 
 class Step(Strict):

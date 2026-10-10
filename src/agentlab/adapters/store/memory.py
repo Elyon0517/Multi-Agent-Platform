@@ -30,6 +30,9 @@ class InMemoryStore:
         self._run_locks: dict[str, threading.Lock] = {}
         self._checkpoints: dict[str, dict[str, Any]] = {}
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
+        self._usage: dict[str, dict[str, Any]] = {}
+        self._usage_totals: dict[str, dict[str, Any]] = {}
+        self._usage_undo: list[list[tuple[str, str, dict[str, Any] | None]]] = []
         self._runs: dict[str, Run] = {}
         self._iterations: dict[str, list[Iteration]] = defaultdict(list)
         self._steps: dict[str, list[Step]] = defaultdict(list)
@@ -51,12 +54,25 @@ class InMemoryStore:
                 "_records",
             )
             backup = {key: copy.deepcopy(getattr(self, key)) for key in fields}
+            undo: list[tuple[str, str, dict[str, Any] | None]] = []
+            self._usage_undo.append(undo)
             try:
                 yield
             except BaseException:
                 for key, value in backup.items():
                     setattr(self, key, value)
+                for identifier, role, previous in reversed(undo):
+                    del self._usage[identifier]
+                    if previous is None:
+                        self._usage_totals.pop(role, None)
+                    else:
+                        self._usage_totals[role] = previous
                 raise
+            else:
+                if len(self._usage_undo) > 1:
+                    self._usage_undo[-2].extend(undo)
+            finally:
+                self._usage_undo.pop()
 
     @contextmanager
     def lock_run(self, run_id: str) -> Iterator[None]:
@@ -79,6 +95,43 @@ class InMemoryStore:
     def put_record(self, kind: str, key: str, data: dict[str, Any]) -> None:
         with self._lock:
             self._records[kind, key] = copy.deepcopy(data)
+
+    def append_usage(self, data: dict[str, Any]) -> bool:
+        with self._lock:
+            identifier, role = data["id"], data["role"]
+            if identifier in self._usage:
+                return False
+            previous = copy.deepcopy(self._usage_totals.get(role))
+            if self._usage_undo:
+                self._usage_undo[-1].append((identifier, role, previous))
+            self._usage[identifier] = copy.deepcopy(data)
+            total = self._usage_totals.setdefault(role, {
+                "role": role, "calls": 0, "unmetered_calls": 0, "tokens_in": 0,
+                "tokens_out": 0, "total_tokens": 0, "cost_cents": 0.0, "models": [],
+            })
+            total["calls" if data["metered"] else "unmetered_calls"] += data.get("calls", 1)
+            for key in ("tokens_in", "tokens_out", "cost_cents"):
+                total[key] += data[key]
+            total["total_tokens"] = total["tokens_in"] + total["tokens_out"]
+            if data["model"] and data["model"] not in total["models"]:
+                total["models"].append(data["model"])
+                total["models"].sort()
+            return True
+
+    def usage_entries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(list(self._usage.values()))
+
+    def usage_by_role(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(list(self._usage_totals.values()))
+
+    def usage_recorded(self, call_id: str, source: str, ref_id: str) -> bool:
+        with self._lock:
+            return any(key in self._usage for key in (
+                "call-" + call_id, "legacy-attempt-" + call_id,
+                "legacy-turn-" + ref_id, "legacy-planning-" + ref_id,
+            ))
 
     def thread_record(self, thread_id: str, project_id: str | None) -> dict[str, Any] | None:
         row = self._records.get(("thread", thread_id))

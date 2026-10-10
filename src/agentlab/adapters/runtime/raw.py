@@ -84,6 +84,7 @@ class OpenAICompatChat:
                 if truncated
                 else Retryable("empty_response")
             )
+            error.usage_present = usage is not None
             error.tokens_in = usage.prompt_tokens if usage else 0
             error.tokens_out = usage.completion_tokens if usage else 0
             raise error
@@ -92,6 +93,7 @@ class OpenAICompatChat:
             usage.prompt_tokens if usage else 0,
             usage.completion_tokens if usage else 0,
             [t.model_dump(exclude_none=True) for t in message.tool_calls] if message and message.tool_calls else None,
+            usage_present=usage is not None,
         )
 
     async def _stream(
@@ -106,6 +108,7 @@ class OpenAICompatChat:
         text = ""
         calls: dict[int, dict[str, Any]] = {}
         tokens_in = tokens_out = 0
+        usage_present = False
         reason = None
         refusal = False
         try:
@@ -122,6 +125,7 @@ class OpenAICompatChat:
             async with stream:
                 async for chunk in stream:
                     if chunk.usage:
+                        usage_present = True
                         tokens_in, tokens_out = chunk.usage.prompt_tokens, chunk.usage.completion_tokens
                     if not chunk.choices:
                         continue
@@ -142,6 +146,7 @@ class OpenAICompatChat:
                             on_delta(text)
         except openai.OpenAIError as exc:
             error = classify(exc)
+            error.usage_present = usage_present  # type: ignore[attr-defined]
             error.tokens_in, error.tokens_out = tokens_in, tokens_out  # type: ignore[attr-defined]
             raise error from exc
         if refusal or reason == "content_filter" or reason == "length" or (not text and not calls):
@@ -152,9 +157,10 @@ class OpenAICompatChat:
                 if refusal or reason == "content_filter"
                 else Retryable("empty_response")
             )
+            error.usage_present = usage_present
             error.tokens_in, error.tokens_out = tokens_in, tokens_out
             raise error
-        return Completion(text, tokens_in, tokens_out, list(calls.values()) or None)
+        return Completion(text, tokens_in, tokens_out, list(calls.values()) or None, usage_present=usage_present)
 
 
 class OpenAICompatEmbedder:

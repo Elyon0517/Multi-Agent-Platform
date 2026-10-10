@@ -1,6 +1,6 @@
 # 验收清单：多模型交接与 Office 可视化
 
-在开始 Monitor 模块（P4）之前，用这份清单确认基础功能可用。自动化部分离线即可运行；真实模型部分会产生少量费用。
+这份清单覆盖 Monitor 模块（P4）的基础功能和用量验收。自动化部分离线即可运行；真实模型部分会产生少量费用。
 
 ## 一、自动化测试（离线，不花钱）
 
@@ -94,3 +94,20 @@ cd ui && npm run dev
 - 人物头顶显示 agent 名称（Root、Planner、Coder、各类 Reviewer），迭代次数与模型信息保留在详情中。
 
 可视化脚本的完整启动、备用端口和停止步骤见 [README](../README.md#scripted-office-acceptance-offline)。
+
+## Monitor 用量验收（v1.7）
+
+```bash
+uv run pytest -q tests/unit/test_monitor.py
+AGENTLAB_TEST_DATABASE_URL=postgresql://agentlab:agentlab@127.0.0.1:5432/agentlab uv run pytest -q tests/integration/test_persistence.py -k monitor
+cd ui && npm run build && npm test
+```
+
+- 两个项目各跑一个 fake 任务，再进行一轮 root 对话；`GET /monitor/usage` 跨项目累计调用数和输入/输出 token 与 step、root_turn 一致。
+- project-planner 和 root 原生上网搜索写入同一流水；失败返回 usage、JSON 修复、重试、零 token usage 分别计数；无 usage 的失败/超时单独计为未计量调用。
+- reviewer 合计与全部总计不重复相加；arbiter 不展示，未调用角色显示零值。
+- PostgreSQL 仅 base schema 建 usage_ledger；项目 schema 不克隆流水表。流水跟随用量事务回滚，重复升级不重复回填，历史 attempt 和 step 不重复计量。
+- 控制台 Monitor 顶部卡片显示总调用次数、总 token、估算美元费用和未计量次数；各 agent 明细显示 token、费用、输入/输出和模型，无需横向滚动，条形图按总 token 排序；进入标签立即刷新，保持打开时每 3 秒刷新，跨项目展示，无新增限制或告警。
+- 历史汇总无法还原缺失模型或逐调用 usage 状态时，模型显示 `unknown`，调用数使用旧记录已知次数，历史未计量次数存在精度限制（见 DISCOVERY §15.5）。
+
+Monitor 回归覆盖：从 `p2_recovery` 且项目缺少 `root_turn` 的数据库跨版本升级；真实 kill-9 请求恢复后仅补记一次，持锁活跃请求不补记；搜索响应保存失败仍保留实际 token 和搜索费用；SQL/内存汇总结果一致，嵌套事务回滚不复制旧流水，也不留下汇总数据。

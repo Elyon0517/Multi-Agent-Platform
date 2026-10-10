@@ -548,6 +548,11 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - 数据来源唯一：`usage_ledger`（§10）。所有拿到 usage 的地方（run 内的 agent 调用、root 对话与上网搜索、项目规划）都写同一张表。
 - 失败但网关返回了 usage 的调用也计入；没有返回 usage 的中断请求无法计量，单独显示「未计量调用」次数。
 - 不新增限制或告警，只做展示；预算仍由 §8 负责。
+- 已实现：base scope Alembic 迁移与一次性回填，run / root（含上网搜索）/ project-planner 逐调用流水，跨项目汇总 API 和控制台汇总卡片、agent 明细表、条形图，每 3 秒刷新；费用从 cents 转为美元显示，并标明估算。`metered` 区分已返回 usage（包括零 token）与未计量请求；`calls` 默认为 1，历史汇总行使用旧记录的 attempt_count。
+- 历史精度：有 attempt 记录的 run 优先回填逐调用数据，避免与 step 重复；其余回填 step / root_turn / planning 的累计 token、费用和已知调用数。旧对话的模型名、各 attempt 是否返回 usage 可能缺失，模型显示 `unknown`，无法精确重建历史未计量次数。新调用按实际 usage 状态记录。
+- 升级顺序：revision 仅创建 base scope 流水表；所有项目 schema 达到 head 后，在同一升级事务中统一回填，并在 base.state_record 保存一次性标记。因此可从 p2_recovery 跨版本升级，项目失败时连同流水/标记一起回滚。
+- 记账入口统一为 record_usage：UsageRecorder 同时处理预算与带 call ID 的流水，支持未直接记账的 runtime 返回值；元数据不进入 step/root 的 Usage JSON。后续保存失败时保留已返回的 provider 用量，不能降格为零 token 未计量请求。
+- 崩溃恢复：启动及 run 恢复/中断审批时补记无 usage 的 attempt，call ID 去重；启动补记先取得执行锁，跳过仍在其他进程执行的 run、对话和规划。Monitor 使用 SQL GROUP BY role，内存后端维护增量汇总及嵌套事务撤销日志，不复制历史流水。
 
 ---
 
@@ -564,7 +569,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
-| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型、Monitor 模块（v1.7，§15.5） |
+| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；Monitor 已实现（v1.7，§15.5）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
@@ -712,7 +717,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 #### P4 · S5a 可视化 v0 收尾（0.5–1 天）
 - [x] SSE 事件流、Office Floor 接事件流、Run 列表 / 时间线、评审对比、审批横幅
 - [ ] Gate 诊断表（file:line、code、message）
-- [ ] Monitor 模块（v1.7，§15.5）：`usage_ledger` 落库（迁移 + 在现有记账点追加写入）、`GET /monitor/usage` 按角色汇总、控制台 `monitor` 标签（表格 + 条形图）；历史 run 的 step 与 root_turn 用量一次性回填
+- [x] Monitor 模块（v1.7，§15.5）：`usage_ledger` 落库（迁移 + 在现有记账点追加写入）、`GET /monitor/usage` 按角色汇总、控制台 `monitor` 标签（表格 + 条形图）；历史 run 的 step 与 root_turn 用量一次性回填
   - 验收：跑一个 fake 任务 + 一轮对话后，root / planner / coder / 三个 reviewer 的调用次数与 token 和 step、root_turn 记录一致；跨两个项目的数据合并显示
 - [ ] openapi-typescript 生成类型，替换手写类型
 
@@ -782,7 +787,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 剩余需要产品确认或外部资料：
 - 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
 - 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
-- 当前所有聊天别名映射 gpt-6-astra；输入独立，不代表跨模型多样性。新增 Claude 等 provider 后仍需明确 provider/routing 配置。
+- 当前已启用跨厂商路由：planner / coder 的 Opus worker 别名通过 Anthropic 执行，其余角色按模型策略路由；Monitor 的模型列记录实际使用的模型，可同时显示多个厂商。
 - ADK、工具白名单执行、危险操作审批、summarizer、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
 
 ---

@@ -9,6 +9,7 @@ from agentlab.bootstrap import Services
 from agentlab.core.budget import BudgetGuard
 from agentlab.core.conversation import Message, RootTurn, Source
 from agentlab.core.llm.tools import tool_spec
+from agentlab.core.monitor import UsageRecorder, commit_result_usage
 from agentlab.core.ports import RunContext
 from agentlab.core.project_config import project_config
 from agentlab.core.schemas import AgentInput, Run, new_id
@@ -72,14 +73,17 @@ class SessionService:
         def started(payload: dict[str, Any]) -> str:
             aid = new_id()
             ref, _ = svc.blobs.put(json.dumps(payload, ensure_ascii=False))
-            record["attempts"].append({"id": aid, "prompt_ref": ref})
+            attempt_data: dict[str, Any] = {"id": aid, "prompt_ref": ref, "status": "in_flight"}
+            attempt_data.update({k: payload[k] for k in ("role", "alias", "model") if k in payload})
+            record["attempts"].append(attempt_data)
             record["prompt_ref"] = ref
             save()
             return aid
 
         def finished(aid: str, payload: dict[str, Any]) -> None:
             ref, _ = svc.blobs.put(json.dumps(payload, ensure_ascii=False))
-            next(a for a in record["attempts"] if a["id"] == aid)["response_ref"] = ref
+            next(a for a in record["attempts"] if a["id"] == aid).update(
+                response_ref=ref, **{k: payload[k] for k in ("usage", "status") if k in payload})
             record["response_ref"] = ref
             save()
 
@@ -154,7 +158,8 @@ class SessionService:
             check_budget=guard.check,
             reserve_budget=guard.reserve,
             release_budget=guard.release,
-            record_usage=guard.record,
+            record_usage=UsageRecorder(svc.store, "turn", turn_id, project_id, guard.record),
+            usage_transaction=svc.store.transaction,
             attempt_started=started,
             attempt_finished=finished,
             tool_specs=specs,
@@ -190,8 +195,8 @@ class SessionService:
                 },
             )
             result = await svc.runtime(cfg=cfg).run_agent("root", inp, RootTurn, ctx)
-            if not result.usage_recorded:
-                guard.record(result.usage)
+            commit_result_usage(ctx, result)
+            record.update(model_alias=result.alias, model=result.model)
             turn = result.output
             for source in web_sources:
                 if not any(s.ref == source.ref for s in turn.sources):

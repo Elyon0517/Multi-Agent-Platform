@@ -19,6 +19,7 @@ from agentlab.core.memory.store import (
     agent_ns,
     readable_namespaces,
 )
+from agentlab.core.monitor import UsageRecorder, commit_result_usage
 from agentlab.core.ports import AgentRuntime, RunContext, Store
 from agentlab.core.project import Project, ProjectPlan, StepStatus
 from agentlab.core.schemas import AgentInput, Run, RunStatus, Severity, Verdict, new_id, utcnow
@@ -161,8 +162,7 @@ class ProjectService:
             persist()
 
         def result_ready(result: Any) -> None:
-            if not result.usage_recorded:
-                record(result.usage)
+            commit_result_usage(ctx, result)
             project.phases = result.output.to_phases()
             attempt["status"] = "completed"
             attempt["result"] = result.output.model_dump(mode="json")
@@ -190,7 +190,7 @@ class ProjectService:
         ctx = RunContext(
             run,
             check_budget=guard.check,
-            record_usage=record,
+            record_usage=UsageRecorder(self.store, "planning", run.id, project.id, record) if self.store else record,
             reserve_budget=guard.reserve,
             release_budget=guard.release,
             on_result=result_ready,

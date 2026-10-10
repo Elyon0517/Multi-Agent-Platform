@@ -19,6 +19,7 @@ import { AgentDetail } from '@/views/AgentDetail';
 import { ActivityView } from '@/views/ActivityView';
 import { KnowledgeView } from '@/views/KnowledgeView';
 import { ProjectView } from '@/views/ProjectView';
+import { MonitorView } from '@/views/MonitorView';
 import { SettingsView } from '@/views/SettingsView';
 import { Status, errorText } from '@/views/ui';
 
@@ -29,7 +30,7 @@ const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'chat', label: 'conversation' },
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
   { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
-  { key: 'activity', label: 'activity' }, { key: 'settings', label: 'settings' },
+  { key: 'activity', label: 'activity' }, { key: 'monitor', label: 'monitor' }, { key: 'settings', label: 'settings' },
 ];
 
 export function App() {
@@ -181,6 +182,7 @@ export function App() {
               onJumpToMemory={(id) => { useStore.getState().select(id); setTab('memory'); }} />
           )}
           {tab === 'activity' && <ActivityView />}
+          {tab === 'monitor' && <MonitorView />}
           {tab === 'settings' && <SettingsView />}
         </div>
       </aside>

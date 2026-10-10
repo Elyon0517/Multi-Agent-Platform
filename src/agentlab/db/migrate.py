@@ -60,6 +60,10 @@ def upgrade(database_url: str, *, script_location: Path | None = None) -> None:
                         config.attributes["base_schema"] = base
                         command.upgrade(config, "head")
                     connection.execute(text(f"SET LOCAL search_path TO {quote(base)}, public"))
+                    config.attributes["migration_scope"] = "base"
+                    from agentlab.db.usage_backfill import backfill_usage
+
+                    backfill_usage(connection, base)
             finally:
                 connection.execute(text("SELECT pg_advisory_unlock(712460801)"))
                 connection.commit()

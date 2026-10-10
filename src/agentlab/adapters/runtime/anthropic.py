@@ -113,6 +113,7 @@ class AnthropicChat:
                     "output_truncated" if response.stop_reason == "max_tokens" else "content_policy_refusal"
                 )
             )
+            error.usage_present = True
             error.tokens_in, error.tokens_out = response.usage.input_tokens, response.usage.output_tokens
             raise error
         return Completion(text, response.usage.input_tokens, response.usage.output_tokens, calls or None, content)

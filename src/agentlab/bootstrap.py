@@ -202,6 +202,9 @@ def build_services(settings: Settings | None = None) -> Services:
 
         upgrade(s.database_url)
         store = PostgresStore(s.database_url)
+        from agentlab.core.monitor import recover_interrupted_calls
+
+        recover_interrupted_calls(store)
     memory = (
         PersistentMemoryStore(store, embedder)
         if not isinstance(store, InMemoryStore)

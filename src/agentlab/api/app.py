@@ -53,6 +53,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
     )
     app.include_router(build_router(svc))
 
+    from agentlab.core.monitor import MonitorUsage, summarize
+
+    @app.get("/monitor/usage", response_model=MonitorUsage)
+    def monitor_usage() -> MonitorUsage:
+        return summarize(svc.store, svc.cfg.agents)
+
     def spawn(driver: Driver, run_id: str) -> None:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)

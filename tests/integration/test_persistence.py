@@ -583,7 +583,7 @@ def test_new_revision_upgrades_existing_project_schemas_atomically(database_url,
     revision = scripts / "versions/schema_regression.py"
     revision.write_text("""from alembic import op
 revision = "schema_regression"
-down_revision = "root_alignment"
+down_revision = "usage_monitor"
 def upgrade():
     op.execute("ALTER TABLE run ADD COLUMN regression_marker text")
 """)
@@ -691,7 +691,7 @@ def test_project_upgrade_head_preserves_base_schema(database_url, tmp_path):
                 assert base_data() == rows_before
             (scripts / "versions/unsafe_base.py").write_text("""from alembic import op
 revision = "unsafe_base"
-down_revision = "root_alignment"
+down_revision = "usage_monitor"
 def upgrade():
     op.execute("ALTER TABLE run_directory ADD COLUMN unsafe_marker text")
 """)
@@ -762,3 +762,162 @@ def test_thread_append_contract(store):
     assert [m.seq for m in get_thread(store, thread.id, "project-a").messages] == [1, 2, 3]
     with pytest.raises(KeyError):
         get_thread(store, thread.id, "project-b")
+
+
+def test_monitor_ledger_is_shared_and_transactional(database_url):
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.core.monitor import UsageRecorder
+
+    store = PostgresStore(database_url)
+    for project_id in ('monitor-one', 'monitor-two'):
+        run = Run(goal='monitor', workspace='/tmp', project_id=project_id)
+        store.create_run(run)
+        from agentlab.core.schemas import Usage
+        UsageRecorder(store, 'run', run.id, project_id)(
+            Usage(tokens_in=100, tokens_out=50, cost_cents=0.1).for_call('coder', 'fake', 'fake'))
+    entries = store.usage_entries()
+    assert len(entries) == 2
+    assert {r['project_id'] for r in entries} == {'monitor-one', 'monitor-two'}
+    rows = store._query("SELECT table_schema FROM information_schema.tables WHERE table_name='usage_ledger'")
+    schemas = {r['table_schema'] for r in rows}
+    project_schemas = {r['schema_name'] for r in store._query('SELECT schema_name FROM project_schema')}
+    assert not schemas & project_schemas
+    from agentlab.db.migrate import upgrade
+    upgrade(database_url)
+    assert len(store.usage_entries()) == 2
+    with pytest.raises(RuntimeError), store.transaction():
+        UsageRecorder(store, 'turn', 'rollback', None)(
+            Usage(tokens_in=1, tokens_out=1).for_call('root', 'fake', 'fake'))
+        raise RuntimeError('rollback')
+    assert len(store.usage_entries()) == 2
+
+
+def test_monitor_legacy_backfill_is_once_and_does_not_duplicate_attempts(database_url):
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.migrate import upgrade
+
+    store = PostgresStore(database_url)
+    run = Run(project_id='legacy-monitor', goal='legacy', workspace='/tmp')
+    store.create_run(run)
+    store.add_iteration(Iteration(run_id=run.id, n=1, phase=RunStatus.CODING, diff_hash="legacy"))
+    step = Step(run_id=run.id, iteration_n=1, role='coder', model_alias='old', model='old-model',
+                usage={'tokens_in': 10, 'tokens_out': 5, 'cost_cents': 0.3}, attempt_count=2)
+    store.add_step(step)
+    for identifier, tin, tout in [('paid-one', 6, 3), ('paid-two', 4, 2)]:
+        store.put_record('attempt', identifier, {'id': identifier, 'run_id': run.id, 'role': 'coder',
+            'alias': 'old', 'model': 'old-model', 'batch_key': [run.id, 'CODING', 1, 'hash'],
+            'status': 'completed', 'usage': {'tokens_in': tin, 'tokens_out': tout, 'cost_cents': 0.15}})
+    store.put_record('thread', 'legacy-thread', {'id': 'legacy-thread', 'project_id': run.project_id})
+    store.put_record('root_turn', 'legacy-turn', {'id': 'legacy-turn', 'thread_id': 'legacy-thread',
+        'project_id': run.project_id, 'tokens_in': 7, 'tokens_out': 2, 'cost_cents': 0.1,
+        'attempts': [{'id': 'old-a'}, {'id': 'old-b'}]})
+    # Simulate a pre-Monitor database in this disposable fixture schema.
+    store._query('DROP TABLE usage_ledger')
+    store._query("DELETE FROM state_record WHERE kind='migration' AND key='usage_monitor_backfill'")
+    store._query("UPDATE alembic_version SET version_num='root_alignment'")
+    for pid in store._schemas():
+        store._query("UPDATE alembic_version SET version_num='root_alignment'", project_id=pid)
+    upgrade(database_url)
+    entries = store.usage_entries()
+    assert len(entries) == 3  # two attempts + one historical root aggregate
+    assert sum(e['tokens_in'] for e in entries) == 17
+    assert sum(e['tokens_out'] for e in entries) == 7
+    assert sum(e['calls'] for e in entries) == 4
+    assert next(e for e in entries if e['source'] == 'turn')['model'] == 'unknown'
+    upgrade(database_url)
+    assert store.usage_entries() == entries
+
+
+def test_monitor_upgrade_from_p2_recovery_with_old_project_schema(database_url):
+    import psycopg
+    from psycopg import sql
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.migrate import upgrade
+
+    store = PostgresStore(database_url)
+    run = Run(project_id='older-project', goal='legacy', workspace='/tmp')
+    store.create_run(run)
+    store.add_step(Step(run_id=run.id, iteration_n=1, role='coder', model_alias='old', model='old-model',
+                        usage={'tokens_in': 30, 'tokens_out': 10, 'cost_cents': 0.5}))
+    # Reconstruct the actual older shape, including registered projects missing root tables.
+    with psycopg.connect(database_url) as c:
+        base = c.execute('SELECT current_schema()').fetchone()[0]
+        projects = [row[0] for row in c.execute('SELECT schema_name FROM project_schema').fetchall()]
+        c.execute('DROP TABLE usage_ledger')
+        c.execute("DELETE FROM state_record WHERE kind='migration' AND key='usage_monitor_backfill'")
+        for schema in [base, *projects]:
+            for table in ('message', 'root_turn', 'thread'):
+                c.execute(sql.SQL('DROP TABLE {}').format(sql.Identifier(schema, table)))
+            c.execute(sql.SQL('ALTER TABLE {} DROP COLUMN thread_id').format(sql.Identifier(schema, 'run')))
+            c.execute(sql.SQL("UPDATE {} SET version_num='p2_recovery'").format(sql.Identifier(schema, 'alembic_version')))
+    upgrade(database_url)
+    rows = store.usage_entries()
+    assert len(rows) == 1 and rows[0]['tokens_in'] == 30 and rows[0]['tokens_out'] == 10
+    assert store.get_run(run.id).thread_id is None
+    upgrade(database_url)
+    assert store.usage_entries() == rows
+
+
+def test_monitor_kill9_inflight_is_recovered_once(database_url, tmp_path):
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.core.monitor import recover_interrupted_calls
+
+    store = PostgresStore(database_url)
+    run = Run(project_id='interrupted-project', goal='interrupted', workspace='/tmp')
+    store.create_run(run)
+    ready = tmp_path / 'monitor-ready'
+    code = """import sys,time
+from pathlib import Path
+from agentlab.adapters.store.postgres import PostgresStore
+store=PostgresStore(sys.argv[1])
+with store.lock_run(sys.argv[2]):
+    store.put_record('attempt','kill9-call',{'id':'kill9-call','run_id':sys.argv[2],
+        'role':'coder','alias':'a','model':'model','status':'in_flight'})
+    Path(sys.argv[3]).touch()
+    time.sleep(60)
+"""
+    process = subprocess.Popen([sys.executable, '-c', code, database_url, run.id, str(ready)])
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            assert process.poll() is None
+            time.sleep(0.02)
+        assert ready.exists()
+        recover_interrupted_calls(store)
+        assert not store.usage_entries()  # another process still owns this call
+        process.kill()
+        process.wait(timeout=10)
+        recover_interrupted_calls(store)
+        recover_interrupted_calls(store)
+        rows = store.usage_entries()
+        assert len(rows) == 1 and rows[0]['metered'] is False
+        assert rows[0]['role'] == 'coder' and rows[0]['tokens_in'] == 0
+        assert store.usage_by_role()[0]['unmetered_calls'] == 1
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+
+
+def test_monitor_sql_and_memory_aggregation_preserve_paid_usage_after_rollback(store):
+    from agentlab.core.config import load_config
+    from agentlab.core.monitor import UsageRecorder, commit_usage, summarize
+    from agentlab.core.ports import RunContext
+    from agentlab.core.schemas import Usage
+    from tests.conftest import CONFIG_DIR
+
+    ctx = RunContext(Run(goal='monitor', workspace='/tmp'), lambda _: None,
+        record_usage=UsageRecorder(store, 'turn', 'rollback-ref', None), usage_transaction=store.transaction)
+    def fail():
+        raise OSError('secondary save failed')
+    with pytest.raises(OSError):
+        commit_usage(ctx, Usage(tokens_in=20, tokens_out=5, cost_cents=0.5).for_call('root', 'a', 'model-a', 'paid'), fail)
+    commit_usage(ctx, Usage(tokens_in=10, tokens_out=3, cost_cents=0.2).for_call('root', 'b', 'model-b', 'other'))
+    commit_usage(ctx, Usage().for_call('correctness-reviewer', 'b', 'model-b', 'unknown', False))
+    total = summarize(store, load_config(CONFIG_DIR).agents)
+    assert total.total.calls == 2 and total.total.unmetered_calls == 1
+    assert total.total.tokens_in == 30 and total.total.tokens_out == 8
+    assert total.total.cost_cents == pytest.approx(0.7)
+    assert total.total.models == ['model-a', 'model-b']
+    assert total.reviewers.unmetered_calls == 1

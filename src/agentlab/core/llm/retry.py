@@ -20,6 +20,7 @@ class ParallelFailure(Exception):
 
 class LlmError(Exception):
     kind: str = "llm_error"
+    usage_present: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
 

@@ -1535,6 +1535,29 @@
     "embeddingApiKey": "Embedding API key",
     "embeddingBaseUrl": "Embedding base URL",
     "embeddingModelHint": "Separate embedding endpoint. Set model ID, dimensions and version in config/models.yaml.",
-    "reindexSharedVectors": "Reindex shared vectors"
+    "reindexSharedVectors": "Reindex shared vectors",
+    "monitor": "Monitor"
+  },
+  "monitor": {
+    "loading": "Loading usage…",
+    "allProjects": "All projects",
+    "agent": "Agent",
+    "calls": "Calls",
+    "unmetered": "Unmetered calls",
+    "input": "Input",
+    "output": "Output",
+    "total": "Total",
+    "cost": "Cost",
+    "models": "Models",
+    "tokenChart": "Tokens by agent",
+    "description": "Token usage and spending across all projects.",
+    "totalRequests": "Total requests",
+    "totalTokens": "Total tokens",
+    "totalCost": "Total cost",
+    "estimatedCost": "Estimated · USD",
+    "unmeteredHint": "Requests without returned usage",
+    "byAgent": "Usage by agent · most tokens first",
+    "reviewers": "Reviewers total",
+    "grandTotal": "All agents total"
   }
 }

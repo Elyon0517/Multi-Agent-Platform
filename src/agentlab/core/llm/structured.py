@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from agentlab.core.budget import BudgetExceeded, estimate_cents
 from agentlab.core.config import AppConfig
 from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted, call_with_retry
+from agentlab.core.monitor import UsageAccumulator, commit_usage
 from agentlab.core.ports import RunContext
 from agentlab.core.routing import Override, Route, Router
 from agentlab.core.schemas import AgentInput, AgentResult, Usage
@@ -25,6 +26,7 @@ class Completion:
     tokens_out: int
     tool_calls: list[dict[str, Any]] | None = None
     provider_content: list[dict[str, Any]] | None = None
+    usage_present: bool = True
 
 
 ChatFn = Callable[..., Awaitable[Completion]]
@@ -52,18 +54,10 @@ class StructuredCaller:
             specs, execute = ctx.tool_factory(role)
             ctx = replace(ctx, tool_specs=specs, execute_tool=execute)
         route = self._router.resolve(role, override)
-        total_usage = Usage()
         recorded = ctx.record_usage is not None
-        original_record = ctx.record_usage
-
-        def record(usage: Usage) -> None:
-            total_usage.tokens_in += usage.tokens_in
-            total_usage.tokens_out += usage.tokens_out
-            total_usage.cost_cents += usage.cost_cents
-            if original_record:
-                original_record(usage)
-
-        ctx = replace(ctx, record_usage=record)
+        accumulator = UsageAccumulator(ctx.record_usage)
+        total_usage = accumulator.total
+        ctx = replace(ctx, record_usage=accumulator)
         log = AttemptLog()
         started = time.monotonic()
         last: Exception | None = None
@@ -175,14 +169,31 @@ class StructuredCaller:
                         tokens_out=exc.tokens_out,
                         cost_cents=alias_cfg.cost_cents(exc.tokens_in, exc.tokens_out),
                     )
-                    with ctx.usage_transaction():
-                        if ctx.record_usage:
-                            ctx.record_usage(charged)
+                    paid = charged.for_call(
+                        role,
+                        alias,
+                        alias_cfg.model,
+                        attempt_id,
+                        exc.usage_present or bool(exc.tokens_in or exc.tokens_out),
+                    )
+
+                    error_kind = exc.kind
+
+                    def failed() -> None:
                         if attempt_id and ctx.attempt_finished:
                             ctx.attempt_finished(
                                 attempt_id,
-                                {"status": "failed", "error_kind": exc.kind, "usage": charged.model_dump(mode="json")},
+                                {
+                                    "status": "failed",
+                                    "error_kind": error_kind,
+                                    "usage": charged.model_dump(mode="json"),
+                                },
                             )
+
+                    commit_usage(ctx, paid, failed)
+                    raise
+                except BaseException:
+                    commit_usage(ctx, Usage().for_call(role, alias, alias_cfg.model, attempt_id, False))
                     raise
                 finally:
                     if ctx.release_budget:
@@ -192,9 +203,8 @@ class StructuredCaller:
                     tokens_out=usage.tokens_out + charged.tokens_out,
                     cost_cents=usage.cost_cents + charged.cost_cents,
                 )
-                with ctx.usage_transaction():
-                    if ctx.record_usage:
-                        ctx.record_usage(charged)
+
+                def completed() -> None:
                     if attempt_id and ctx.attempt_finished:
                         ctx.attempt_finished(
                             attempt_id,
@@ -205,6 +215,10 @@ class StructuredCaller:
                                 "usage": charged.model_dump(mode="json"),
                             },
                         )
+
+                commit_usage(
+                    ctx, charged.for_call(role, alias, alias_cfg.model, attempt_id, completion.usage_present), completed
+                )
                 return completion
 
             completion = await call_with_retry(attempt, self._cfg.retry.llm_call, log, check_attempt)

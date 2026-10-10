@@ -19,6 +19,7 @@ from agentlab.core.loop.arbiter import arbitrate
 from agentlab.core.loop.convergence import gate_fingerprints, is_oscillating, review_fingerprints
 from agentlab.core.loop.hooks import NoHooks, RunHooks
 from agentlab.core.loop.states import ACTIVE, TERMINAL, check_transition
+from agentlab.core.monitor import UsageRecorder, commit_result_usage, recover_run_calls
 from agentlab.core.ports import (
     AgentRuntime,
     BlobStore,
@@ -143,6 +144,8 @@ class Driver:
         unknown = [
             a for a in self.store.records("attempt") if a.get("run_id") == run_id and a.get("status") == "in_flight"
         ]
+        if unknown:
+            recover_run_calls(self.store, run_id)
         if unknown and run.status in ACTIVE:
             self._escalate(run, "interrupted_call", {"attempt_ids": [a["id"] for a in unknown]}, on_approve=run.status)
         while run.status in ACTIVE:
@@ -263,6 +266,7 @@ class Driver:
         if decision in {"reject", "abort"}:
             self._clear_agent_cache(run.id)
         if approval.reason == "interrupted_call":
+            recover_run_calls(self.store, run_id)
             for item in self.store.records("attempt"):
                 if item.get("run_id") == run_id and item.get("status") == "in_flight":
                     item["status"] = "unknown_authorized_retry" if decision == "approve" else "unknown_closed"
@@ -453,7 +457,7 @@ class Driver:
         ctx = RunContext(
             run=run,
             check_budget=guard.check,
-            record_usage=record_usage,
+            record_usage=UsageRecorder(self.store, "run", run.id, run.project_id, record_usage),
             reserve_budget=guard.reserve,
             release_budget=guard.release,
         )
@@ -509,8 +513,7 @@ class Driver:
             elif self.recovery_options.get("assignments", {}).get(r.role):
                 r.routing_reason = "supervisor_dispatch"
             self._completed_agents[cache_key(r.role)] = r
-            if not r.usage_recorded:
-                record_usage(r.usage)
+            commit_result_usage(ctx, r)
             attempts = [
                 a
                 for a in self.store.records("attempt")

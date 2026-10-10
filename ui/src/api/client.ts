@@ -176,7 +176,14 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown, method = 'POST') =>
   json<T>(path, { method, body: JSON.stringify(body) });
 
+export interface UsageSummary {
+  role: string; calls: number; unmetered_calls: number; tokens_in: number;
+  tokens_out: number; total_tokens: number; cost_cents: number; models: string[];
+}
+export interface MonitorUsage { agents: UsageSummary[]; reviewers: UsageSummary; total: UsageSummary }
+
 export const api = {
+  monitorUsage: () => json<MonitorUsage>('/monitor/usage'),
   roster: (projectId?: string, runId?: string) => json<RosterEntry[]>(`/roster?${new URLSearchParams({ ...(projectId ? { project_id: projectId } : {}), ...(runId ? { run_id: runId } : {}) })}`),
   runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),

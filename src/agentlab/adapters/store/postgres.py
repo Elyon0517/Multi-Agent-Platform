@@ -75,6 +75,47 @@ class PostgresStore:
                 if connection.info.transaction_status != TransactionStatus.INERROR:
                     connection.execute("SELECT set_config('search_path', %s, true)", (original,))
 
+    def append_usage(self, data: dict[str, Any]) -> bool:
+        # The connection search path is restored to base by every project query.
+        columns = list(data)
+        return bool(
+            self._query(
+                sql.SQL("INSERT INTO usage_ledger ({}) VALUES ({}) ON CONFLICT (id) DO NOTHING RETURNING id").format(
+                    sql.SQL(",").join(map(sql.Identifier, columns)),
+                    sql.SQL(",").join(sql.Placeholder() for _ in columns),
+                ),
+                list(data.values()),
+            )
+        )
+
+    def usage_entries(self) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM usage_ledger ORDER BY ts,id")
+
+    def usage_by_role(self) -> list[dict[str, Any]]:
+        return self._query("""SELECT role,
+            sum(calls) FILTER (WHERE metered) AS calls,
+            sum(calls) FILTER (WHERE NOT metered) AS unmetered_calls,
+            sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out,
+            sum(tokens_in + tokens_out) AS total_tokens, sum(cost_cents) AS cost_cents,
+            array_agg(DISTINCT model ORDER BY model) FILTER (WHERE model <> '') AS models
+            FROM usage_ledger WHERE role <> 'arbiter' GROUP BY role""")
+
+    def usage_recorded(self, call_id: str, source: str, ref_id: str) -> bool:
+        return bool(
+            self._query(
+                """SELECT 1 FROM usage_ledger WHERE id IN (%s,%s)
+            OR (source=%s AND ref_id=%s AND id IN (%s,%s)) LIMIT 1""",
+                (
+                    "call-" + call_id,
+                    "legacy-attempt-" + call_id,
+                    source,
+                    ref_id,
+                    "legacy-turn-" + ref_id,
+                    "legacy-planning-" + ref_id,
+                ),
+            )
+        )
+
     def _owner(self, run_id: str) -> str:
         rows = self._query("SELECT project_id FROM run_directory WHERE run_id=%s", (run_id,))
         if not rows:
