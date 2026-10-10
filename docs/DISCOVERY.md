@@ -1,8 +1,8 @@
-# Agent Converge Discovery
+# Multi-Agent Platform Discovery
 
 > 状态：v1.5 · P0 / P1 / P2 完成，下一步 P3 与 §16.4 项目隔离 · 可持续更新
 > 最近更新：2026-10-10
-> 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
+> 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
 > 适用范围：个人本地 dev/研究工具，面向未来开源
 
@@ -205,13 +205,15 @@ override:
   must_log: true
 ```
 
+auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束取代；目录有至少两个不同 model id 时，correctness 和 arch reviewer 必须使用不同 model id（不同 alias 不代表不同模型）。manual 模式同样校验模型多样性。
+
 ### 7.3 Retry（retry = 3）
 
 `num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前预留预算（并行请求共享预留量）；网关返回的 usage 逐次即时记账，包括空响应、拒绝与 JSON 修复失败。没有 usage 的传输失败无法准确计费，不伪造 token；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
 
 ### 7.4 Embedding 与 Rerank（API）
 
-embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
+embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
 
 ---
 
@@ -385,7 +387,7 @@ agentlab/
 
 ### 15.2 从 munder-difflin 移植的内容（ADR-011）
 
-| munder 源 | Agent Converge 用途 | 改动 |
+| munder 源 | Multi-Agent Platform 用途 | 改动 |
 |---|---|---|
 | `scene/office/*`（OfficeFloor、Character、CharacterSprite、Camera、pathfinding、ThoughtBubble、ToolBubble、MessageEnvelope、DeskScreen、SeatPool、TiledMapRenderer、theme*、cast、portraitArt、glRecovery、cafeteriaLines） | Office Floor 主场景 | 数据源 `window.cth`(Electron IPC) → `EventSource` SSE；删 `pixi.js/unsafe-eval`（浏览器无需） |
 | `design/tokens.{ts,css}`, `global.css`, `fonts.css` | 像素风设计系统 | 原样 |
@@ -414,7 +416,7 @@ agentlab/
 
 Office Floor 只认事件流，映射规则集中在 `ui/src/scene/adapter/` 一处：
 
-| Agent Converge | munder Agent 字段 |
+| Multi-Agent Platform | munder Agent 字段 |
 |---|---|
 | supervisor | `isGod = true`（坐 Michael 的办公室） |
 | planner / coder / reviewer×3 / summarizer / arbiter | 普通工位，各分配一个 cast 角色与 accent |
@@ -446,7 +448,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
-| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆、PDF 上传 RAG、project phase/step 进度已实现（内存版）；Postgres/pgvector 落库、summarizer、导入导出未做 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
 | P8 | S6 Eval | 部分完成 | 已有 py-fix-add 固定任务与 smoke；完整评分卡待做 |
 
@@ -523,7 +525,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 持久化 | P2 已完成；配置数据库 URL 后启用，显式 memory 模式仍为临时数据 | 已完成 |
 | 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
 | CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
-| supervisor（root）角色 | 配置与路由都有，Driver 尚未调用；调度目前是固定状态机 | P3 |
+| supervisor（root）角色 | 项目 auto 模式调用并持久化 Dispatch；角色模型与任务经过确定性校验，非法分配需人类填写反馈后 reject 重生成，phase 顺序仍由 Driver 执行 | 已接线 |
 | summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
 | 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 已配置，未强制执行 | P3 |
@@ -591,7 +593,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [ ] 把以上三块落到 Postgres（`memory` 表 + pgvector HNSW + tsvector；`project` 表加 phases JSONB）
 - [ ] summarizer 接入，每轮自动抽 episodic
 - [ ] `pin_memory` 工具；rerank
-- [ ] per-project schema、`pg_dump -n` 导入导出
+- [x] per-project schema，既有数据一次性迁移；`pg_dump -n` 导出/数据库级恢复验证
+- [ ] 完整项目导入 UI/CLI（目录注册、共享依赖与 blobs/snapshots 一起恢复）
 - 演示：第二个 project 复用第一个 project 沉淀的经验
 
 #### P7 · S5b 可视化 v2 + 可观测（2–3 天）
@@ -620,17 +623,30 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 隔离：project 各自拥有 workspace、模型/任务配置、对话、运行记录、预算与记忆；agent 私有记忆按 project × role 归属。global 知识为明确共享的个人知识，项目私有文档不得进入 global。切换 project 同步切换 run、agent 状态、事件、看板、审批和检索范围；后端校验 project/thread/run/step 归属。workspace 路径重叠需要检测；并发修改同一仓库需要独立 worktree/沙箱。
 
-workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse --show-toplevel`，拒绝已有 monorepo 内的非根目录 workspace，不创建嵌套仓库。子目录范围支持与项目间路径重叠检查仍属于本节。
+workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse --show-toplevel`，拒绝已有 monorepo 内的非根目录 workspace，不创建嵌套仓库。子目录范围支持仍未实现；本轮已拒绝项目 workspace 重叠，提示使用独立 worktree。
 
-当前检查结果（以上是目标，尚未完整实现）：
-- `auto/manual` YAML 有配置，Driver 尚未调用 supervisor，固定状态机仍负责调度。
-- `Project` 没有模式、角色模型与任务字段；runtime/roster 使用全局模型策略。
-- 非 global 记忆检索按 project_id 过滤；global 知识有意共享。
-- `/runs` 返回全量记录；UI runs/tasks/agent 状态没有完整按项目隔离，切换 project 只改 activeProjectId。
-- `/runs` 已根据 project_id 继承 workspace，并在创建 run 前验证 project/step 归属，拒绝不匹配的路径；完整项目隔离仍待实现。
-- 未实现对话 thread/message 数据模型；P2 已持久化现有运行、项目与记忆。完整项目隔离仍待本节实现。
+2026-10-10 UX / E2E 实现与检查结果：
 
-P2 持久化基础已完成；本节先修复项目归属/workspace/界面状态隔离，再实现项目配置、两种调度路径及选择界面，随后接入对话。run 的全局配置快照已在 P2 实现，项目专属配置仍待本节。
+| 用户路径 | 本轮实现 | 验证与边界 |
+|---|---|---|
+| 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 尚未接入循环 |
+| auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
+| 左侧 project → 对话 → run | Conversation/Message 持久化；thread 可关联多 run；用户目标与终止状态写入历史，最近 20 条作为下一 run 上下文 | project/thread 归属先验证，消息与 run 创建同事务；目前是任务对话，不是通用即时聊天 |
+| 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
+| 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
+| 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
+| memory 文档 | global 明确共享；project 上传/替换/移除仅影响本项目，保留历史版本；agent 私有记忆需 project | 相同文档名跨项目隔离测试，移除文档不误删同 source 的 note |
+| RAG | 项目选择 off / keyword / hybrid，默认 keyword；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
+| embedding 配置 | 独立 embedding URL/Key 保存至本机 .env；模型/维度/version 在 models.yaml；可测试接口、重建共享知识与项目/agent 记忆向量 | 有凭据不等于可用：只有实际调用成功才 ready；当前没有可用 embedding 服务，真实向量验收需用户补充 |
+| 配置即代码 | 控制台支持项目设置 YAML 导出/校验导入，适合提交 Git；run 固化完整配置 | 全局模型能力/价格仍在 config/*.yaml，项目选项是持久化运行数据。导入不改变已存在 run |
+
+本轮检查可复现：后端 `tests/unit/test_project_experience.py`、Postgres `test_project_dispatch_and_conversation_survive_postgres_restart`，前端 `store.test.ts`；浏览器在隔离 fake 服务验证了创建 auto/manual 项目、对话启动、审批、实际 diff 和项目切换。测试 workspace 与 UI 服务数据不写入生产项目。
+
+剩余需要产品确认或外部资料：
+- 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
+- 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
+- 当前所有聊天别名映射 gpt-6-astra；输入独立，不代表跨模型多样性。新增 Claude 等 provider 后仍需明确 provider/routing 配置。
+- ADK、工具白名单执行、危险操作审批、summarizer、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
 
 ---
 
@@ -760,3 +776,36 @@ P2 持久化基础已完成；本节先修复项目归属/workspace/界面状态
 - 真实网关 + Docker 恢复 smoke：run `6b2e0c696274`，付费 planner 返回后 kill -9，CLI resume 后 FULL Gate 通过、停在 signoff；planner step 仍为 1，累计 8451 input / 631 output tokens，按配置估算 5.4875c。未代替用户批准最终 signoff。
 - Smoke workspace 放在 `~/.agentlab-workspaces`，避免 macOS 临时路径无法被 Colima 挂载，以及在父仓库中意外创建嵌套仓库。
 - 历史 §16.1d–g 中“P2 待持久化”的说明记录的是当时状态；由本节更新。当前总验收：后端 167 项、前端 17 项，ruff / mypy / UI build 通过。
+
+
+### 16.1i · 项目 schema 与调度修正（2026-10-10）
+
+- 项目有效模型目录包含 ≥2 个不同 model id 时，auto Dispatch 和 manual 配置都要求 correctness/arch reviewer 的 model id 不同；alias 不算多样性。单模型目录仍可运行。auto override 由模型目录、reviewer 档位与此规则约束，root 输入包含可用模型 ID/档位和 reviewer 档位上限。
+- `/roster?run_id=...` 使用该 run 的 checkpoint 配置，反映已保存的实际 Dispatch，不受之后编辑项目设置影响；切换/取消选择 run 会重载对应 roster。
+- global 文档上传会尝试生成 embedding，不再依赖 project；未配置或调用失败仍降级。项目文档按项目 hybrid 设置生成向量，支持手动重建。
+- `agentlab.db.isolation` 是可重复执行的一次性迁移入口，db-upgrade/启动也会检查。所有已有项目统一迁移，不存在新旧双轨运行路径。锁旧表、复制完整记录、逐表核对行数和内容，任何失败回滚；只读 `legacy_projects` 保留旧数据，不自动删除。public 中空的旧项目表作为建表模板，触发器禁止旧客户端再次写入项目数据。
+- `proj_<id>` 包含 project/agent_def/run/iteration/step/artifact/blackboard/memory/approval/event/run_checkpoint/state_record。项目记忆、对话、Dispatch、attempt、规划调用账目均按归属迁移。public 保留全局知识、共享记录、project_schema/run_directory 路由元数据；模型目录仍以 YAML 为准。项目内外键、serial 序列与 ownership CHECK 不依赖其他项目。
+- 本地迁移：既有 4 个 default run、9 个 iteration、28 个 step、33 个 artifact、4 条 memory、4 个 approval、163 个 event、4 个 checkpoint、8 个 state_record 全部迁入 `proj_default`；完整记录比对通过。真实 run `6b2e0c696274` 保持 WAITING_HUMAN/signoff，cost=5.4875c，恢复 driver 成功。
+- `pg_dump -n proj_default` 已在临时数据库恢复，并核对 4 run / 163 event / 4 checkpoint。恢复到新环境仍需共享 vector 扩展、路由目录注册与 `.agentlab` 中的对象/内容文件；完整导入工具尚待实现。后续 Alembic 结构变更通过下述 schema 版本机制同步，不能只更新 public 模板。
+
+本轮验证：后端 183 项（包含 17 个持久化集成用例）、前端 19 项，ruff/mypy/config-check/UI build 全部通过；新增模型 ID 多样性、global 上传 embedding、frozen roster、既有数据迁移/只读备份/失败回滚测试。
+
+
+### 16.1j · 各项目结构迁移与访问边界
+
+- 每个项目 schema 记录独立的 `alembic_version`。新项目从基础模板克隆时复制其当前版本；升级前，没有版本表的既有项目先按升级前的基础版本登记，随后补跑到 head。
+- db-upgrade/启动在同一事务内升级基础 schema 和 project_schema 登记的全部项目；任意项目失败，所有表结构和版本号一起回滚。迁移锁与项目创建共享锁协调，避免升级期间克隆到半更新模板；legacy_projects 只读备份不参与升级。
+- 迁移脚本的未限定表名通过目标 schema 的 search_path 解析；共享目录、全局元数据、扩展等仅基础 schema 执行的操作，必须使用 `op.get_context().config.attributes["migration_scope"] == "base"` 判断。新增项目表也必须更新 isolation.TABLES 克隆清单。基础 schema 的项目表是只读空模板，项目数据回填也需限制在 project scope。不得在 revision 中手工 COMMIT 或启用 autocommit，破坏跨 schema 原子性。
+- 回归验证：先创建两个项目（其中一个模拟旧版无版本表），再增加 run 列，确认已有项目与随后新建项目均有新列和一致版本；模拟某项目升级失败，确认基础/全部项目的列和版本完整回滚。
+- **访问控制边界：物理 schema 用于项目数据归档、导出和删除范围管理；访问控制仍由应用层按 project_id/角色过滤。** 当前使用同一数据库账号，records()/list_runs() 会遍历项目 schemas，PersistentMemoryStore 会把各项目记忆加载到同一进程后再按授权范围检索；数据库权限没有阻止跨项目读取。这不是数据库账号级隔离，也不是独立进程隔离。
+
+本轮验证：后端 184 项，包含 18 项持久化集成测试；ruff、mypy、config-check 通过。前端代码未改动。
+
+
+### 16.1k · 迁移范围守护
+
+revision 统一导入 `agentlab.db.migration_scope.is_project_scope()`；基础表操作必须先在项目范围下 return，再使用 `base_table("表名")` 得到限定 schema 的 SQL 标识符。`base_table` 在项目范围下调用会报错，防止辅助函数被误用。共享 vector 扩展仅在 base scope 创建。
+
+env.py 实际读取 migration_scope；项目范围执行前后比较基础 schema 的表/列/默认值/约束/索引/触发器定义，发现变化即报错，由外层事务整体回滚。它不能拦住绕过辅助函数的任意共享表 UPDATE；基础数据迁移仍必须遵守 scope 与限定 schema 约定。
+
+守护测试从空项目 schema 重放当前 upgrade head，要求基础表结构及路由目录数据不变；并注入一条未限定 schema 的 ALTER TABLE run_directory，验证环境守护检测和回滚。GitHub Checks 配置 PostgreSQL/pgvector，确保此集成测试在 CI 中执行，不因未提供数据库 URL 而跳过。

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-SECRET_KEYS = ("AGENTLAB_LLM_API_KEY",)
-PLAIN_KEYS = ("AGENTLAB_LLM_BASE_URL",)
+SECRET_KEYS = ("AGENTLAB_LLM_API_KEY", "AGENTLAB_EMBEDDING_API_KEY")
+PLAIN_KEYS = ("AGENTLAB_LLM_BASE_URL", "AGENTLAB_EMBEDDING_BASE_URL")
 EDITABLE = (*SECRET_KEYS, *PLAIN_KEYS)
 _LINE = re.compile(r"^\s*([A-Z0-9_]+)\s*=\s*(.*)$")
 

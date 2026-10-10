@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 class CreateRun(BaseModel):
     goal: str
+    thread_id: str | None = None
     workspace: str | None = None
     runtime: str | None = None
     language: str | None = None
@@ -83,9 +84,28 @@ def create_app(svc: Services | None = None) -> FastAPI:
         return {"ok": True, "agents": sorted(svc.cfg.agents)}
 
     @app.get("/roster")
-    def roster() -> list[dict[str, str | int]]:
-        policy = svc.cfg.model_policy.roles
-        aliases = svc.cfg.models.aliases
+    def roster(project_id: str | None = None, run_id: str | None = None) -> list[dict[str, str | int]]:
+        cfg = svc.cfg
+        if project_id:
+            try:
+                project = svc.projects.get(project_id)
+            except KeyError as exc:
+                raise HTTPException(404, "project not found") from exc
+            if project.settings:
+                from agentlab.core.project_config import project_config
+
+                cfg = project_config(cfg, project.settings)
+        if run_id:
+            run = get_run(run_id)
+            if project_id and run.project_id != project_id:
+                raise HTTPException(422, "run belongs to another project")
+            checkpoint = svc.store.checkpoint(run_id)
+            if checkpoint:
+                from agentlab.core.config import AppConfig
+
+                cfg = AppConfig.model_validate(checkpoint["config"])
+        policy = cfg.model_policy.roles
+        aliases = cfg.models.aliases
         out: list[dict[str, str | int]] = []
         for r, a in svc.cfg.agents.items():
             alias = policy[r].primary if r in policy else ""
@@ -115,18 +135,63 @@ def create_app(svc: Services | None = None) -> FastAPI:
             body.workspace = project.workspace
         elif body.step_id:
             raise HTTPException(422, "step_id requires project_id")
+        conversation = None
+        new_conversation = False
+        if body.thread_id:
+            from agentlab.core.conversation import Conversation
+            conversation = next((Conversation.model_validate(t) for t in svc.store.records("thread")
+                                 if t["id"] == body.thread_id and t["project_id"] == body.project_id), None)
+            if conversation is None:
+                raise HTTPException(404, "conversation not found in this project")
+            if len(conversation.messages) >= 998:
+                raise HTTPException(409, "conversation is full; start a new conversation")
+        elif body.project_id:
+            from agentlab.core.conversation import Conversation
+            conversation = Conversation(project_id=body.project_id, title=body.goal.strip()[:80] or "New conversation")
+            body.thread_id = conversation.id
+            new_conversation = True
+        if not body.goal.strip() or len(body.goal) > 20000:
+            raise HTTPException(422, "goal must contain 1 to 20000 characters")
         ws = (
             Path(body.workspace)
             if body.workspace
             else seed_demo_workspace(Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
         )
         try:
-            driver = svc.driver(ws, body.runtime, body.language)
+            driver = svc.driver(ws, body.runtime, body.language, body.project_id)
+            if conversation:
+                driver.recovery_options["conversation"] = [
+                    m.model_dump(mode="json") for m in conversation.messages[-20:]
+                ]
         except (MissingGatewayConfig, NoGateDetected) as e:
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
+
+        def record_conversation(run: Run) -> None:
+            if not conversation:
+                return
+            from agentlab.core.conversation import Conversation, Message
+
+            with svc.store.lock_run("thread:" + conversation.id):
+                latest = conversation if new_conversation else next(
+                    Conversation.model_validate(t) for t in svc.store.records("thread") if t["id"] == conversation.id
+                )
+                if len(latest.messages) >= 998:
+                    raise HTTPException(409, "conversation is full; start a new conversation")
+                latest.messages.append(Message(author="user", text=body.goal, run_id=run.id))
+                svc.store.put_record("thread", latest.id, latest.model_dump(mode="json"))
+
         try:
             await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
-            run = await driver.create_async(body.goal, project_id=body.project_id or "default")
+            run = await driver.create_async(
+                body.goal, project_id=body.project_id or "default", thread_id=body.thread_id,
+                on_create=record_conversation
+            )
+        except RunBusy as exc:
+            driver.workspace.close()  # type: ignore[attr-defined]
+            raise HTTPException(409, str(exc)) from exc
+        except HTTPException:
+            driver.workspace.close()  # type: ignore[attr-defined]
+            raise
         except Exception as exc:
             driver.workspace.close()  # type: ignore[attr-defined]
             reason = execution_error_reason(exc)
@@ -142,8 +207,8 @@ def create_app(svc: Services | None = None) -> FastAPI:
         return run
 
     @app.get("/runs", response_model=list[Run])
-    def list_runs() -> list[Run]:
-        return svc.store.list_runs()
+    def list_runs(project_id: str | None = None) -> list[Run]:
+        return [r for r in svc.store.list_runs() if project_id is None or r.project_id == project_id]
 
     @app.get("/runs/{run_id}", response_model=RunDetail)
     def run_detail(run_id: str) -> RunDetail:

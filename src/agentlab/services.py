@@ -35,29 +35,44 @@ class KnowledgeService:
     def __init__(self, memory: InMemoryMemoryStore) -> None:
         self.memory = memory
 
-    async def ingest(self, filename: str, data: bytes) -> DocumentSummary:
+    async def ingest(
+        self, filename: str, data: bytes, project_id: str | None = None, embed: bool = False
+    ) -> DocumentSummary:
         text = extract_text(filename, data)
         items = [
-            MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT, text=c, source=filename)
+            MemoryItem(
+                project_id=project_id,
+                namespace=PROJECT if project_id else GLOBAL,
+                kind=MemoryKind.DOCUMENT,
+                text=c,
+                source=filename,
+            )
             for c in chunk(text)
         ]
-        await self.memory.add(items)
+        await self.memory.add(items, embed=embed)
         new_ids = {item.id for item in items}
-        for old in self.memory.items_in(GLOBAL):
-            if old.source == filename and old.id not in new_ids:
+        for old in self.memory.items_in(PROJECT if project_id else GLOBAL, project_id):
+            if old.kind == MemoryKind.DOCUMENT and old.source == filename and old.id not in new_ids:
                 old.valid_to = utcnow().isoformat()
                 old.superseded_by = items[0].id if items else None
         self.memory.flush()
         return DocumentSummary(filename, len(items), len(text))
 
-    def documents(self) -> list[DocumentSummary]:
+    def documents(self, project_id: str | None = None) -> list[DocumentSummary]:
         by_source: dict[str, list[MemoryItem]] = {}
-        for i in self.memory.items_in(GLOBAL):
+        for i in self.memory.items_in(PROJECT if project_id else GLOBAL, project_id):
+            if i.kind != MemoryKind.DOCUMENT:
+                continue
             by_source.setdefault(i.source, []).append(i)
         return [DocumentSummary(s, len(items), sum(len(i.text) for i in items)) for s, items in by_source.items()]
 
-    def delete(self, source: str) -> int:
-        return self.memory.delete_source(GLOBAL, source)
+    def delete(self, source: str, project_id: str | None = None) -> int:
+        items = [i for i in self.memory.items_in(PROJECT if project_id else GLOBAL, project_id)
+                 if i.kind == MemoryKind.DOCUMENT and i.source == source]
+        for item in items:
+            item.valid_to = utcnow().isoformat()
+        self.memory.flush()
+        return len(items)
 
     async def note(
         self, project_id: str | None, namespace: str, text: str, run_id: str | None = None, pinned: bool = False
@@ -71,10 +86,12 @@ class KnowledgeService:
             source_run_id=run_id,
             pinned=pinned,
         )
-        return (await self.memory.add([item]))[0]
+        return (await self.memory.add([item], embed=False))[0]
 
-    async def search(self, project_id: str | None, role: str, query: str, k: int = CONTEXT_HITS) -> list[Hit]:
-        return await self.memory.search(project_id, readable_namespaces(role), query, k)
+    async def search(
+        self, project_id: str | None, role: str, query: str, k: int = CONTEXT_HITS, use_vectors: bool = False
+    ) -> list[Hit]:
+        return await self.memory.search(project_id, readable_namespaces(role), query, k, use_vectors=use_vectors)
 
 
 class ProjectService:
@@ -230,7 +247,23 @@ class MemoryHooks:
         self.projects = projects
 
     async def context_for(self, run: Run, role: str, inp: AgentInput) -> dict[str, Any]:
-        hits = await self.knowledge.search(run.project_id, role, run.goal)
+        project_settings = (
+            self.projects.get(run.project_id).settings
+            if run.project_id in [p.id for p in self.projects.list()]
+            else None
+        )
+        if inp.context.get("retrieval_settings"):
+            from agentlab.core.project_config import ProjectSettings
+            project_settings = ProjectSettings.model_validate(inp.context["retrieval_settings"])
+        if project_settings and project_settings.retrieval == "off":
+            return {}
+        hits = await self.knowledge.memory.search(
+            run.project_id,
+            readable_namespaces(role),
+            run.goal,
+            project_settings.retrieval_k if project_settings else CONTEXT_HITS,
+            use_vectors=bool(project_settings and project_settings.retrieval == "hybrid"),
+        )
         ctx: dict[str, Any] = {"memory": _format_hits(hits)} if hits else {}
         if run.project_id in [p.id for p in self.projects.list()]:
             project = self.projects.get(run.project_id)
@@ -248,8 +281,29 @@ class MemoryHooks:
 
     async def on_finished(self, run: Run) -> None:
         self.projects.complete_run(run)
+        if run.thread_id:
+            from agentlab.core.conversation import Conversation, Message
+
+            store = self.projects.store
+            if store:
+                with store.lock_run("thread:" + run.thread_id):
+                    thread = next(
+                        (
+                            Conversation.model_validate(t)
+                            for t in store.records("thread")
+                            if t["id"] == run.thread_id and t["project_id"] == run.project_id
+                        ),
+                        None,
+                    )
+                    if thread and not any(m.author == "system" and m.run_id == run.id for m in thread.messages):
+                        thread.messages.append(
+                            Message(author="system", text=f"Run {run.status}: {run.goal}"[:20000], run_id=run.id)
+                        )
+                        store.put_record("thread", thread.id, thread.model_dump(mode="json"))
         outcome = "approved" if run.status == RunStatus.DONE else f"ended as {run.status}"
         text = f"Run {run.id} '{run.goal}' {outcome}."
-        if not any(i.source_run_id == run.id and i.text == text
-                   for i in self.knowledge.memory.items_in(PROJECT, run.project_id)):
+        if not any(
+            i.source_run_id == run.id and i.text == text
+            for i in self.knowledge.memory.items_in(PROJECT, run.project_id)
+        ):
             await self.knowledge.note(run.project_id, PROJECT, text, run.id)

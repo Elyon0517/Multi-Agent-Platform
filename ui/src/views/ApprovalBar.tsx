@@ -34,7 +34,7 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
           summary: approval.reason,
           detail: JSON.stringify(approval.payload).slice(0, 400),
           actions: [
-            { label: t('lab.approve'), kind: 'approve' },
+            ...(approval.reason === 'dispatch_invalid' ? [] : [{ label: t('lab.approve'), kind: 'approve' as const }]),
             { label: t('lab.reject'), kind: 'deny' },
             { label: t('lab.abort'), kind: 'neutral' },
           ],

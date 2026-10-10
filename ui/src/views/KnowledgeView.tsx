@@ -8,15 +8,16 @@ import { Field, Muted, Status, errorText, inputStyle } from '@/views/ui';
 
 const ACCEPT = '.pdf,.md,.markdown,.txt';
 
-function GlobalDocuments({ onChange }: { onChange: () => void }) {
+function GlobalDocuments({ onChange, projectId }: { onChange: () => void; projectId?: string }) {
   const { t } = useTranslation();
   const [docs, setDocs] = useState<DocumentSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const uploadId = `kb-upload-${projectId ?? 'global'}`;
 
-  const refresh = useCallback(() => { api.documents().then(setDocs).catch((e) => setError(errorText(e))); }, []);
+  const refresh = useCallback(() => { api.documents(projectId).then(setDocs).catch((e) => setError(errorText(e))); }, [projectId]);
   useEffect(refresh, [refresh]);
 
   const upload = async (files: FileList | null) => {
@@ -26,7 +27,7 @@ function GlobalDocuments({ onChange }: { onChange: () => void }) {
     setOk(null);
     try {
       for (const f of Array.from(files)) {
-        const d = await api.uploadDocument(f);
+        const d = await api.uploadDocument(f, projectId);
         setOk(t('lab.indexed', { source: d.source, count: d.chunks }));
       }
       refresh();
@@ -40,16 +41,14 @@ function GlobalDocuments({ onChange }: { onChange: () => void }) {
   };
 
   const remove = async (source: string) => {
-    await api.deleteDocument(source);
-    refresh();
-    onChange();
+    try { await api.deleteDocument(source, projectId); refresh(); onChange(); } catch (e) { setError(errorText(e)); }
   };
 
   return (
-    <PixelPanel title={t('lab.globalKnowledgeAllAgents')}>
-      <Muted>{t('lab.resumeBackgroundPreferencesPdfMarkdownTextSplitIntoChunksAndEmbeddedForRag')}</Muted>
-      <Field id="kb-upload" label={t('lab.uploadDocuments')}>
-        <input id="kb-upload" ref={input} type="file" accept={ACCEPT} multiple disabled={busy}
+    <PixelPanel title={projectId ? t('lab.privateDocuments') : t('lab.globalKnowledgeAllAgents')}>
+      <Muted>{t(projectId ? 'lab.privateDocumentsHint' : 'lab.sharedDocumentsHint')}</Muted>
+      <Field id={uploadId} label={t('lab.uploadDocuments')}>
+        <input id={uploadId} ref={input} type="file" accept={ACCEPT} multiple disabled={busy}
           onChange={(e) => void upload(e.target.files)} />
       </Field>
       <Status error={error} ok={busy ? t('lab.indexing') : ok} />
@@ -134,7 +133,7 @@ function SearchBox({ projectId }: { projectId?: string }) {
       <form onSubmit={(e) => { e.preventDefault(); void run(); }} style={{ display: 'flex', gap: 6 }}>
         <label htmlFor="mem-role" style={{ position: 'absolute', left: -9999 }}>{t('lab.asAgent')}</label>
         <select id="mem-role" value={role} onChange={(e) => setRole(e.target.value)} style={{ ...inputStyle, width: 150 }}>
-          {agents.filter((a) => a.id !== 'gate').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {agents.filter((a) => !['gate', 'arbiter'].includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <label htmlFor="mem-q" style={{ position: 'absolute', left: -9999 }}>{t('lab.query')}</label>
         <input id="mem-q" style={inputStyle} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('lab.query')} />
@@ -161,6 +160,7 @@ export function KnowledgeView() {
   const agents = useStore((s) => s.agents);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [version, setVersion] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const role = selected && selected !== 'gate' ? selected : 'coder';
   const bump = () => setVersion((v) => v + 1);
 
@@ -171,18 +171,24 @@ export function KnowledgeView() {
       <PixelPanel title={t('lab.memoryStatus')}>
         <Muted>
           {stats ? t('lab.stats', { count: stats.items, embedded: stats.embedded, model: stats.embedding_model ?? t('lab.noEmbedder') }) + ' · '
-            + (stats.embedding_ready ? t('lab.vectorSearchOn') : t('lab.keywordSearchOnlySetGatewayInSettings')) : '…'}
+            + (stats.embedding_ready ? t('lab.vectorSearchOn') : t('lab.embeddingUnverified')) : '…'}
         </Muted>
+        {stats?.last_error && <Muted>{stats.last_error}</Muted>}
+        <PixelButton size="sm" onClick={() => { void api.probeEmbedding().then(setStats).catch(e => setError(errorText(e))); }}>{t('lab.testEmbedding')}</PixelButton>
+        <PixelButton size="sm" onClick={() => { void api.reindexGlobalKnowledge().then(setStats).catch(e => setError(errorText(e))); }}>{t('lab.reindexSharedVectors')}</PixelButton>
+        {projectId && <PixelButton size="sm" onClick={() => { void api.reindexKnowledge(projectId).then(setStats).catch(e => setError(errorText(e))); }}>{t('lab.reindexVectors')}</PixelButton>}
       </PixelPanel>
+      <Status error={error} />
       <GlobalDocuments onChange={bump} />
+      {projectId && <GlobalDocuments key={`documents:${projectId}`} projectId={projectId} onChange={bump} />}
       <PixelPanel title={projectId ? t('lab.projectMemory') : t('lab.projectMemorySelectAProjectFirst')}>
-        {projectId ? <MemoryList scope="project" projectId={projectId} version={version} /> : <Muted>—</Muted>}
+        {projectId ? <MemoryList key={projectId} scope="project" projectId={projectId} version={version} /> : <Muted>—</Muted>}
       </PixelPanel>
       <PixelPanel title={t('lab.agentMemory', { name: agents.find((a) => a.id === role)?.name ?? role })}>
         <Muted>{t('lab.clickAnAvatarOrCardToSwitchAgent')}</Muted>
-        <MemoryList scope="agent" role={role} projectId={projectId} version={version} />
+        {projectId ? <MemoryList key={`${projectId}:${role}`} scope="agent" role={role} projectId={projectId} version={version} /> : <Muted>{t('lab.projectMemorySelectAProjectFirst')}</Muted>}
       </PixelPanel>
-      <SearchBox projectId={projectId} />
+      <SearchBox key={`search:${projectId ?? 'global'}`} projectId={projectId} />
     </>
   );
 }

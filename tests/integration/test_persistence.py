@@ -39,7 +39,12 @@ def database_url():
         yield url
     finally:
         with psycopg.connect(dsn, autocommit=True) as c:
-            c.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            names = c.execute(
+                "SELECT nspname FROM pg_namespace WHERE nspname LIKE %s", (schema[:20] + "_%",)
+            ).fetchall()
+            for (name,) in names:
+                c.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+            c.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
 
 
 @pytest.fixture(params=["memory", "postgres"])
@@ -288,17 +293,27 @@ async def test_monorepo_subdirectory_does_not_init_repo(tmp_path):
 async def test_paid_response_recovers_before_result_checkpoint(database_url, tmp_path):
     from agentlab.core.llm.structured import Completion, StructuredCaller
     from agentlab.core.schemas import Plan, Usage
+
     svc, d = await driver_for(database_url, tmp_path)
     r = d.create("fix add")
+
     class CallerRuntime:
         async def run_agent(self, role, inp, out, ctx):
             # Simulate death after durable response/usage, before AgentResult callback.
             from dataclasses import replace
+
             def crash(_):
                 raise RuntimeError("crash after validation")
+
             async def chat(**kwargs):
-                return Completion(Plan(summary="paid plan", steps=["fix"], acceptance_criteria=["pass"]).model_dump_json(), 2_000_000, 50)
+                return Completion(
+                    Plan(summary="paid plan", steps=["fix"], acceptance_criteria=["pass"]).model_dump_json(),
+                    2_000_000,
+                    50,
+                )
+
             return await StructuredCaller(d.cfg, chat).call(role, inp, out, replace(ctx, on_result=crash))
+
     d.runtime = CallerRuntime()
     r = await d.run(r.id)
     assert r.paused_reason == "execution_error"
@@ -321,14 +336,19 @@ async def test_paid_response_recovers_before_result_checkpoint(database_url, tmp
 async def test_planning_failure_usage_is_durable(database_url, tmp_path):
     from agentlab.core.llm.structured import Completion, StructuredCaller
     from agentlab.core.project import ProjectPlan
+
     svc = services(database_url, tmp_path)
     project = svc.projects.create("failed", "goal", str(tmp_path / "ws"), publish=False)
+
     class Broken:
         async def run_agent(self, role, inp, out, ctx):
             async def chat(**kwargs):
                 return Completion("not json", 100, 50)
+
             return await StructuredCaller(svc.cfg, chat).call(role, inp, ProjectPlan, ctx)
+
     from agentlab.core.llm.retry import LlmError
+
     with pytest.raises(LlmError):
         await svc.projects.plan(project, Broken(), svc.knowledge, 500)
     svc2 = services(database_url, tmp_path)
@@ -353,6 +373,7 @@ async def test_api_decides_persisted_approval_after_restart(database_url, tmp_pa
     from fastapi.testclient import TestClient
 
     from agentlab.api.app import create_app
+
     _svc, d = await driver_for(database_url, tmp_path)
     r = await d.run(d.create("fix add").id)
     svc2 = services(database_url, tmp_path)
@@ -365,6 +386,7 @@ async def test_api_decides_persisted_approval_after_restart(database_url, tmp_pa
 
 async def test_reject_clears_durable_paid_result_cache(database_url, tmp_path):
     from agentlab.core.schemas import Plan
+
     svc, d = await driver_for(database_url, tmp_path)
     r = d.create("fix add")
     await d._agent(r, "planner", d._input(r), Plan)
@@ -379,13 +401,15 @@ async def test_reject_clears_durable_paid_result_cache(database_url, tmp_path):
 
 async def test_baseline_objects_are_owned_not_only_git_alternates(tmp_path):
     from agentlab.adapters.workspace import GitWorkspace
+
     workspace = tmp_path / "ws"
     workspace.mkdir()
     (workspace / "file.py").write_text("original = 1\n")
     ws = GitWorkspace(workspace, snapshot_dir=tmp_path / "snapshots")
     await ws.ensure_repo()
     subprocess.run(["git", "-C", str(workspace), "add", "file.py"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(workspace), "commit", "-m", "baseline"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(workspace), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-m", "baseline"], check=True, capture_output=True)
     original = subprocess.check_output(["git", "-C", str(workspace), "rev-parse", "HEAD:file.py"]).decode().strip()
     ws.begin_run()
     state = ws.export_state()
@@ -393,3 +417,274 @@ async def test_baseline_objects_are_owned_not_only_git_alternates(tmp_path):
     objects = tmp_path / "snapshots" / "objects"
     assert (objects / original[:2] / original[2:]).exists()
     assert (objects / tree[:2] / tree[2:]).exists()
+
+
+async def test_project_dispatch_and_conversation_survive_postgres_restart(database_url, tmp_path):
+    from agentlab.bootstrap import build_services
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.project_config import ProjectSettings
+    from agentlab.demo import seed_demo_workspace
+    from agentlab.settings import Settings
+    from tests.conftest import CONFIG_DIR
+
+    settings = Settings(
+        store_backend="postgres",
+        database_url=database_url,
+        runtime="fake",
+        config_dir=CONFIG_DIR,
+        data_dir=tmp_path / "data",
+        env_file=tmp_path / ".env",
+        _env_file=None,
+    )
+    svc = build_services(settings)
+    workspace = seed_demo_workspace(tmp_path / "workspace")
+    project = svc.projects.create("persistent", "fix add", str(workspace))
+    project.settings = ProjectSettings()
+    svc.projects.save(project)
+    conversation = Conversation(project_id=project.id, title="Discussion")
+    svc.store.put_record("thread", conversation.id, conversation.model_dump(mode="json"))
+    driver = svc.driver(workspace, "fake", "python", project.id)
+    await driver.workspace.ensure_repo()
+
+    def record(run):
+        conversation.messages.append(Message(author="user", text=run.goal, run_id=run.id))
+        svc.store.put_record("thread", conversation.id, conversation.model_dump(mode="json"))
+
+    run = await driver.create_async("fix add", project_id=project.id, thread_id=conversation.id, on_create=record)
+    await driver._planning(run)
+    other = build_services(settings)
+    restored = other.restore_driver(run.id)
+    assert other.store.get_run(run.id).thread_id == conversation.id
+    assert other.projects.get(project.id).settings.mode == "auto"
+    assert other.store.records("thread")[0]["messages"][0]["run_id"] == run.id
+    assert restored.recovery_options["assignments"] == driver.recovery_options["assignments"]
+    assert len(other.store.artifacts(run.id, "dispatch")) == 1
+    driver.workspace.close()
+
+
+def test_existing_projects_migrate_and_backup_is_readonly(database_url, monkeypatch):
+    import psycopg
+    from psycopg import sql
+    from psycopg.rows import dict_row
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.isolation import migrate, schema_name
+
+    with psycopg.connect(database_url, row_factory=dict_row) as c:
+        base = c.execute("SELECT current_schema() AS name").fetchone()["name"]
+        archive = base[:20] + "_legacy"
+        c.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(archive)))
+        c.execute("DROP TABLE run_directory; DROP TABLE project_schema")
+        c.execute(sql.SQL("DROP FUNCTION {}() CASCADE").format(sql.Identifier(base, "reject_legacy_project_write")))
+        for pid in ("old_a", "old_b"):
+            c.execute(
+                "INSERT INTO project(id,name,workspace_path,payload) VALUES (%s,%s,%s,%s)",
+                (pid, pid, "/tmp/" + pid, psycopg.types.json.Jsonb({"id": pid})),
+            )
+            c.execute(
+                "INSERT INTO run(id,project_id,goal,workspace,status,max_iter,budget_cents) "
+                "VALUES (%s,%s,'goal','/tmp','WAITING_HUMAN',5,500)",
+                ("run_" + pid, pid),
+            )
+            c.execute(
+                "INSERT INTO run_checkpoint VALUES (%s,%s,now())",
+                ("run_" + pid, psycopg.types.json.Jsonb({"cache": "paid"})),
+            )
+            c.execute(
+                "INSERT INTO state_record VALUES ('thread',%s,%s,now())",
+                (pid, psycopg.types.json.Jsonb({"project_id": pid, "messages": ["private"]})),
+            )
+            c.execute(
+                "INSERT INTO memory(id,project_id,namespace,kind,text,payload) "
+                "VALUES (%s,%s,'project','note','private',%s)",
+                (pid, pid, psycopg.types.json.Jsonb({"id": pid, "project_id": pid})),
+            )
+        c.execute(
+            "INSERT INTO memory(id,namespace,kind,text,payload) VALUES ('global','global','note','shared',%s)",
+            (psycopg.types.json.Jsonb({"id": "global", "project_id": None}),),
+        )
+    import agentlab.db.isolation as isolation
+
+    original = isolation.clone_tables
+
+    def interrupted(c, base_schema, target):
+        original(c, base_schema, target)
+        if target.endswith("proj_old_b"):
+            raise RuntimeError("simulated migration interruption")
+
+    monkeypatch.setattr(isolation, "clone_tables", interrupted)
+    with pytest.raises(RuntimeError, match="interruption"):
+        migrate(database_url)
+    with psycopg.connect(database_url) as c:
+        assert c.execute("SELECT count(*) FROM run").fetchone()[0] == 2
+        assert c.execute("SELECT to_regclass(%s)", (base + ".project_schema",)).fetchone()[0] is None
+    monkeypatch.setattr(isolation, "clone_tables", original)
+    result = migrate(database_url)
+    assert set(result["projects"]) == {"old_a", "old_b"}
+    assert result["projects"]["old_a"]["run_checkpoint"] == 1
+    assert migrate(database_url) == {"already_migrated": True}
+    store = PostgresStore(database_url)
+    assert len(store.list_runs()) == 2
+    assert store.checkpoint("run_old_a") == {"cache": "paid"}
+    assert len(store.records("memory")) == 3
+    with psycopg.connect(database_url, row_factory=dict_row) as c:
+        assert c.execute("SELECT count(*) AS n FROM run").fetchone()["n"] == 0
+        assert c.execute("SELECT count(*) AS n FROM memory").fetchone()["n"] == 1
+        for pid in ("old_a", "old_b"):
+            target = schema_name(base, pid)
+            assert (
+                c.execute(sql.SQL("SELECT project_id FROM {}").format(sql.Identifier(target, "run"))).fetchone()[
+                    "project_id"
+                ]
+                == pid
+            )
+        with pytest.raises(psycopg.errors.RaiseException, match="read-only"):
+            c.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(archive, "run")))
+    # Fresh projects use the same schema path, never the archived tables.
+    fresh = Run(project_id="new_c", goal="new", workspace="/tmp/new")
+    store.create_run(fresh)
+    assert store.get_run(fresh.id).project_id == "new_c"
+    assert len(store.list_runs()) == 3
+
+
+def test_new_revision_upgrades_existing_project_schemas_atomically(database_url, tmp_path):
+    import shutil
+
+    import psycopg
+    from psycopg import sql
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.isolation import schema_name
+    from agentlab.db.migrate import upgrade
+
+    store = PostgresStore(database_url)
+    store.create_run(Run(project_id="before_one", goal="one", workspace="/tmp/one"))
+    store.create_run(Run(project_id="before_two", goal="two", workspace="/tmp/two"))
+    with psycopg.connect(database_url) as c:
+        base = c.execute("SELECT current_schema()").fetchone()[0]
+        # Adopt a pre-fix project without a version table, using the old base version.
+        c.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier(schema_name(base, "before_one"), "alembic_version")))
+    scripts = tmp_path / "alembic"
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/alembic", scripts)
+    revision = scripts / "versions/schema_regression.py"
+    revision.write_text("""from alembic import op
+revision = "schema_regression"
+down_revision = "project_threads"
+def upgrade():
+    op.execute("ALTER TABLE run ADD COLUMN regression_marker text")
+""")
+    upgrade(database_url, script_location=scripts)
+    upgrade(database_url, script_location=scripts)
+    store.create_run(Run(project_id="after", goal="after", workspace="/tmp/after"))
+    schemas = [base, *(schema_name(base, pid) for pid in ("before_one", "before_two", "after"))]
+    with psycopg.connect(database_url) as c:
+        for schema in schemas:
+            assert (
+                c.execute(
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='run' AND column_name='regression_marker'",
+                    (schema,),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                c.execute(
+                    sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version"))
+                ).fetchone()[0]
+                == "schema_regression"
+            )
+    (scripts / "versions/failing_revision.py").write_text("""from alembic import op
+revision = "failing_revision"
+down_revision = "schema_regression"
+def upgrade():
+    op.execute("ALTER TABLE run ADD COLUMN rollback_marker text")
+    if op.get_context().config.attributes["migration_scope"] == "project":
+        raise RuntimeError("project migration failed")
+""")
+    with pytest.raises(RuntimeError, match="project migration failed"):
+        upgrade(database_url, script_location=scripts)
+    with psycopg.connect(database_url) as c:
+        for schema in schemas:
+            assert (
+                c.execute(
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema=%s "
+                    "AND table_name='run' AND column_name='rollback_marker'",
+                    (schema,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                c.execute(
+                    sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version"))
+                ).fetchone()[0]
+                == "schema_regression"
+            )
+
+
+def test_project_upgrade_head_preserves_base_schema(database_url, tmp_path):
+    import shutil
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.migration_scope import base_structure
+
+    PostgresStore(database_url).create_run(Run(project_id="guard_seed", goal="seed", workspace="/tmp/guard"))
+    scripts = tmp_path / "alembic"
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/alembic", scripts)
+    # p2_initial reads its packaged SQL relative to the script root.
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/migrations", tmp_path / "migrations")
+    engine = create_engine(database_url.replace("postgresql://", "postgresql+psycopg://", 1))
+    try:
+        with engine.connect() as c:
+            base = c.execute(text("SELECT current_schema()")).scalar_one()
+            target = base[:20] + "_guard"
+            quote = c.dialect.identifier_preparer.quote
+            c.execute(text(f"CREATE SCHEMA {quote(target)}"))
+            c.commit()
+            config = Config()
+            config.set_main_option("script_location", str(scripts))
+            config.attributes.update(connection=c, migration_scope="project", base_schema=base)
+            with c.begin():
+                c.execute(text(f"SET LOCAL search_path TO {quote(target)}, {quote(base)}, public"))
+                before = base_structure(c, base)
+
+                def base_data():
+                    tables = (
+                        c.execute(
+                            text("SELECT tablename FROM pg_tables WHERE schemaname=:base ORDER BY tablename"),
+                            {"base": base},
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    return {
+                        table: list(
+                            c.execute(
+                                text(
+                                    f"SELECT to_jsonb(t)::text FROM {quote(base)}.{quote(table)} t ORDER BY to_jsonb(t)::text"
+                                )
+                            ).scalars()
+                        )
+                        for table in tables
+                    }
+
+                rows_before = base_data()
+                command.upgrade(config, "head")  # replay all shipped revisions in project scope
+                assert base_structure(c, base) == before
+                assert base_data() == rows_before
+            (scripts / "versions/unsafe_base.py").write_text("""from alembic import op
+revision = "unsafe_base"
+down_revision = "project_threads"
+def upgrade():
+    op.execute("ALTER TABLE run_directory ADD COLUMN unsafe_marker text")
+""")
+            with pytest.raises(RuntimeError, match="changed base schema structure"), c.begin():
+                c.execute(text(f"SET LOCAL search_path TO {quote(target)}, {quote(base)}, public"))
+                command.upgrade(config, "head")
+            assert base_structure(c, base) == before
+            c.rollback()
+    finally:
+        engine.dispose()

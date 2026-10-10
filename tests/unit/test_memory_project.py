@@ -102,7 +102,7 @@ async def test_embedding_outage_degrades_to_keyword_search() -> None:
     m = InMemoryMemoryStore(BrokenEmbedder())
     await m.add([MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT, text=RESUME)])
     hits = await m.search(None, [GLOBAL], "Python")
-    assert hits and hits[0].item.embedding is None and "gateway down" in str(m.stats()["last_error"])
+    assert hits and hits[0].item.embedding is None and m.stats()["last_error"] == "ConnectionError"
 
 
 async def test_run_survives_broken_memory(tmp_path: Path) -> None:
@@ -196,3 +196,23 @@ async def test_driver_injects_global_project_and_own_memory_into_agent_context(t
 def seed_ws(tmp: Path) -> Path:
     from agentlab.demo import seed_demo_workspace
     return seed_demo_workspace(tmp / "ws")
+
+
+async def test_vectors_from_a_different_embedding_version_are_not_mixed() -> None:
+    embedder = FakeEmbedder()
+    embedder.version = 1
+    memory = InMemoryMemoryStore(embedder)
+    await memory.add([MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT, text="resume")])
+    assert (await memory.search(None, [GLOBAL], "career"))[0].item.embedding_version == 1
+    embedder.version = 2
+    assert await memory.search(None, [GLOBAL], "career") == []
+
+
+async def test_bad_embedding_dimensions_degrade_without_marking_ready() -> None:
+    embedder = FakeEmbedder()
+    embedder.dimensions = 3
+    memory = InMemoryMemoryStore(embedder)
+    await memory.add([MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT, text="resume")])
+    assert not memory.stats()["embedding_ready"]
+    assert memory.stats()["last_error"] == "ValueError"
+    assert await memory.search(None, [GLOBAL], "resume")

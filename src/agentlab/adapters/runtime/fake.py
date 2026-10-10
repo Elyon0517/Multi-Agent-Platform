@@ -21,16 +21,33 @@ class FakeRuntime:
         self.calls: list[tuple[str, int]] = []
         self.inputs: list[tuple[str, AgentInput]] = []
 
-    async def run_agent(
-        self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext
-    ) -> AgentResult[T]:
+    async def run_agent(self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext) -> AgentResult[T]:
         ctx.check_budget(self._cost)
         self.calls.append((role, inp.iteration))
         self.inputs.append((role, inp))
-        out = output_type.model_validate(self._scripts[role](inp).model_dump())
+        result: BaseModel
+        if role == "supervisor":
+            from agentlab.core.project_config import Binding, Dispatch
+
+            available = list(inp.context["available_models"])
+            result = Dispatch(
+                assignments={
+                    r: Binding(
+                        alias=("strong" if "strong" in available else available[0]), task=f"Perform {r} for: {inp.goal}"
+                    )
+                    for r in inp.context["roles"]
+                }
+            )
+        else:
+            result = self._scripts[role](inp)
+        out = output_type.model_validate(result.model_dump())
         return AgentResult[output_type](  # type: ignore[valid-type]
-            role=role, output=out, alias="fake", model="fake",
-            usage=Usage(tokens_in=100, tokens_out=50, cost_cents=self._cost), routing_reason="fake",
+            role=role,
+            output=out,
+            alias="fake",
+            model="fake",
+            usage=Usage(tokens_in=100, tokens_out=50, cost_cents=self._cost),
+            routing_reason="fake",
         )
 
     async def run_parallel(
