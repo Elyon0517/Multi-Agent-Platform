@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.5 · P0 / P1 / P2 完成，下一步 P3 与 §16.4 项目隔离 · 可持续更新
+> 状态：v1.6 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（回答 / 任务分流，§2.5、ADR-025），下一步 P2.5 → P3 · 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -18,6 +18,14 @@
 | 7 | munder 的 `window.cth`（Electron IPC）以 `ui/src/bridge.ts` 适配层重实现，场景代码几乎零改动 | 便于对照上游、降低移植风险 | ADR-017 |
 | 6 | 新增「开发 Phase / Steps」章节，替代原里程碑的粗粒度描述；v1.2 按实际进度重排（§16） | 可执行性 | — |
 
+## v1.6 变更摘要（2026-10-10，目标不变，补充交互入口）
+
+| # | 变更 | 原因 | ADR |
+|---|---|---|---|
+| 1 | 新增 **Root 会话层**：用户在对话中只与 root 交流；root 每轮判断意图——**回答**（只读工具检索后直接回复）、**澄清**、或**任务**（交给收敛 Loop） | 原设计中每条消息都会进入编码流水线，问答无法得到回复；参照 Codex / Claude Code 的单一会话入口 | ADR-025 |
+| 2 | 对话窗口显示 root 的回复、任务进度与内联审批，而不只是 run 状态 | 对话是主要交互界面 | ADR-025 |
+| 3 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 实时信息（如天气、最新文档）需要搜索；保持简单 | ADR-026 |
+
 ---
 
 ## 一、项目定位与设计原则
@@ -25,6 +33,7 @@
 | 维度 | 决定 |
 |---|---|
 | 定位 | 个人本地 dev/研究工具，未来开源 |
+| 交互入口 | 对话中只与 root 交流；root 每轮判断「回答 / 澄清 / 任务」，回答直接回复，任务交给收敛 Loop（§2.5） |
 | 核心 MVP | Planner + Coder + Reviewer 的收敛 Loop |
 | 拓扑 | Supervisor（root）自动分派，调度逻辑抽成独立 policy 层（auto / manual 两种 policy） |
 | 消息 | 结构化对象，传 `artifact_id` 引用，**不传全文** |
@@ -44,7 +53,7 @@
 
 ### 四条不可妥协的设计原则
 
-1. **确定性的事情不交给 LLM**：预算熔断、收敛判定、震荡检测、重试、路由，全部是普通 Python 代码。
+1. **确定性的事情不交给 LLM**：预算熔断、收敛判定、震荡检测、重试、路由，全部是普通 Python 代码。root 判断「回答还是做任务」属于语义判断，交给 LLM（§2.5）。
 2. **配置即代码**：YAML + git 管理 agent 定义、模型策略、工具授权；DB 只存运行时状态。配置在加载时严格校验，未知字段直接报错。
 3. **便宜的检查先跑**：编译、类型、lint、测试在 LLM 评审之前，失败直接退回，不花一个 reviewer token。
 4. **一切可回放**：step 树 + artifact 内容寻址 + 事件日志，任何一次 run 都能重放和 diff。
@@ -58,6 +67,10 @@
 ### 三层切分
 
 ```
+Layer 4  Root Session（交互层 · v1.6，§2.5）
+  每条用户消息 → root：回答（查文件 / 记忆 / 上网后直接回复）| 澄清 | 任务（分配给 Layer 3）
+  职责：理解意图、回答问题、把任务进度与审批带回对话
+
 Layer 3  Loop Driver（自研 · 纯 Python · 无框架依赖）
   状态机：PLAN→CODE→GATE→REVIEW→ARBITRATE→HUMAN→DONE
   职责：收敛判定、震荡检测、迭代上限、预算熔断、HIL 卡点、断点续跑（Postgres run / iteration）
@@ -74,6 +87,60 @@ Layer 1  Model Gateway（LiteLLM Proxy → 单一 OpenAI 兼容上游）
 
 ---
 
+## 2.5 Root 会话与意图分流（v1.6 新增，ADR-025）
+
+**问题**：v1.5 及以前，对话里的每条消息都会创建一个编码 run（Planner → Coder → Gate → 评审 → 人工终审），对话中只记录用户原话和 `Run <状态>` 系统消息。用户问一个问题得不到回答，反而触发一整轮流水线。
+
+**目标形态**（参照 Codex / Claude Code）：用户在对话里只和 **root** 说话，像和一个助手聊天。root 自己判断这条消息该怎么处理：能直接回答就回答；需要改代码就把任务分给 multi-agent 团队，并在对话里汇报进度；拿不准就问一句。用户也可以直接说「只回答就行」或「直接改」，root 照做。
+
+分工原则：root 负责理解和沟通，**不自己写代码**；编码交给 §3 的收敛 Loop（Planner / Coder / Gate / 评审 / 人工终审）。
+
+### 2.5.1 流程
+
+```
+用户消息 ──▶ root
+              ├─ 回答 ─▶ 需要时查项目文件、记忆或上网搜索 ─▶ 直接回复（附来源）
+              ├─ 澄清 ─▶ 问用户一个问题
+              └─ 任务 ─▶ 回复「我理解的任务」─▶ 分配给 multi-agent 团队（创建 run）
+                            └─▶ 进度、审批、最终结果回到同一个对话
+```
+
+### 2.5.2 root 的输出（RootTurn）
+
+| 字段 | 含义 |
+|---|---|
+| `intent` | `answer` / `clarify` / `task` |
+| `reply` | 给用户看的回复（Markdown） |
+| `sources` | 回答引用的文件、记忆或网页（可为空） |
+| `task` | 仅 task：整理后的任务目标，交给 Planner |
+
+### 2.5.3 root 能用的能力
+
+- **项目文件**：浏览、读取、搜索当前项目的文件（只读）。
+- **记忆**：检索 global / 项目 / agent 记忆（沿用 §9 的范围）。
+- **上网搜索**：直接使用模型或网关自带的联网搜索能力（ADR-026），不单独接搜索服务。网关不支持时，root 如实说明拿不到实时信息，不编造。
+- **任务进行中提问**：同一对话有正在进行的任务时，root 能看到它的进度、diff 和评审结果，用来回答「现在到哪了？」「为什么测试没过？」这类问题。
+
+为了不失控，只保留两个默认上限：每轮最多 8 次工具调用、每轮有单轮预算（§8）。root 的回答路径本身不改文件；要改代码就走任务路径。
+
+### 2.5.4 对话中显示什么
+
+| 消息 | 作者 | 来源 |
+|---|---|---|
+| 用户输入 | `user` | 用户 |
+| 回答 / 澄清 / 任务确认 | `assistant`（root） | 流式输出 |
+| 任务进度（计划完成、测试结果、评审结论、等待审批） | `system` | 由 run 事件自动生成 |
+| 审批卡片（批准 / 反馈 / 中止） | `system` | 复用现有审批 |
+| 任务结果总结 | `assistant`（root） | 任务结束后 root 总结改了什么、结果如何 |
+
+### 2.5.5 上下文与模型
+
+- **上下文**：当前对话最近 20 条消息 + 项目信息 + 相关记忆。
+- **模型**：使用项目设置的 root 模型（§16.4）。配置上新增 agent 定义 `root`（输出 `root_turn`）；`supervisor` 继续负责 auto 模式下给各 agent 分配模型与任务。
+- **项目外对话**：未选择项目时也可以聊天和提问；要改代码需要先选项目。
+
+---
+
 ## 三、Loop Engine（系统灵魂）
 
 ```
@@ -81,6 +148,8 @@ Task → Planner → Coder → [客观 Gate] → [LLM 评审团] → Arbiter →
                    ↑          │ fail          │ changes      │ 冲突/震荡
                    └──────────┴───────────────┘              └→ Human
 ```
+
+Task 的来源：root 会话判定为任务（§2.5），或在控制台、CLI 直接创建 run。问答类消息不进入本 Loop。
 
 1. **客观 Gate 前置**：build / typecheck / lint / test / diff 合法性先跑，失败退回 Coder，不消耗 reviewer token。
 2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。baseline/current 使用临时 index 的 `git write-tree` 捕获工作区，保留用户 index；快照对象也保存在独立临时对象库，用户对象库仅作为只读 alternate。大文件、二进制和脱敏内容显示 Git 改动元数据；大文件变为短源码时同时展示当前完整内容，不能因上下文过滤而变成空 diff。
@@ -157,7 +226,8 @@ Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化�
 
 | Role | 输入 | 输出 artifact | 默认模型别名 |
 |---|---|---|---|
-| supervisor (root) | 任务 + project 配置 | 调度决策（policy 层） | `root` |
+| root（会话，v1.6） | 用户消息 + 对话历史 + 项目信息 + 文件 / 记忆 / 搜索结果 | `root_turn`（回答 / 澄清 / 任务，§2.5） | 项目 root 模型 |
+| supervisor (root) | 任务 + project 配置 | 调度决策（policy 层，auto 模式 Dispatch） | `root` |
 | planner | 需求 + 仓库上下文 + semantic memory | `plan`（含验收标准） | `strong` |
 | coder | plan + gate 报告 + arbiter 指令 | `diff` | `strong` |
 | reviewer × 3 | 需求 + 验收标准 + diff + gate 输出 | `review`（结构化 JSON） | `strong` / `strong-alt` / `cheap` |
@@ -223,6 +293,7 @@ embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），�
 1. LiteLLM virtual key（每 project 一把）—— `max_budget` / `rpm_limit` / 模型白名单（S2 起）。
 2. 应用层熔断中间件（ADK `before_model_callback` / raw runtime 调用前）—— 估算成本，超 run 预算直接短路，run 置 `WAITING_HUMAN`。
 3. per-run 软预算 —— `run.budget_cents`，80% 告警，实际 usage 达到预算后，在下一批付费调用前暂停；已返回的成功结果先保存。
+4. root 会话单轮上限（v1.6）—— 默认每轮最多 8 次工具调用 + 单轮预算 `budget.ask.max_turn_cents`；超限时停止并在回复中说明。会话花费计入项目账目。
 
 估算系数由 `models.yaml` 每个别名控制：`estimate_input_tokens_per_byte`（输入 UTF-8 字节到 token 的系数）与 `estimate_output_token_ratio`（输出 token 上限的预留比例）。当前均为 0.5；实际 usage 按完整账单计费，不乘估算系数。缺省均为 1.0，便于选择保守模式。可用预算约为总预算减去下一批调用的预估；80,000 字节 prompt、16384 输出上限及当前价格下，每 reviewer 预估 36.384c，三人共 109.152c。系数为估算策略，不保证网关结算硬上限。
 
@@ -272,10 +343,16 @@ memory     (id, project_id NULL for global, namespace, kind [document|note|episo
             embedding_version, source_run_id, valid_from, valid_to, superseded_by, pinned, tsv)
 approval   (id, run_id, reason, payload jsonb, status, decided_by, decided_at)
 event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：可视化与回放的唯一事件流
+thread     (id, project_id NULL, title, created_at)                             -- v1.6：对话
+message    (id, thread_id, seq, author user|assistant|system, kind, text, run_id NULL,
+            turn_id NULL, sources jsonb, created_at)                           -- v1.6：逐条存储，替代整段 JSON
+root_turn  (id, thread_id, user_message_id, intent, tool_calls jsonb,
+            prompt_ref, response_ref, tokens, cost_cents, created_at)          -- v1.6：可回放、可计费
 ```
 
 - v1.1 新增 `event` 表：Office Floor、Run 树、TUI 都只消费这条事件流（SSE），见 §15.3。
 - `prompt_ref / response_ref / content_ref` 指向 blob 存储（本地文件，sha256 寻址），DB 不存大文本。
+- v1.6：对话事件（`message.created`、`message.delta` 流式输出、`turn.finished`）与 run 事件共用 SSE，按 `thread_id` 订阅；任务进度消息由 run 事件确定性生成。`project_id` 为 NULL 的对话存于 `public`，其余存于各项目 schema。
 - 隔离：单 Postgres 实例，每 project 一个 schema（`proj_<id>`）。导出 = `pg_dump -n schema`。
 
 ---
@@ -293,6 +370,7 @@ event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：
 | 命令执行 | argv 列表、不经 shell、可执行文件白名单（借鉴 homerail `command` 节点） |
 | 密钥 | 永不进 agent 进程与沙箱；LLM key 只在 daemon/网关进程 |
 | 危险操作 | 写 workspace 外、开网络、force push、删分支 → `approval` 卡点 |
+| root 会话（v1.6） | 回答时只读项目文件，不改代码；上网搜索由模型 / 网关自带能力完成（§2.5.3） |
 
 写 workspace 外或秘密文件的尝试会暂停并生成审批；批准仅恢复到 Coder，用新反馈生成合法修改，不授权突破 workspace 边界。只有 signoff + FULL Gate 之后的批准才能完成项目 step。
 
@@ -382,7 +460,7 @@ agentlab/
 | 版本 | 内容 |
 |---|---|
 | v0（只读） | **Office Floor**、Run 列表、Run 时间线（iteration × phase）、Gate 诊断表、3 个 reviewer verdict 并排对比、成本与 token 看板 |
-| v1（交互） | 审批卡点（approve / reject+反馈）、恢复暂停的 run、调整 budget 与 max_iter |
+| v1（交互） | **对话窗口为主入口（v1.6）**：root 回复流式显示、来源引用、任务进度消息与内联审批卡片；审批卡点（approve / reject+反馈）、恢复暂停的 run、调整 budget 与 max_iter |
 | v2（深度） | React Flow step 树、Monaco diff viewer、从任意 iteration 回放、memory 浏览与 pin、Memory Graph |
 
 ### 15.2 从 munder-difflin 移植的内容（ADR-011）
@@ -445,6 +523,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P0 | 架构骨架 | **完成** | 2026-10-09；fake 模型下 loop 端到端跑通，UI 可视化可演示 |
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
+| P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 未开始 | 对话目前只记录用户原话与 run 状态，没有 root 回复；每条消息都会进入编码流水线 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
@@ -562,6 +641,24 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] CLI：`resume / status / show / decide`
 - 演示：真实小 repo 跑到一半 kill -9，resume 后完成
 
+#### P2.5 · Root 会话层（v1.6，约 2 天）
+目标：在对话中提问能直接得到回答；提出编码需求时 root 把任务分给 multi-agent 团队，进度与审批都回到对话里（§2.5）。
+
+- [ ] 对话消息逐条落库（`thread` / `message` / `root_turn`），支持 user / assistant / system 三种作者
+- [ ] `config/agents/root.yaml` + `prompts/root.md`：输出 `RootTurn`，模型跟随项目 root
+- [ ] root 能力：读项目文件、检索记忆、任务进行中查看进度与 diff
+- [ ] 上网搜索：先用 `agentlab ping` 确认网关是否支持模型自带搜索；支持就打开，不支持时 root 如实说明
+- [ ] 默认上限：每轮最多 8 次工具调用 + 单轮预算
+- [ ] 回复流式输出；任务进度消息由 run 事件自动生成；审批卡片显示在对话中；任务结束由 root 总结
+- [ ] UI：对话窗口为主入口
+
+验收（加入 P8 评测集）：
+- 「这个仓库的入口文件是哪个？」→ 直接回答并引用文件，不创建任务
+- 「上传的文档里关于 X 是怎么说的？」→ 直接回答并引用记忆
+- 「今天天气怎么样？」→ 网关支持搜索时回答并附来源；不支持时说明无法获取，不编造
+- 「把 calc.add 修好让测试通过」→ 分配为任务，进度与审批出现在对话中
+- 「帮我看看这个函数」→ 先回答或问一句，不直接改代码
+
 #### P3 · S2 评审团真实化 + HIL（2–3 天）系统真正形态
 - [x] 3 个 reviewer 并行、互相不可见（fake 下验证）
 - [x] Arbiter 冲突打包升级（fake 下验证）
@@ -631,7 +728,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 |---|---|---|
 | 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 尚未接入循环 |
 | auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
-| 左侧 project → 对话 → run | Conversation/Message 持久化；thread 可关联多 run；用户目标与终止状态写入历史，最近 20 条作为下一 run 上下文 | project/thread 归属先验证，消息与 run 创建同事务；目前是任务对话，不是通用即时聊天 |
+| 左侧 project → 对话 → run | Conversation/Message 持久化；thread 可关联多 run；用户目标与终止状态写入历史，最近 20 条作为下一 run 上下文 | project/thread 归属先验证，消息与 run 创建同事务；目前每条消息都会创建 run，root 不回复——由 v1.6 Root 会话层（§2.5、P2.5）补齐回答 / 澄清 / 任务分流 |
 | 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
 | 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
 | 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
@@ -663,6 +760,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | Hybrid 检索 | pgvector 官方示例 + RRF | HNSW 参数、tsvector 融合 |
 | **可视化** | **munder-difflin**（已移植完毕，见 §15.2 与 `ui/THIRD_PARTY_NOTICES.md`） | Pixi office floor、状态→动画映射、像素设计系统 |
 | **DAG 严格语义** | **homerail**（已消化完毕，ADR-014 + P8 评分卡结构） | WorkflowSpec 严格校验、while 静态上限、command 白名单、scorecard/replay |
+| **会话入口（v1.6）** | OpenAI Codex CLI、Claude Code | 单一会话入口；先只读探索再行动；只读与写操作分级授权；风险操作需用户批准；回复中引用文件位置 |
 
 ---
 
@@ -681,6 +779,8 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | 单网关单 key（v1.1） | 网关限流影响所有角色 | 角色级 RPM 配置 + 预算中间件；reviewer 并发可配 |
 | munder 移植代码量大（~5.6k 行场景 + 组件） | 维护负担 | 只改数据适配层，场景代码尽量保持原样便于对照上游 |
 | LimeZu 素材许可（v1.1） | 开源分发受限（"不可再分发素材"） | 开源前评估：替换为自绘/CC0 素材或要求使用者自购；署名常驻 |
+| root 意图误判（v1.6） | 问题被当成任务，或任务被当成问题 | 用户可以直接说「只回答」或「直接改」；即使误开任务，也要经过 Gate、评审与人工终审才会完成 |
+| 会话成本累积（v1.6） | 频繁提问持续花费 | 默认单轮预算与 8 次工具调用上限；会话花费计入项目账目 |
 
 ---
 
@@ -691,6 +791,8 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - [ ] C++ Gate 的 GTest 发现策略：CTest 注册 vs 直接跑二进制
 - [ ] Java 项目 Maven 与 Gradle 优先级
 - [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
+- [ ] （v1.6）确认当前网关是否支持模型自带的联网搜索（P2.5 实现时用 `agentlab ping` 检测）
+- [x] （v1.6）root 每轮默认最多 8 次工具调用、使用默认单轮预算（用户确认）
 - [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**LimeZu 素材替换方案**
 
 ---
@@ -723,6 +825,8 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-022 | 控制台做精简版（8 标签），不整体移植 CommandCenterPanel | 2026-10-09 | 用户选择；原版大半依赖 PTY / 触发器 |
 | ADR-023 | API key 由 UI 写入本地 `.env`（chmod 600），后端只回 mask | 2026-10-09 | 用户选择 .env；最简单且已在 .gitignore |
 | ADR-024 | memory 故障降级为关键词检索，hook 异常不改变 run 结果 | 2026-10-09 | 实测：网关不可达时 embedding 报错曾导致 run 卡死 |
+| ADR-025 | 新增 Root 会话层：每条用户消息先由 root 判断 回答 / 澄清 / 任务；回答走只读工具直接回复，任务交给收敛 Loop，进度与审批回到对话 | 2026-10-10 | 用户要求：对话应能直接得到回复，编码需求再分配任务（参照 Codex / Claude Code）；root 不自行编码，保留 Gate、多模型评审与人工终审 |
+| ADR-026 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 2026-10-10 | 用户要求保持简单；系统重点是 multi-agent 分工，而不是增加限制 |
 
 
 ### 可靠性复核补充（2026-10-09）
