@@ -3,17 +3,20 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentlab.adapters.runtime.fake import FakeRuntime
 from agentlab.adapters.runtime.raw import RawRuntime
+from agentlab.adapters.workspace import GitWorkspace
 from agentlab.bootstrap import build_services
 from agentlab.core.conversation import Conversation, RootTurn
 from agentlab.core.llm.structured import Completion, StructuredCaller
-from agentlab.core.schemas import CoderOutput, FileEdit, Plan, RunStatus
+from agentlab.core.schemas import CoderOutput, FileEdit, Plan, RunStatus, new_id
 from agentlab.core.session.service import SessionService
 from agentlab.demo import demo_scripts, seed_demo_workspace
+from agentlab.evaluation.fixtures import InvalidFixture, changed_files, require_test_failure
 from agentlab.settings import Settings
 from agentlab.workspaces import evaluation_workspace_root
 
@@ -42,6 +45,8 @@ def check(name: str, passed: bool, detail: str, source: str = "runtime", severit
 async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
     data = json.loads(manifest.read_text())
     cards = []
+    results_dir = Settings().data_dir.resolve() / "eval-results" / new_id()
+    results_dir.mkdir(parents=True, exist_ok=True)
     eval_dir = evaluation_workspace_root()
     with tempfile.TemporaryDirectory(prefix="agentlab-eval-", dir=eval_dir) as temp:
         root = Path(temp)
@@ -59,6 +64,10 @@ async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
             original_test = (workspace / "test_calc.py").read_bytes()
             driver = svc.driver(workspace, runtime, "python")
             if runtime == "fake":
+                from agentlab.adapters.gates.config_gate import resolve_gate
+
+                driver.gate = resolve_gate(svc.gates(), workspace, "python")
+                driver.recovery_options["gate"] = driver.gate.cfg.model_dump(mode="json")
                 scripts = demo_scripts()
                 scripts["planner"] = lambda inp: Plan(
                     summary=inp.goal, steps=["Fix implementation"], acceptance_criteria=["Tests pass unchanged"]
@@ -70,11 +79,36 @@ async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
 
                 scripts["coder"] = coder
                 driver.runtime = FakeRuntime(scripts)
+            run = None
+            original_files: dict[str, bytes] = {}
+            final_diff = ""
+            changed: list[str] = []
+            baseline_result = None
             try:
                 await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
+                original_files = {
+                    path: (workspace / path).read_bytes()
+                    for path in await cast(GitWorkspace, driver.workspace).source_files()
+                }
+                baseline_result = await require_test_failure(driver.gate, workspace)
                 run = await driver.create_async(task["goal"])
                 run = await driver.run(run.id)
+                final_diff = await driver.workspace.diff()
+                changed = changed_files(
+                    original_files,
+                    {
+                        path: (workspace / path).read_bytes()
+                        for path in await cast(GitWorkspace, driver.workspace).source_files()
+                    },
+                )
                 checks = [
+                    check("fixture_baseline", True, "Full Gate fails only at test", "fixture"),
+                    check(
+                        "expected_files_only",
+                        set(changed) <= set(task.get("allowed_files", ["calc.py"])),
+                        ", ".join(changed),
+                        "workspace",
+                    ),
                     check(
                         "signoff",
                         run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "signoff",
@@ -104,8 +138,40 @@ async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
                 ]
                 cards.append(scorecard(task["id"], checks, int(runtime == "fake")))
             except Exception as exc:
-                cards.append(scorecard(task["id"], [check("execution", False, type(exc).__name__)]))
+                fixture_error = isinstance(exc, InvalidFixture)
+                if isinstance(exc, InvalidFixture):
+                    baseline_result = exc.result
+                card = scorecard(
+                    task["id"],
+                    [
+                        check(
+                            "fixture_baseline" if fixture_error else "execution",
+                            False,
+                            str(exc) if fixture_error else type(exc).__name__,
+                            "fixture" if fixture_error else "runtime",
+                        )
+                    ],
+                )
+                card["failure_kind"] = "fixture" if fixture_error else "execution"
+                cards.append(card)
             finally:
+                if run is not None and not final_diff:
+                    with suppress(Exception):
+                        final_diff = await driver.workspace.diff()
+                diff_path = results_dir / (task["id"] + ".diff")
+                diff_path.write_text(final_diff)
+                cards[-1].update(
+                    final_diff=final_diff,
+                    diff_path=str(diff_path),
+                    changed_files=changed,
+                    stopped_reason=(run.paused_reason or str(run.status))
+                    if run
+                    else cards[-1].get("failure_kind", "execution"),
+                    baseline_gate=baseline_result.model_dump(mode="json") if baseline_result else None,
+                )
+                (results_dir / (task["id"] + ".json")).write_text(
+                    json.dumps(cards[-1], ensure_ascii=False, indent=2) + "\n"
+                )
                 driver.workspace.close()  # type: ignore[attr-defined]
         for case in data["conversations"]:
             project = svc.projects.create(
@@ -204,8 +270,11 @@ async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
             finally:
                 svc.runtime = original_runtime  # type: ignore[method-assign]
     checks = [check(card["run_id"], card["passed"], card["verdict"], "scorecard") for card in cards]
-    return {
+    report = {
         **scorecard("baseline", checks, sum(c["blind_spot_count"] for c in cards)),
         "runtime": runtime,
         "scorecards": cards,
+        "results_dir": str(results_dir),
     }
+    (results_dir / "scorecard.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    return report

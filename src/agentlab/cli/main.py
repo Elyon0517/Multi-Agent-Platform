@@ -179,9 +179,9 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
             driver = svc.driver(workspace, "raw", "python")
             driver.hooks = NoHooks()  # isolate convergence from optional RAG/embedding calls
             await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
-            baseline = await driver.gate.run(workspace, GateMode.FAST)
-            if baseline.passed or baseline.failed_at != "test":
-                raise RuntimeError("smoke baseline must fail specifically at the tests")
+            from agentlab.evaluation.fixtures import require_test_failure
+
+            await require_test_failure(driver.gate, workspace, GateMode.FAST)
             typer.echo(f"Trial {index + 1}/{trials}: baseline tests fail; starting real model loop", err=True)
             run = await driver.run(
                 driver.create(

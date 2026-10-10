@@ -2,8 +2,13 @@
 
 Run `uv run agentlab eval --output evals/results/latest.json` for the deterministic
 baseline: ten fixed Python repairs plus the five DISCOVERY §2.5 conversation cases.
+Each repair first runs the full Python Gate and requires failure specifically at `test`;
+a failure at typecheck, lint or format is reported as `failure_kind: fixture`, before any
+model call. Fake mode also uses the full Gate rather than the pytest-only demo Gate.
 Each repair executes the real objective Gate and review loop, stops at human signoff,
-and verifies original tests, budget and the three-reviewer panel. Task conversations
+and verifies original tests, budget and the three-reviewer panel. The manifest
+`allowed_files` check fails when files other than `calc.py` change, including Gate
+configuration; this is a scoring check, not an execution restriction. Task conversations
 use the same run creation service as the API and verify progress and approval messages.
 
 Scorecards contain checks (`name`, `passed`, `severity`, `gate`, `source_type`, `detail`)
@@ -23,5 +28,9 @@ is enabled only for the exact probed gateway/model. Search request/response blob
 tool results and usage are persisted with each root turn. `budget.ask.web_search_cents`
 is a configurable gateway search fee estimate, added to actual token usage; adjust it
 to the gateway's billing schedule. Chat search with no citation evidence is not enabled.
+
+Each evaluation saves `scorecard.json`, per-task JSON records and final `.diff` files
+under `data_dir/eval-results/<id>`. Records include `stopped_reason`, `changed_files`
+and the initial Gate result, and survive disposable workspace cleanup.
 
 Results are generated locally; do not commit machine-specific transcripts or credentials.

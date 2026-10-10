@@ -1,2 +1,2 @@
-def absolute(a):
+def absolute(a: int) -> int:
     return a

@@ -3,52 +3,82 @@
     {
       "id": "py-fix-add",
       "goal": "Fix calc.add so all tests pass. Preserve the tests.",
-      "solution": "def add(a, b):\n    \"\"\"Compute add.\"\"\"\n    return a + b\n"
+      "solution": "def add(a: int, b: int) -> int:\n    \"\"\"Compute add.\"\"\"\n    return a + b\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-subtract",
       "goal": "Fix calc.subtract so all tests pass. Preserve the tests.",
-      "solution": "def subtract(a, b):\n    \"\"\"Compute subtract.\"\"\"\n    return a - b\n"
+      "solution": "def subtract(a: int, b: int) -> int:\n    \"\"\"Compute subtract.\"\"\"\n    return a - b\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-multiply",
       "goal": "Fix calc.multiply so all tests pass. Preserve the tests.",
-      "solution": "def multiply(a, b):\n    \"\"\"Compute multiply.\"\"\"\n    return a * b\n"
+      "solution": "def multiply(a: int, b: int) -> int:\n    \"\"\"Compute multiply.\"\"\"\n    return a * b\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-divide",
       "goal": "Fix calc.divide so all tests pass. Preserve the tests.",
-      "solution": "def divide(a, b):\n    \"\"\"Compute divide.\"\"\"\n    return a / b\n"
+      "solution": "def divide(a: int, b: int) -> float:\n    \"\"\"Compute divide.\"\"\"\n    return a / b\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-negate",
       "goal": "Fix calc.negate so all tests pass. Preserve the tests.",
-      "solution": "def negate(a):\n    \"\"\"Compute negate.\"\"\"\n    return -a\n"
+      "solution": "def negate(a: int) -> int:\n    \"\"\"Compute negate.\"\"\"\n    return -a\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-absolute",
       "goal": "Fix calc.absolute so all tests pass. Preserve the tests.",
-      "solution": "def absolute(a):\n    \"\"\"Compute absolute.\"\"\"\n    return abs(a)\n"
+      "solution": "def absolute(a: int) -> int:\n    \"\"\"Compute absolute.\"\"\"\n    return abs(a)\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-minimum",
       "goal": "Fix calc.minimum so all tests pass. Preserve the tests.",
-      "solution": "def minimum(a, b):\n    \"\"\"Compute minimum.\"\"\"\n    return min(a, b)\n"
+      "solution": "def minimum(a: int, b: int) -> int:\n    \"\"\"Compute minimum.\"\"\"\n    return min(a, b)\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-maximum",
       "goal": "Fix calc.maximum so all tests pass. Preserve the tests.",
-      "solution": "def maximum(a, b):\n    \"\"\"Compute maximum.\"\"\"\n    return max(a, b)\n"
+      "solution": "def maximum(a: int, b: int) -> int:\n    \"\"\"Compute maximum.\"\"\"\n    return max(a, b)\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-clamp",
       "goal": "Fix calc.clamp so all tests pass. Preserve the tests.",
-      "solution": "def clamp(a, lo, hi):\n    \"\"\"Compute clamp.\"\"\"\n    return min(max(a, lo), hi)\n"
+      "solution": "def clamp(a: int, lo: int, hi: int) -> int:\n    \"\"\"Compute clamp.\"\"\"\n    return min(max(a, lo), hi)\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     },
     {
       "id": "py-fix-square",
       "goal": "Fix calc.square so all tests pass. Preserve the tests.",
-      "solution": "def square(a):\n    \"\"\"Compute square.\"\"\"\n    return a * a\n"
+      "solution": "def square(a: int) -> int:\n    \"\"\"Compute square.\"\"\"\n    return a * a\n",
+      "allowed_files": [
+        "calc.py"
+      ]
     }
   ],
   "conversations": [

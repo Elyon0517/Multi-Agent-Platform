@@ -359,6 +359,7 @@ async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatc
     from agentlab.evaluation import baseline
 
     monkeypatch.setattr(baseline, "evaluation_workspace_root", lambda: tmp_path)
+    monkeypatch.setenv("AGENTLAB_DATA_DIR", str(tmp_path / "state"))
     manifest = tmp_path / "baseline.json"
     manifest.write_text('{"tasks": []}')
 

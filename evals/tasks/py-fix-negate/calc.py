@@ -1,2 +1,2 @@
-def negate(a):
+def negate(a: int) -> int:
     return a
