@@ -83,14 +83,19 @@ def test_five_discovery_conversations(tmp_path: Path, case: str):
         else:
             import time
 
-            for _ in range(100):
+            # The fake loop still runs real pytest subprocesses for each Gate.
+            # Cold CI runners can take longer than five seconds to reach signoff.
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
                 messages = client.get(f"/projects/{project.id}/threads").json()[0]["messages"]
                 if any(m["kind"] == "summary" for m in messages) and any(m["kind"] == "approval" for m in messages):
                     break
                 time.sleep(0.05)
             assert any(m["kind"] == "progress" for m in messages)
-            assert any(m["kind"] == "approval" for m in messages)
-            assert any(m["kind"] == "summary" for m in messages)
+            run = svc.store.get_run(data["run"]["id"])
+            diagnostic = f"run={run.status}, paused_reason={run.paused_reason}, messages={messages}"
+            assert any(m["kind"] == "approval" for m in messages), diagnostic
+            assert any(m["kind"] == "summary" for m in messages), diagnostic
             assert all("step.finished:" not in m["text"] for m in messages)
             assert len([e for e in published if e.type == "turn.finished"]) >= 2
         turns = svc.store.records("root_turn")
