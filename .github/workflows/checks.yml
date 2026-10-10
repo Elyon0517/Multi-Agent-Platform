@@ -1,0 +1,33 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentlab
+          POSTGRES_PASSWORD: agentlab
+          POSTGRES_DB: agentlab
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U agentlab -d agentlab"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AGENTLAB_TEST_DATABASE_URL: postgresql://agentlab:agentlab@localhost:5432/agentlab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install uv
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run mypy src
+      - run: uv run pytest -q

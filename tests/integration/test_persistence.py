@@ -618,3 +618,72 @@ def upgrade():
                 ).fetchone()[0]
                 == "schema_regression"
             )
+
+
+def test_project_upgrade_head_preserves_base_schema(database_url, tmp_path):
+    import shutil
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.db.migration_scope import base_structure
+
+    PostgresStore(database_url).create_run(Run(project_id="guard_seed", goal="seed", workspace="/tmp/guard"))
+    scripts = tmp_path / "alembic"
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/alembic", scripts)
+    # p2_initial reads its packaged SQL relative to the script root.
+    shutil.copytree(Path(__file__).parents[2] / "src/agentlab/db/migrations", tmp_path / "migrations")
+    engine = create_engine(database_url.replace("postgresql://", "postgresql+psycopg://", 1))
+    try:
+        with engine.connect() as c:
+            base = c.execute(text("SELECT current_schema()")).scalar_one()
+            target = base[:20] + "_guard"
+            quote = c.dialect.identifier_preparer.quote
+            c.execute(text(f"CREATE SCHEMA {quote(target)}"))
+            c.commit()
+            config = Config()
+            config.set_main_option("script_location", str(scripts))
+            config.attributes.update(connection=c, migration_scope="project", base_schema=base)
+            with c.begin():
+                c.execute(text(f"SET LOCAL search_path TO {quote(target)}, {quote(base)}, public"))
+                before = base_structure(c, base)
+
+                def base_data():
+                    tables = (
+                        c.execute(
+                            text("SELECT tablename FROM pg_tables WHERE schemaname=:base ORDER BY tablename"),
+                            {"base": base},
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    return {
+                        table: list(
+                            c.execute(
+                                text(
+                                    f"SELECT to_jsonb(t)::text FROM {quote(base)}.{quote(table)} t ORDER BY to_jsonb(t)::text"
+                                )
+                            ).scalars()
+                        )
+                        for table in tables
+                    }
+
+                rows_before = base_data()
+                command.upgrade(config, "head")  # replay all shipped revisions in project scope
+                assert base_structure(c, base) == before
+                assert base_data() == rows_before
+            (scripts / "versions/unsafe_base.py").write_text("""from alembic import op
+revision = "unsafe_base"
+down_revision = "project_threads"
+def upgrade():
+    op.execute("ALTER TABLE run_directory ADD COLUMN unsafe_marker text")
+""")
+            with pytest.raises(RuntimeError, match="changed base schema structure"), c.begin():
+                c.execute(text(f"SET LOCAL search_path TO {quote(target)}, {quote(base)}, public"))
+                command.upgrade(config, "head")
+            assert base_structure(c, base) == before
+            c.rollback()
+    finally:
+        engine.dispose()

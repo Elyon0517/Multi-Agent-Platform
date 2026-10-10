@@ -16,7 +16,7 @@ Design doc (source of truth): [`docs/DISCOVERY.md`](docs/DISCOVERY.md). Phases a
 
 P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and knowledge/project services. P2 PostgreSQL persistence and CLI resume are implemented. The real gateway and Docker Python gate are connected; project-specific auto/manual scheduling and persistent conversations are now connected to the UI.
 
-Verified on 2026-10-10: 184 backend tests (including 18 persistence integration cases), 19 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runs, projects, memory versions, model attempts and recovery checkpoints persist when PostgreSQL is configured. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
+Verified on 2026-10-10: 185 backend tests (including 19 persistence integration cases), 19 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runs, projects, memory versions, model attempts and recovery checkpoints persist when PostgreSQL is configured. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
 
 Execution failures pause for human intervention. Only reviewed signoff plus the full gate can be approved as complete; budget pauses require an explicit increase. The console approval panel accepts budget and iteration limits. SSE resumes from Last-Event-ID and deduplicates replayed usage. Diffs are based on the run-start snapshot without changing the Git index. Alembic adopts the existing bootstrap SQL and applies subsequent migrations automatically.
 

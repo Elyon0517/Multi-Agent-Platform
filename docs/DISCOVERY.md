@@ -800,3 +800,12 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - **访问控制边界：物理 schema 用于项目数据归档、导出和删除范围管理；访问控制仍由应用层按 project_id/角色过滤。** 当前使用同一数据库账号，records()/list_runs() 会遍历项目 schemas，PersistentMemoryStore 会把各项目记忆加载到同一进程后再按授权范围检索；数据库权限没有阻止跨项目读取。这不是数据库账号级隔离，也不是独立进程隔离。
 
 本轮验证：后端 184 项，包含 18 项持久化集成测试；ruff、mypy、config-check 通过。前端代码未改动。
+
+
+### 16.1k · 迁移范围守护
+
+revision 统一导入 `agentlab.db.migration_scope.is_project_scope()`；基础表操作必须先在项目范围下 return，再使用 `base_table("表名")` 得到限定 schema 的 SQL 标识符。`base_table` 在项目范围下调用会报错，防止辅助函数被误用。共享 vector 扩展仅在 base scope 创建。
+
+env.py 实际读取 migration_scope；项目范围执行前后比较基础 schema 的表/列/默认值/约束/索引/触发器定义，发现变化即报错，由外层事务整体回滚。它不能拦住绕过辅助函数的任意共享表 UPDATE；基础数据迁移仍必须遵守 scope 与限定 schema 约定。
+
+守护测试从空项目 schema 重放当前 upgrade head，要求基础表结构及路由目录数据不变；并注入一条未限定 schema 的 ALTER TABLE run_directory，验证环境守护检测和回滚。GitHub Checks 配置 PostgreSQL/pgvector，确保此集成测试在 CI 中执行，不因未提供数据库 URL 而跳过。
