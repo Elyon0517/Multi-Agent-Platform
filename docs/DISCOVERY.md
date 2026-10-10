@@ -1,7 +1,7 @@
 # Agent Converge Discovery
 
 > 状态：v1.4 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
-> 最近更新：2026-10-09
+> 最近更新：2026-10-10
 > 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
 > 适用范围：个人本地 dev/研究工具，面向未来开源
@@ -83,7 +83,7 @@ Task → Planner → Coder → [客观 Gate] → [LLM 评审团] → Arbiter →
 ```
 
 1. **客观 Gate 前置**：build / typecheck / lint / test / diff 合法性先跑，失败退回 Coder，不消耗 reviewer token。
-2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。baseline/current 使用临时 index 的 `git write-tree` 捕获工作区，保留用户 index。大文件、二进制和脱敏内容显示 Git 改动元数据；大文件变为短源码时同时展示当前完整内容，不能因上下文过滤而变成空 diff。
+2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。baseline/current 使用临时 index 的 `git write-tree` 捕获工作区，保留用户 index；快照对象也保存在独立临时对象库，用户对象库仅作为只读 alternate。大文件、二进制和脱敏内容显示 Git 改动元数据；大文件变为短源码时同时展示当前完整内容，不能因上下文过滤而变成空 diff。
 3. **结构化评审 + severity 阈值**：`blocking + major == 0` 即 signoff；minor / nit 只记录。
 4. **四个终止条件**：
 
@@ -719,4 +719,15 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 已替换文本快照拼接；新增大文件缩小、二进制/大文件变更与删除、mode 变化、ignored Coder 文件、用户 staged index 保留、密钥不落入新 Git blob、跨行冲突、未知 subject、可配置估算、事件线程与缓存冻结/清理的回归用例。reject/abort/终止会清理 run 的缓存；已成功交付的 batch 立即释放输入快照。Git baseline tree ID 与 batch 仍需 P2 持久化才能跨重启恢复。
 
-当前验收：后端 132 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
+上一轮验收：后端 132 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
+
+
+### 子仓库与快照性能复核（2026-10-10）
+
+- 子模块和内嵌仓库使用原生 mode `160000` + 子仓库 HEAD；未初始化的 gitlink 保留 index 中的 commit。无 HEAD 的内嵌仓库展示可见标记；dirty 子仓库展示状态/patch 指纹，内部详细评审需在该子仓库运行独立 project。
+- 文件先做密钥检测和脱敏，再通过单次 `hash-object -w --no-filters --stdin-paths` 批量哈希；index 与 object database 均隔离在临时目录，不往用户 `.git/objects` 写入快照对象。objects 通过只读 alternate 引用原仓库，run 终止/abort 释放临时对象，进程退出由临时目录生命周期回收。P2 须同时持久化对象库和 tree 引用，不能只保存 tree ID。
+- 本机 2000 小文件基准：begin_run 1.321s，单文件改变后的 diff 0.590s，父仓库新增对象 0。回归校验每次 snapshot 仅一个 hash-object 请求，父仓库 objects/index 不变；测试不依赖易波动的时间阈值。
+- 文件不可读使用 `workspace_unreadable`，与 `workspace_escape` 区分；API baseline 不可读返回 422 和安全错误类型，而非 500。
+- execution_error 批准重试仍保留同一批冻结输入和成功结果，避免再次付费；该批缓存不因反复批准而新增条目。成功交付、reject、abort、终止清理。P2 持久化须保留上述生命周期，并为长期暂停运行设计显式归档/清理机制。
+
+当前验收：后端 141 项、前端 17 项，ruff / mypy 通过；真实模型 Docker smoke 1/1，一轮 signoff，FULL Gate 通过，原测试未改。

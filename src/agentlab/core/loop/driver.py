@@ -103,7 +103,7 @@ class Driver:
                                on_approve=run.status)
             except Exception as exc:
                 # Exceptions can contain prompts/keys. Persist only a safe error class.
-                reason = "workspace_escape" if isinstance(exc, PermissionError) else "execution_error"
+                reason = getattr(exc, "kind", "workspace_unreadable") if isinstance(exc, OSError) else "execution_error"
                 self._escalate(run, reason, {
                     "error_type": type(exc).__name__, "error_kind": getattr(exc, "kind", "execution_error")
                 }, on_approve=run.status)
@@ -112,6 +112,9 @@ class Driver:
         if run.status in TERMINAL and run.id not in self._finished:
             self._finished.add(run.id)
             self._clear_agent_cache(run.id)
+            close = getattr(self.workspace, "close", None)
+            if close:
+                close()
             try:
                 await self.hooks.on_finished(run)
             except Exception:  # post-run bookkeeping must not change the outcome

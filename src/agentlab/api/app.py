@@ -109,7 +109,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
         except (MissingGatewayConfig, NoGateDetected) as e:
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
         await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
-        run = await driver.create_async(body.goal, project_id=body.project_id or "default")
+        try:
+            run = await driver.create_async(body.goal, project_id=body.project_id or "default")
+        except OSError as exc:
+            driver.workspace.close()  # type: ignore[attr-defined]
+            raise HTTPException(422, {"reason": "workspace_unreadable", "error_type": type(exc).__name__}) from exc
         if body.project_id and body.step_id:
             try:
                 svc.projects.link_run(body.project_id, body.step_id, run.id)

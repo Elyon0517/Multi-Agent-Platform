@@ -26,6 +26,10 @@ from agentlab.core.schemas import (
 T = TypeVar("T", bound=BaseModel)
 
 
+class WorkspaceUnreadable(OSError):
+    kind = "workspace_unreadable"
+
+
 class BudgetCheck(Protocol):
     def __call__(self, estimate_cents: float) -> None: ...
 

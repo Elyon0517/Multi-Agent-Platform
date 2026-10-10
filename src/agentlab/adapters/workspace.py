@@ -9,11 +9,12 @@ import tempfile
 from pathlib import Path
 
 from agentlab.adapters.sandbox.local import run_argv, scrubbed_env
+from agentlab.core.ports import WorkspaceUnreadable
 from agentlab.core.schemas import FileEdit
 
 
 class WorkspaceEscape(PermissionError):
-    pass
+    kind = "workspace_escape"
 
 
 class GitWorkspace:
@@ -23,6 +24,9 @@ class GitWorkspace:
         self._baseline_tree: str | None = None
         self._baseline_meta: dict[str, tuple[str, str]] = {}
         self._edited_paths: set[str] = set()
+        self._snapshot_dir = tempfile.TemporaryDirectory(prefix="agentlab-objects-")
+        self._object_env: dict[str, str] | None = None
+        self._present_repositories: set[str] = set()
 
     def _resolve(self, rel: str) -> Path:
         path = (self.root / rel).resolve()
@@ -40,10 +44,24 @@ class GitWorkspace:
             "id_rsa", "id_ed25519", "node_modules", "__pycache__"
         } for part in parts) or Path(rel.casefold()).suffix in {".pem", ".key"}
 
+    def close(self) -> None:
+        self._snapshot_dir.cleanup()
+
+    def _snapshot_env(self) -> dict[str, str]:
+        if self._object_env is None:
+            result = subprocess.run(["git", "-C", str(self.root), "rev-parse", "--path-format=absolute",
+                                     "--git-path", "objects"], capture_output=True, check=True,
+                                    env=scrubbed_env(), timeout=30)
+            objects = Path(self._snapshot_dir.name) / "objects"
+            objects.mkdir()
+            self._object_env = {**scrubbed_env(), "GIT_OBJECT_DIRECTORY": str(objects),
+                                "GIT_ALTERNATE_OBJECT_DIRECTORIES": result.stdout.decode().strip()}
+        return self._object_env
+
     def _git_bytes(self, *args: str, data: bytes | None = None,
                    env: dict[str, str] | None = None) -> bytes:
         result = subprocess.run(["git", "-C", str(self.root), *args], input=data,
-                                capture_output=True, check=True, env=env or scrubbed_env(), timeout=30)
+                                capture_output=True, check=True, env=env or self._snapshot_env(), timeout=30)
         return result.stdout
 
     def _snapshot(self) -> tuple[str, dict[str, tuple[str, str]]]:
@@ -52,36 +70,93 @@ class GitWorkspace:
         names = set(os.fsdecode(paths).split("\0")) | self._edited_paths
         entries: list[bytes] = []
         metadata: dict[str, tuple[str, str]] = {}
-        for rel in sorted(names):
-            if not rel or self._sensitive(rel):
-                continue
-            candidate = self.root / rel
-            if candidate.is_symlink():
-                data = os.fsencode(os.readlink(candidate))
-                mode, kind = "120000", "symlink"
-            else:
-                path = self._resolve(rel)
-                if not path.exists():
-                    continue  # A real deletion, unlike a filtered or unreadable file.
-                if not path.is_file():
-                    raise ValueError("unsupported workspace entry")
-                data = path.read_bytes()  # Fail closed on unreadable files.
-                mode = "100755" if path.stat().st_mode & 0o111 else "100644"
-                try:
-                    data.decode("utf-8")
-                    binary = b"\0" in data
-                except UnicodeError:
-                    binary = True
-                kind = "binary" if binary else "oversize" if len(data) > 100_000 else "text"
-            if self._secret_text(data.decode("utf-8", errors="replace")):
-                kind = "redacted-secret"
-                # Never write detected secret contents into Git objects, even temporarily.
-                data = ("[redacted secret content sha256=" + hashlib.sha256(data).hexdigest() + "]\n").encode()
-            oid = self._git_bytes("hash-object", "-w", "--stdin", data=data).decode().strip()
-            entries.append(f"{mode} {oid}\t".encode() + os.fsencode(rel) + b"\0")
-            metadata[rel] = (oid, kind)
+        stages = self._git_bytes("ls-files", "--stage", "-z")
+        gitlinks = {os.fsdecode(path): header.split()[1].decode()
+                    for item in stages.split(b"\0") if item
+                    for header, path in [item.split(b"\t", 1)] if header.startswith(b"160000 ")}
+        repository_roots = set(gitlinks) | {name.rstrip("/") for name in names
+                                           if name and (self.root / name).is_dir()}
         with tempfile.TemporaryDirectory(prefix="agentlab-index-") as directory:
-            env = {**scrubbed_env(), "GIT_INDEX_FILE": str(Path(directory) / "index")}
+            pending: list[tuple[str, str, str, Path]] = []
+            for rel in sorted(names):
+                rel = rel.rstrip("/")
+                if not rel or self._sensitive(rel) or any(rel.startswith(root + "/") for root in repository_roots):
+                    continue
+                candidate = self.root / rel
+                if candidate.is_symlink():
+                    data = os.fsencode(os.readlink(candidate))
+                    mode, kind = "120000", "symlink"
+                else:
+                    path = self._resolve(rel)
+                    if rel in gitlinks and not path.exists() and rel in self._present_repositories:
+                        continue
+                    if path.is_dir() or (rel in gitlinks and not path.exists()):
+                        if path.exists():
+                            self._present_repositories.add(rel)
+                        # Gitlinks can refer to commits absent from the parent object database.
+                        oid = gitlinks.get(rel)
+                        if (path / ".git").exists():
+                            head = subprocess.run(["git", "-C", str(path), "rev-parse", "--verify", "HEAD"],
+                                                  capture_output=True, env=scrubbed_env(), timeout=30)
+                            if head.returncode == 0:
+                                oid = head.stdout.decode().strip()
+                        if oid:
+                            entries.append(f"160000 {oid}\t".encode() + os.fsencode(rel) + b"\0")
+                            kind = "submodule"
+                            if (path / ".git").exists():
+                                status = subprocess.run(["git", "-C", str(path), "status", "--porcelain", "-z"],
+                                                        capture_output=True, check=True, env=scrubbed_env(), timeout=30)
+                                if status.stdout:
+                                    patch = subprocess.run(["git", "-C", str(path), "diff", "--no-ext-diff",
+                                                            "--no-textconv", "--binary", "HEAD"], capture_output=True,
+                                                           check=True, env=scrubbed_env(), timeout=30)
+                                    dirty = status.stdout + patch.stdout
+                                    for edited in sorted(self._edited_paths):
+                                        if edited.startswith(rel + "/") and (self.root / edited).is_file():
+                                            dirty += (self.root / edited).read_bytes()
+                                    kind = "submodule-dirty sha256=" + hashlib.sha256(dirty).hexdigest()
+                            metadata[rel] = (oid, kind)
+                            continue
+                        # An unborn embedded repository is visible, rather than blocking creation.
+                        unborn = b""
+                        for edited in sorted(self._edited_paths):
+                            if edited.startswith(rel + "/") and (self.root / edited).is_file():
+                                unborn += (self.root / edited).read_bytes()
+                        data = ("[embedded repository without HEAD; edited content sha256="
+                                + hashlib.sha256(unborn).hexdigest() + "]\n").encode()
+                        mode, kind = "100644", "embedded-unborn"
+                    else:
+                        if not path.exists():
+                            continue
+                        if not path.is_file():
+                            raise WorkspaceUnreadable("unsupported workspace entry")
+                        try:
+                            data = path.read_bytes()
+                            mode = "100755" if path.stat().st_mode & 0o111 else "100644"
+                        except OSError as exc:
+                            raise WorkspaceUnreadable("workspace file unreadable") from exc
+                        try:
+                            data.decode("utf-8")
+                            binary = b"\0" in data
+                        except UnicodeError:
+                            binary = True
+                        kind = "binary" if binary else "oversize" if len(data) > 100_000 else "text"
+                if self._secret_text(data.decode("utf-8", errors="replace")):
+                    kind = "redacted-secret"
+                    data = ("[redacted secret content sha256=" + hashlib.sha256(data).hexdigest() + "]\n").encode()
+                sanitized = Path(directory) / str(len(pending))
+                sanitized.write_bytes(data)
+                pending.append((rel, mode, kind, sanitized))
+            if pending:
+                # Sanitized copies avoid Git filters and prevent secrets entering even temporary blobs.
+                paths = b"".join(os.fsencode(path) + b"\n" for _, _, _, path in pending)
+                oids = self._git_bytes("hash-object", "-w", "--no-filters", "--stdin-paths", data=paths).splitlines()
+                if len(oids) != len(pending):
+                    raise RuntimeError("incomplete batch hashing")
+                for (rel, mode, kind, _), batch_oid in zip(pending, oids, strict=True):
+                    entries.append(f"{mode} ".encode() + batch_oid + b"\t" + os.fsencode(rel) + b"\0")
+                    metadata[rel] = (batch_oid.decode(), kind)
+            env = {**self._snapshot_env(), "GIT_INDEX_FILE": str(Path(directory) / "index")}
             self._git_bytes("read-tree", "--empty", env=env)
             self._git_bytes("update-index", "-z", "--index-info", data=b"".join(entries), env=env)
             tree = self._git_bytes("write-tree", env=env).decode().strip()
@@ -93,6 +168,7 @@ class GitWorkspace:
         return known_secret or bool(re.search(pattern, text))
 
     def begin_run(self) -> None:
+        self._present_repositories.clear()
         self._baseline_tree, self._baseline_meta = self._snapshot()
 
     def read(self, path: str) -> str:
@@ -158,6 +234,8 @@ class GitWorkspace:
         baseline = self._baseline_tree or self._git_bytes("mktree", data=b"").decode().strip()
         changed = os.fsdecode(self._git_bytes("diff", "--name-only", "-z", "--no-renames",
                                              baseline, current)).split("\0")
+        changed = sorted(set(changed) | {path for path in metadata.keys() & self._baseline_meta.keys()
+                                         if metadata[path] != self._baseline_meta[path]})
         parts: list[str] = []
         for path in changed:
             if not path:

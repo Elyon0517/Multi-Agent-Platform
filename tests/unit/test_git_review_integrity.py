@@ -89,7 +89,7 @@ async def test_detected_secret_change_is_marked_without_persisting_secret_blob(t
     path.write_text(secret)
     diff = await ws.diff()
     assert "redacted-secret" in diff and secret not in diff
-    objects = subprocess.check_output(["git", "-C", str(tmp_path), "cat-file", "--batch-all-objects", "--batch"])
+    objects = subprocess.check_output(["git", "-C", str(tmp_path), "cat-file", "--batch-all-objects", "--batch"], env=ws._snapshot_env())
     assert secret.encode() not in objects
 
 
