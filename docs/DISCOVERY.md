@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.7 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）· 可持续更新
+> 状态：v1.8 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 规划 summarizer 与删除项目（§9.1、ADR-028）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -26,6 +26,7 @@
 | 2 | 对话窗口显示 root 的回复、任务进度与内联审批，而不只是 run 状态 | 对话是主要交互界面 | ADR-025 |
 | 3 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 实时信息（如天气、最新文档）需要搜索；保持简单 | ADR-026 |
 | 4 | （v1.7）新增 **Monitor 模块**：按 agent 统计累计消耗的 token（跨所有 project 汇总，不按 project 区分） | 了解哪个 agent 用得最多，便于调整模型与分工 | ADR-027 |
+| 5 | （v1.8）**summarizer 接入**：每个 run 结束时从人工反馈与 review findings 总结经验，按重要性写入 global / project / agent，写入时去重并退役旧条目；新增**删除项目**，项目记忆随项目一起删除 | 记忆目前只有固定规则写入的流水，没有整理与归纳；项目无法删除 | ADR-028 |
 
 ---
 
@@ -43,7 +44,7 @@
 | 冲突 | 升级给人 + 震荡检测自动触发升级 |
 | Memory | Blackboard + Episodic + Semantic（MVP）；Procedural 延后 |
 | 隔离 | per-role namespace 私有 + 共享黑板；per-project Postgres schema |
-| 记忆写入 | 每轮 summarizer 自动抽取 + `pin_memory` 手动工具 |
+| 记忆写入 | 每个 run 结束时 summarizer 从你的反馈与 review findings 总结经验，按重要性写入 global / project / agent，并去重、退役旧条目（§9.1）+ `pin_memory` 手动工具 |
 | LLM | **纯云端调用，本地不跑模型**；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口） |
 | 路由 | 静态 policy 表（角色→模型别名）+ root agent 受限 override（可复现优先） |
 | 多模型评审 | 2–3 个不同 LLM 并行独立 review（核心卖点） |
@@ -233,7 +234,7 @@ Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化�
 | coder | plan + gate 报告 + arbiter 指令 | `diff` | `strong` |
 | reviewer × 3 | 需求 + 验收标准 + diff + gate 输出 | `review`（结构化 JSON） | `strong` / `strong-alt` / `cheap` |
 | arbiter | 全部 verdicts | `arbiter_decision` | 确定性代码 |
-| summarizer | 本轮全部 artifact | episodic memory 条目 | `cheap` |
+| summarizer（v1.8） | run 结束时：人工反馈 + review findings（含是否被修复）+ run 结果 + 相关已有记忆 | 记忆操作：新增 / 更新 / 退役，每条标注 global / project / agent 层（§9.1） | `cheap` |
 
 所有 agent 定义存于 `config/agents/*.yaml`，进 git。
 
@@ -315,15 +316,37 @@ embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），�
 
 | 层 | namespace | 归属 | 谁能读 | 谁写 | 已实现 |
 |---|---|---|---|---|---|
-| Global 个人知识 | `global` | 跨所有 project | 所有 agent | 用户上传 PDF / Markdown / txt（切块 + embedding） | Yes（内存版） |
-| Project | `project` | 单个 project | 该 project 的所有 agent | run 结束自动写结果；用户手写 note | Yes（内存版） |
-| Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | reviewer 提出 blocking/major 时自动记；用户手写 note | Yes（内存版） |
+| Global 个人知识 | `global` | 跨所有 project | 所有 agent | 用户上传 PDF / Markdown / txt（切块 + embedding）；用户手写 note；（v1.8）summarizer 写入你的偏好与跨项目重要经验 | Yes（内存版） |
+| Project | `project` | 单个 project | 该 project 的所有 agent | run 结束自动写结果；用户手写 note；（v1.8）summarizer 写入项目经验 | Yes（内存版） |
+| Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | reviewer 提出 blocking/major 时自动记；用户手写 note；（v1.8）summarizer 写入角色经验 | Yes（内存版） |
 
 每次调用 agent 前，Driver 通过 `RunHooks.context_for` 检索 `global ∪ project ∪ agent:<self>`，top-6 注入 `AgentInput.context.memory`。检索：BM25 + 向量（网关 embedding）→ RRF；embedding 失败自动降级为纯关键词，且 memory 任何异常都不会中断 run。扫描版 PDF（无文字层）会被拒绝并提示。
 
 **Project 进度**：project-planner（root 模型）把 project 目标拆成 phase → step；每个 step 可一键发起 run，run DONE 自动把 step 标为 done，失败/取消标 blocked；用户也可手动改状态（ADR-021）。
 
-旧命名空间 `shared` 由 `project` 取代；记忆归属 `project × role`。版本化非覆盖：`valid_from / valid_to / superseded_by`，永不物理删除。检索：`pgvector HNSW top-50 ∪ tsvector BM25 top-50 → RRF → rerank top-8`。
+旧命名空间 `shared` 由 `project` 取代；记忆归属 `project × role`。版本化非覆盖：`valid_from / valid_to / superseded_by`，项目存在期间不物理删除单条记忆；（v1.8）删除项目时其 project / agent 记忆随项目 schema 一起物理删除（§9.1）。检索：`pgvector HNSW top-50 ∪ tsvector BM25 top-50 → RRF → rerank top-8`。
+
+### 9.1 Summarizer 与项目删除（v1.8，ADR-028）
+
+**目的**：把你在 run 中给的反馈和 reviewer 反复指出的问题总结成经验，供以后的 run 检索使用；重复的合并，过时的退役。
+
+| 项 | 决定 |
+|---|---|
+| 何时运行 | 每个 run 结束时运行一次（批准 DONE、打回后终止、abort 均触发）。不按迭代运行：中间轮次的 finding 常被下一轮修复，run 结束时信息才完整、只需一次调用。不设每日定时任务，去重在写入时完成。 |
+| 读什么 | ① 人工反馈：reject 反馈、Ask Me 回答、审批附带说明；② review findings（blocking / major），并标出后续是否被修复、是否反复出现；③ run 结果（DONE / 终止原因）；④ 与以上内容相关的已有记忆（按目标层检索 top-k），用于去重。不读完整 diff 与代码。 |
+| 写到哪层 | 每条经验由 summarizer 标注层级：**global** = 与你相关的偏好、习惯、跨项目都适用的高优先级经验；**project** = 本项目的约定与教训（默认）；**agent:\<role\>** = 只对某个角色有用的经验。global 条目来源标为 `summarizer`，在 memory 页面可查看、删除；prompt 明确禁止把项目代码细节、私有文档内容写入 global。 |
+| 输出 | 结构化记忆操作列表：`add`（新条目）/ `update`（新条目取代旧条目，旧条目写 `superseded_by`）/ `retire`（旧条目写 `valid_to`，不再参与检索）。只能引用本次提供给它的已有条目 id，越权的层或 id 由确定性代码拒绝。 |
+| 保护 | `pinned` 条目不会被更新或退役；用户上传的文档（`kind=document`）不在 summarizer 可改范围内。 |
+| 预算与计量 | 使用 run 之外的小额独立预算（同 project-planner 做法），失败只记录日志，不改变 run 结果（同 ADR-024 降级原则）；用量写入 `usage_ledger`，Monitor 中显示为 `summarizer`。 |
+| 取代旧规则 | summarizer 接入后，移除现有确定性写入（「Flagged in run …」reviewer 笔记与「Run X approved」项目笔记），避免重复。 |
+| 暂不做 | 对话（root 会话）中的偏好总结；后续按需在会话结束时加同样的流程。 |
+
+**删除项目**（当前不存在此功能，本次新增）：
+
+- `DELETE /projects/{id}` + 控制台删除按钮，需二次确认；项目有未结束的 run 时拒绝删除。
+- 删除范围：`proj_<id>` schema（项目记忆、agent 记忆、对话、run、审批、事件等）、`project_schema` / `run_directory` 路由登记、`.agentlab` 中该项目的快照与对象、进程内缓存（记忆、事件订阅）。
+- 不删除：用户 workspace 中的代码文件；已写入 global 的经验（这正是 global 的用途）；`usage_ledger` 流水（Monitor 跨项目累计，保留 `project_id` 仅作追溯）。
+- 删除不可撤销；需要保留时先用 `pg_dump -n proj_<id>` 导出（§10）。
 
 ---
 
@@ -571,7 +594,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；Monitor 已实现（v1.7，§15.5）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
-| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer（v1.8 方案见 §9.1）、删除项目、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
 | P8 | S6 Eval | 基线完成 | 10 个固定修复 + 5 条 Root 对话；agentlab eval 输出评分卡；fake 不代表模型语义质量 |
 
@@ -649,7 +672,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
 | CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
 | supervisor（root）角色 | 项目 auto 模式调用并持久化 Dispatch；角色模型与任务经过确定性校验，非法分配需人类填写反馈后 reject 重生成，phase 顺序仍由 Driver 执行 | 已接线 |
-| summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
+| summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入。v1.8 方案见 §9.1 | P6 |
+| 删除项目 | 无 API、无界面入口；项目记忆无法随项目清除。v1.8 方案见 §9.1 | P6 |
 | 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；网络 / Git 危险操作仍待接入 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
@@ -733,7 +757,13 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] Global 文档上传（PDF / md / txt）+ 切块 + 网关 embedding + BM25∪向量 RRF（内存版）
 - [x] project-planner 生成 phase/step；run 完成自动更新进度
 - [ ] 把以上三块落到 Postgres（`memory` 表 + pgvector HNSW + tsvector；`project` 表加 phases JSONB）
-- [ ] summarizer 接入，每轮自动抽 episodic
+- [ ] summarizer 接入（v1.8，§9.1）：run 结束时读人工反馈 + review findings + 相关已有记忆，输出 add / update / retire 操作并按 global / project / agent 分层写入
+  - prompt 与输出 schema（`MemoryOps`）；确定性校验层级、条目 id 归属与 pinned / document 保护
+  - 在 `on_finished` 调用，独立小额预算，失败降级不影响 run；用量计入 `usage_ledger`
+  - 移除「Flagged in run …」与「Run X approved」两条确定性写入
+  - 验收：同一问题在两个 run 中被指出 → 只留一条经验（第二次为 update）；你的 reject 反馈中的偏好进入 global，项目约定进入 project；pinned 条目不被改动；summarizer 失败时 run 仍正常结束
+- [ ] 删除项目（v1.8，§9.1）：`DELETE /projects/{id}` + 控制台按钮（二次确认）；有未结束 run 时拒绝；删除项目 schema、路由登记、`.agentlab` 快照与对象、进程内缓存；保留 workspace、global 记忆与 `usage_ledger`
+  - 验收：删除后该项目的 project / agent 记忆不再出现在任何检索与列表中，其他项目与 global 不受影响；Postgres 与内存两种 Store 行为一致
 - [ ] `pin_memory` 工具；rerank
 - [x] per-project schema，既有数据一次性迁移；`pg_dump -n` 导出/数据库级恢复验证
 - [ ] 完整项目导入 UI/CLI（目录注册、共享依赖与 blobs/snapshots 一起恢复）
@@ -873,6 +903,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-025 | 新增 Root 会话层：每条用户消息先由 root 判断 回答 / 澄清 / 任务；回答走只读工具直接回复，任务交给收敛 Loop，进度与审批回到对话 | 2026-10-10 | 用户要求：对话应能直接得到回复，编码需求再分配任务（参照 Codex / Claude Code）；root 不自行编码，保留 Gate、多模型评审与人工终审 |
 | ADR-026 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 2026-10-10 | 用户要求保持简单；系统重点是 multi-agent 分工，而不是增加限制 |
 | ADR-027 | 新增 Monitor 模块：按 agent 汇总累计 token 与费用，跨项目合并；数据来自 `public.usage_ledger` 单一流水表 | 2026-10-10 | 用户要求只按 agent 区分、不分 project；单表追加写入，比每次扫描所有项目 schema 简单、快 |
+| ADR-028 | summarizer 在每个 run 结束时运行一次，读人工反馈与 review findings，输出 add / update / retire 并自行标注 global / project / agent 层；去重在写入时完成，不设定时任务；新增删除项目，项目 / agent 记忆随项目 schema 删除，global 与 usage 流水保留；对话偏好总结暂不做 | 2026-10-10 | 用户决定：以总结经验为主，偏好与高优先级经验进 global、其余进 project / agent；需要去重退役，且项目记忆随项目删除。按 run 而非按迭代或按天，信息完整、调用最少、无需调度器 |
 
 
 ### 可靠性复核补充（2026-10-09）
