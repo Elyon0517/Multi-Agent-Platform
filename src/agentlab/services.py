@@ -386,8 +386,13 @@ class MemoryHooks:
 
             store = self.projects.store
             thread = get_thread(store, run.thread_id, run.project_id)
+            approval = store.pending_approval(run.id) if run.status == RunStatus.WAITING_HUMAN else None
+            approval_id = approval.id if approval else None
             if not any(
-                m.kind == "summary" and m.run_id == run.id and m.payload.get("status") == run.status
+                m.kind == "summary"
+                and m.run_id == run.id
+                and m.payload.get("status") == run.status
+                and m.payload.get("approval_id") == approval_id
                 for m in thread.messages
             ):
                 gate_results = [e.payload for e in store.events(run.id) if e.type == "gate.finished"]
@@ -420,7 +425,7 @@ class MemoryHooks:
                         text=reply[:20000],
                         sources=sources,
                         run_id=run.id,
-                        payload={"status": run.status},
+                        payload={"status": run.status, "approval_id": approval_id},
                     ),
                 )
                 if self.session_services:

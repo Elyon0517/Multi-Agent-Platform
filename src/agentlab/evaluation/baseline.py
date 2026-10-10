@@ -41,7 +41,9 @@ def check(name: str, passed: bool, detail: str, source: str = "runtime", severit
 async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
     data = json.loads(manifest.read_text())
     cards = []
-    with tempfile.TemporaryDirectory(prefix="agentlab-eval-") as temp:
+    eval_dir = Settings().data_dir.resolve() / "eval"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="agentlab-eval-", dir=eval_dir) as temp:
         root = Path(temp)
         svc = build_services(
             Settings(

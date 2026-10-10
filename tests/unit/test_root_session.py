@@ -358,6 +358,7 @@ def test_append_only_message_storage_does_not_scan_records(tmp_path):
 async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatch, runtime, sandbox):
     from agentlab.evaluation import baseline
 
+    monkeypatch.setenv("AGENTLAB_DATA_DIR", str(tmp_path / "data"))
     manifest = tmp_path / "baseline.json"
     manifest.write_text('{"tasks": []}')
 
@@ -366,8 +367,35 @@ async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatc
 
     def build(settings):
         assert settings.sandbox == sandbox
+        assert settings.data_dir.parent.parent == (tmp_path / "data" / "eval").resolve()
         raise StopBeforeExecution
 
     monkeypatch.setattr(baseline, "build_services", build)
     with pytest.raises(StopBeforeExecution):
         await baseline.evaluate(manifest, runtime)
+
+
+async def test_each_approval_gets_its_own_summary(tmp_path):
+    from agentlab.core.conversation import Conversation
+    from agentlab.core.schemas import Approval, RunStatus
+    from agentlab.core.session.store import get_thread
+    from agentlab.services import MemoryHooks
+
+    svc = services(tmp_path)
+    thread = Conversation(project_id="p", title="chat")
+    svc.store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+    run = Run(goal="fix", workspace=".", project_id="p", thread_id=thread.id, status=RunStatus.WAITING_HUMAN)
+    svc.store.create_run(run)
+    hooks = MemoryHooks(svc.knowledge, svc.projects)
+    first = Approval(run_id=run.id, reason="budget_exceeded", on_approve=RunStatus.CODING)
+    svc.store.create_approval(first)
+    await hooks.summarize_run(run)
+    await hooks.summarize_run(run)
+    first.status = "approved"
+    svc.store.save_approval(first)
+    second = Approval(run_id=run.id, reason="signoff", on_approve=RunStatus.DONE)
+    svc.store.create_approval(second)
+    await hooks.summarize_run(run)
+    await hooks.summarize_run(run)
+    summaries = [m for m in get_thread(svc.store, thread.id, "p").messages if m.kind == "summary"]
+    assert [m.payload["approval_id"] for m in summaries] == [first.id, second.id]
