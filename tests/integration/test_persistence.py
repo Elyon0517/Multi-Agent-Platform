@@ -408,7 +408,8 @@ async def test_baseline_objects_are_owned_not_only_git_alternates(tmp_path):
     ws = GitWorkspace(workspace, snapshot_dir=tmp_path / "snapshots")
     await ws.ensure_repo()
     subprocess.run(["git", "-C", str(workspace), "add", "file.py"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(workspace), "commit", "-m", "baseline"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(workspace), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-m", "baseline"], check=True, capture_output=True)
     original = subprocess.check_output(["git", "-C", str(workspace), "rev-parse", "HEAD:file.py"]).decode().strip()
     ws.begin_run()
     state = ws.export_state()
