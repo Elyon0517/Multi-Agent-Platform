@@ -43,3 +43,22 @@ describe('event replay accounting', () => {
     expect(useStore.getState().runs[0].cost_cents).toBe(20);
   });
 });
+
+describe('project isolation', () => {
+  it('clears run, approvals, tasks, agent activity, telemetry and conversations on switching', () => {
+    const s = useStore.getState();
+    s.setActiveProject('p'); s.setRuns([run]); s.setActiveRun('r'); s.setActiveThread('thread'); s.setActiveRun('r');
+    s.select('coder'); s.setAnswerDraft('r', 'private reply'); s.applyEvent(event(1));
+    s.setActiveProject('other');
+    const next = useStore.getState();
+    expect(next.activeRunId).toBeNull(); expect(next.activeThreadId).toBeNull();
+    expect(next.runs).toEqual([]); expect(next.tasks).toEqual([]); expect(next.events).toEqual([]);
+    expect(next.agents).toEqual([]); expect(next.answerDrafts).toEqual({}); expect(next.selectedId).toBeNull();
+    next.applyEvent(event(2)); expect(useStore.getState().events).toEqual([]);
+  });
+  it('switching conversations drops the previous run and its approval events', () => {
+    useStore.getState().setActiveRun('r'); useStore.getState().applyEvent(event(1));
+    useStore.getState().setActiveThread('next-thread');
+    expect(useStore.getState().activeRunId).toBeNull(); expect(useStore.getState().events).toEqual([]);
+  });
+});

@@ -393,3 +393,37 @@ async def test_baseline_objects_are_owned_not_only_git_alternates(tmp_path):
     objects = tmp_path / "snapshots" / "objects"
     assert (objects / original[:2] / original[2:]).exists()
     assert (objects / tree[:2] / tree[2:]).exists()
+
+
+async def test_project_dispatch_and_conversation_survive_postgres_restart(database_url, tmp_path):
+    from agentlab.bootstrap import build_services
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.project_config import ProjectSettings
+    from agentlab.demo import seed_demo_workspace
+    from agentlab.settings import Settings
+    from tests.conftest import CONFIG_DIR
+
+    settings = Settings(store_backend="postgres", database_url=database_url, runtime="fake", config_dir=CONFIG_DIR,
+                        data_dir=tmp_path / "data", env_file=tmp_path / ".env", _env_file=None)
+    svc = build_services(settings)
+    workspace = seed_demo_workspace(tmp_path / "workspace")
+    project = svc.projects.create("persistent", "fix add", str(workspace))
+    project.settings = ProjectSettings()
+    svc.projects.save(project)
+    conversation = Conversation(project_id=project.id, title="Discussion")
+    svc.store.put_record("thread", conversation.id, conversation.model_dump(mode="json"))
+    driver = svc.driver(workspace, "fake", "python", project.id)
+    await driver.workspace.ensure_repo()
+    def record(run):
+        conversation.messages.append(Message(author="user", text=run.goal, run_id=run.id))
+        svc.store.put_record("thread", conversation.id, conversation.model_dump(mode="json"))
+    run = await driver.create_async("fix add", project_id=project.id, thread_id=conversation.id, on_create=record)
+    await driver._planning(run)
+    other = build_services(settings)
+    restored = other.restore_driver(run.id)
+    assert other.store.get_run(run.id).thread_id == conversation.id
+    assert other.projects.get(project.id).settings.mode == "auto"
+    assert other.store.records("thread")[0]["messages"][0]["run_id"] == run.id
+    assert restored.recovery_options["assignments"] == driver.recovery_options["assignments"]
+    assert len(other.store.artifacts(run.id, "dispatch")) == 1
+    driver.workspace.close()

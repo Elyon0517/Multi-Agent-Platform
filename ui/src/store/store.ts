@@ -81,6 +81,7 @@ interface LabState {
   runs: Run[];
   activeRunId: string | null;
   activeProjectId: string | null;
+  activeThreadId: string | null;
   events: LabEvent[];
   lastEventSeq: number;
   tasks: BoardTask[];
@@ -99,6 +100,7 @@ interface LabState {
   setRoster: (roster: RosterEntry[]) => void;
   setRuns: (runs: Run[]) => void;
   setActiveRun: (id: string | null) => void;
+  setActiveThread: (id: string | null) => void;
   setActiveProject: (id: string | null) => void;
   applyEvent: (e: LabEvent) => void;
   setOfficeTheme: (theme: ThemeId) => void;
@@ -117,7 +119,7 @@ function agentFromRole(role: string, entry: RosterEntry | undefined, prefs: Pref
     id: role, name: prefs.names[role] ?? seat.name, character: seat.character, accent: seat.accent,
     description: seat.description, status: 'idle', action: '', progress: 0, isGod: seat.isGod,
     model: entry?.model, project: entry?.alias ? `${entry.alias} · ${entry.model}` : 'deterministic',
-    note: prefs.notes[role], contextLimit: entry?.ctx_window,
+    note: prefs.notes[`${useStore.getState().activeProjectId ?? 'default'}:${role}`], contextLimit: entry?.ctx_window,
   };
 }
 
@@ -173,6 +175,7 @@ export const useStore = create<LabState>((set, get) => {
     runs: [],
     activeRunId: null,
     activeProjectId: null,
+    activeThreadId: null,
     events: [],
     lastEventSeq: 0,
     tasks: [],
@@ -196,8 +199,13 @@ export const useStore = create<LabState>((set, get) => {
     },
 
     setRuns: (runs) => set((s) => ({ runs, tasks: tasksFor(runs, s.dismissedAsks) })),
-    setActiveRun: (id) => set({ activeRunId: id, events: [], lastEventSeq: 0, telemetry: EMPTY_TELEMETRY, log: [] }),
-    setActiveProject: (id) => set({ activeProjectId: id }),
+    setActiveRun: (id) => set((s) => ({ agents: s.agents.map(a => ({ ...a, status: 'idle', action: '', progress: 0, carrying: undefined, recentText: undefined, recentSeq: undefined, blockReason: undefined, contextTokens: undefined })), selectedId: null, taskDetailId: null, activeRunId: id, activeThreadId: id ? s.runs.find(r => r.id === id)?.thread_id ?? null : s.activeThreadId, events: [], lastEventSeq: 0, telemetry: EMPTY_TELEMETRY, log: [] })),
+    setActiveThread: (id) => { get().setActiveRun(null); set({ activeThreadId: id }); },
+    setActiveProject: (id) => {
+      if (get().activeProjectId === id) return;
+      get().setActiveRun(null);
+      set({ activeProjectId: id, activeThreadId: null, agents: [], runs: [], tasks: [], answerDrafts: {}, dismissedAsks: {}, fullscreenAgentId: null, taskDetailId: null });
+    },
 
     applyEvent: (e) => {
       if (e.run_id !== get().activeRunId || e.seq <= get().lastEventSeq) return;
@@ -251,7 +259,7 @@ export const useStore = create<LabState>((set, get) => {
     },
 
     setAgentNote: (id, note) => {
-      persist({ notes: { ...get().prefs.notes, [id]: note } });
+      persist({ notes: { ...get().prefs.notes, [`${get().activeProjectId ?? 'default'}:${id}`]: note } });
       set((s) => ({ agents: s.agents.map((a) => (a.id === id ? { ...a, note } : a)) }));
     },
 

@@ -8,6 +8,8 @@ import { OfficeThemePicker } from '@/components/OfficeThemePicker';
 import { Field, Status, errorText, inputStyle } from '@/views/ui';
 
 const LABELS: Record<string, { label: string; hint: string; placeholder: string }> = {
+  AGENTLAB_EMBEDDING_BASE_URL: { label: 'Embedding base URL', hint: 'Separate embedding endpoint; model is configured in models.yaml', placeholder: 'https://…/v1' },
+  AGENTLAB_EMBEDDING_API_KEY: { label: 'Embedding API key', hint: 'Separate embedding credential', placeholder: 'paste a new key' },
   AGENTLAB_LLM_BASE_URL: { label: 'Gateway base URL', hint: 'OpenAI-compatible endpoint, e.g. https://gateway/v1',
     placeholder: 'https://…/v1' },
   AGENTLAB_LLM_API_KEY: { label: 'API key', hint: 'Saved to the local .env (chmod 600). Never sent back to the browser.',
@@ -54,8 +56,8 @@ export function SettingsView() {
             const meta = LABELS[v.key] ?? { label: v.key, hint: '', placeholder: '' };
             const id = `setting-${v.key}`;
             return (
-              <Field key={v.key} id={id} label={v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.gatewayBaseUrl') : v.key === 'AGENTLAB_LLM_API_KEY' ? t('lab.apiKey') : meta.label}
-                hint={`${v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.openaiCompatibleEndpointEGHttpsGatewayV1') : t('lab.savedToTheLocalEnvChmod600NeverSentBackToTheBrowser')} ${v.is_set ? t('lab.current', { value: v.display }) : t('lab.notSet')}`}>
+              <Field key={v.key} id={id} label={v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.gatewayBaseUrl') : v.key === 'AGENTLAB_LLM_API_KEY' ? t('lab.apiKey') : t(v.secret ? 'lab.embeddingApiKey' : 'lab.embeddingBaseUrl')}
+                hint={`${v.key === 'AGENTLAB_LLM_BASE_URL' ? t('lab.openaiCompatibleEndpointEGHttpsGatewayV1') : v.secret ? t('lab.savedToTheLocalEnvChmod600NeverSentBackToTheBrowser') : t('lab.embeddingModelHint')} ${v.is_set ? t('lab.current', { value: v.display }) : t('lab.notSet')}`}>
                 <input id={id} style={inputStyle} spellCheck={false} autoComplete="off"
                   type={v.secret && !reveal ? 'password' : 'text'}
                   placeholder={v.secret ? (v.is_set ? v.display : t('lab.pasteANewKeyToReplace')) : (v.display || meta.placeholder)}

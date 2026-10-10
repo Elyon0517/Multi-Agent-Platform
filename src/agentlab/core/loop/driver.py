@@ -24,11 +24,13 @@ from agentlab.core.ports import (
     BlobStore,
     EventBus,
     GateAdapter,
+    RunBusy,
     RunContext,
     Store,
     Workspace,
     execution_error_reason,
 )
+from agentlab.core.project_config import Dispatch, ProjectSettings
 from agentlab.core.schemas import (
     AgentInput,
     AgentResult,
@@ -103,20 +105,29 @@ class Driver:
 
     def create(self, goal: str, **overrides: Any) -> Run:
         with self.store.lock_run("workspace:" + str(self.workspace.root)):
+            self._check_workspace_available()
             self.workspace.begin_run()
             return self._create(goal, **overrides)
 
     async def create_async(self, goal: str, **overrides: Any) -> Run:
         with self.store.lock_run("workspace:" + str(self.workspace.root)):
+            self._check_workspace_available()
             await asyncio.to_thread(self.workspace.begin_run)
             return self._create(goal, **overrides)
 
-    def _create(self, goal: str, **overrides: Any) -> Run:
+    def _check_workspace_available(self) -> None:
+        if any(r.workspace == str(self.workspace.root) and r.status not in {S.DONE, S.CANCELLED}
+               for r in self.store.list_runs()):
+            raise RunBusy("workspace already has an unfinished run; finish or abort it before starting another")
+
+    def _create(self, goal: str, on_create: Callable[[Run], None] | None = None, **overrides: Any) -> Run:
         defaults = {"max_iter": self.cfg.budget.loop.max_iter, "budget_cents": self.cfg.budget.default_run_budget_cents}
         run = Run(goal=goal, workspace=str(self.workspace.root), **{**defaults, **overrides})
         with self._atomic():
             self.store.create_run(run)
             self._checkpoint(run)
+            if on_create:
+                on_create(run)
             self._emit(run, EventType.RUN_CREATED, goal=goal, roles=self._roster())
         return run
 
@@ -193,6 +204,9 @@ class Driver:
             raise ValueError("budget must be positive")
         if max_iter is not None and not 1 <= max_iter <= 50:
             raise ValueError("max_iter must be between 1 and 50")
+        if (approval.reason == "dispatch_invalid" and decision != "abort"
+                and (decision != "reject" or not (feedback or "").strip())):
+            raise ValueError("reject with feedback to regenerate invalid model/task assignments")
         if decision == "approve":
             if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
                 raise ValueError("feedback is required to resolve reviewer disagreement")
@@ -208,8 +222,11 @@ class Driver:
                 raise ValueError("increase max_iter before resuming")
             if approval.on_approve == S.DONE and approval.reason != "signoff":
                 raise ValueError("only signoff approval can complete a run")
-        if (decision != "abort" and self.runtime_factory is not None
-                and not (decision == "approve" and approval.on_approve == S.DONE)):
+        if (
+            decision != "abort"
+            and self.runtime_factory is not None
+            and not (decision == "approve" and approval.on_approve == S.DONE)
+        ):
             self.runtime = self.runtime_factory()  # reread gateway credentials when resuming
         run.budget_cents = budget_cents if budget_cents is not None else run.budget_cents
         run.max_iter = max_iter if max_iter is not None else run.max_iter
@@ -245,6 +262,45 @@ class Driver:
         return run
 
     async def _planning(self, run: Run) -> None:
+        settings_data = self.recovery_options.get("project_settings")
+        if settings_data:
+            settings = ProjectSettings.model_validate(settings_data)
+            if settings.mode == "auto" and not self.store.records("dispatch_" + run.id):
+                context = {
+                    "available_models": {
+                        a: self.cfg.models.aliases[a].model_dump(mode="json")
+                        for a in settings.allowed_aliases or self.cfg.models.aliases
+                    },
+                    "roles": sorted(set(self.cfg.model_policy.roles) - {"supervisor", "project-planner"}),
+                    "instruction": ("Assign each worker a model alias and task. Keep all reviewers independent; "
+                                    "never skip gates or approvals."),
+                }
+                result = await self._agent(
+                    run, "supervisor", self._input(run, context=context, feedback=self._latest_text(run, "feedback")),
+                    Dispatch,
+                )
+                try:
+                    result.output.validate_for(self.cfg, settings)
+                except ValueError as exc:
+                    with self._atomic():
+                        self._save_artifact(run, "dispatch", result.output.model_dump_json(), "supervisor")
+                        self._escalate(run, "dispatch_invalid", {"detail": str(exc)}, on_approve=S.PLANNING)
+                    return
+                with self._atomic():
+                    data = self.cfg.model_dump(mode="json")
+                    for role, binding in result.output.assignments.items():
+                        data["model_policy"]["roles"][role]["primary"] = binding.alias
+                        data["model_policy"]["roles"][role]["fallback"] = []
+                    self.cfg = AppConfig.model_validate(data)
+                    self.recovery_options["assignments"] = result.output.model_dump(mode="json")["assignments"]
+                    self.store.put_record("dispatch_" + run.id, run.id, result.output.model_dump(mode="json"))
+                    self._save_artifact(run, "dispatch", result.output.model_dump_json(), "supervisor")
+                    # Keep dispatch separate from the planner's plan artifact.
+                    arts = self.store.artifacts(run.id, "dispatch")
+                    self.recovery_options["dispatch_artifact_id"] = arts[-1].id
+                    self._checkpoint(run)
+                if self.runtime_factory:
+                    self.runtime = self.runtime_factory()
         res = await self._agent(run, "planner", self._input(run, feedback=self._latest_text(run, "feedback")), Plan)
         with self._atomic():
             self._save_artifact(run, "plan", res.output.model_dump_json(), "planner", to="coder")
@@ -342,6 +398,9 @@ class Driver:
 
     async def _context(self, run: Run, role: str, inp: AgentInput) -> dict[str, Any]:
         try:
+            settings = self.recovery_options.get("project_settings")
+            if settings:
+                inp = inp.model_copy(update={"context": {**inp.context, "retrieval_settings": settings}})
             return await self.hooks.context_for(run, role, inp)
         except Exception:  # an agent without memory context is better than a dead run
             log.exception("context_for hook failed for %s in run %s", role, run.id)
@@ -369,13 +428,26 @@ class Driver:
         )
         for role in roles:
             self._emit(run, EventType.STEP_STARTED, actor=role, role=role, iteration=inp.iteration)
-        batch_hash = hashlib.sha256(inp.model_dump_json(exclude={"context"}).encode()).hexdigest()
+        batch_hash = hashlib.sha256((inp.model_dump_json(exclude={"context"}) + json.dumps(roles)).encode()).hexdigest()
+        # P2 checkpoints used an input-only hash; reuse paid legacy batches when roles match.
+        legacy_hash = hashlib.sha256(inp.model_dump_json(exclude={"context"}).encode()).hexdigest()
+        legacy_key = (run.id, run.status.value, inp.iteration, legacy_hash)
+        if legacy_key in self._agent_inputs and set(self._agent_inputs[legacy_key]) == set(roles):
+            batch_hash = legacy_hash
         batch_key = (run.id, run.status.value, inp.iteration, batch_hash)
         if batch_key not in self._agent_inputs:
             files = await self.workspace.context_files()
             self._agent_inputs[batch_key] = {
                 r: inp.model_copy(
-                    update={"context": {**inp.context, "files": files, **await self._context(run, r, inp)}}
+                    update={
+                        "context": {
+                            **inp.context,
+                            "files": files,
+                            **await self._context(run, r, inp),
+                            "assignment": self._assignment(r),
+                            "conversation": self.recovery_options.get("conversation", []),
+                        }
+                    }
                 )
                 for r in roles
             }
@@ -400,6 +472,11 @@ class Driver:
         def completed(r: AgentResult[Any]) -> None:
             if cache_key(r.role) in self._completed_agents:
                 return
+            settings = self.recovery_options.get("project_settings") or {}
+            if settings.get("mode") == "manual":
+                r.routing_reason = "project_manual_binding"
+            elif self.recovery_options.get("assignments", {}).get(r.role):
+                r.routing_reason = "supervisor_dispatch"
             self._completed_agents[cache_key(r.role)] = r
             if not r.usage_recorded:
                 record_usage(r.usage)
@@ -522,6 +599,10 @@ class Driver:
         # The next stage checks its entire batch before making any paid calls.
         return [self._completed_agents[cache_key(r)] for r in roles]
 
+    def _assignment(self, role: str) -> Any:
+        settings = self.recovery_options.get("project_settings") or {}
+        return (self.recovery_options.get("assignments") or settings.get("bindings", {})).get(role)
+
     def _clear_agent_cache(self, run_id: str) -> None:
         self._completed_agents = {k: v for k, v in self._completed_agents.items() if k[0] != run_id}
         self._agent_inputs = {k: v for k, v in self._agent_inputs.items() if k[0] != run_id}
@@ -635,6 +716,11 @@ class Driver:
         data = self.store.checkpoint(run_id)
         if data is None:
             return
+        new_cfg = AppConfig.model_validate(data["config"])
+        changed = new_cfg.model_dump() != self.cfg.model_dump()
+        self.cfg = new_cfg
+        if changed and self.runtime_factory and self.store.get_run(run_id).status in ACTIVE:
+            self.runtime = self.runtime_factory()
         self._clear_agent_cache(run_id)
         self.restore_checkpoint(data)
         restore = getattr(self.workspace, "restore_state", None)
@@ -652,7 +738,15 @@ class Driver:
             }
         for item in data["results"]:
             key, value = item["key"], item["result"]
-            model = Plan if value["role"] == "planner" else CoderOutput if value["role"] == "coder" else Verdict
+            model = (
+                Dispatch
+                if value["role"] == "supervisor"
+                else Plan
+                if value["role"] == "planner"
+                else CoderOutput
+                if value["role"] == "coder"
+                else Verdict
+            )
             self._completed_agents[(key[0], key[1], key[2], key[3])] = AgentResult[model].model_validate(value)  # type: ignore[valid-type]
 
     def _attempt_started(self, run: Run, data: dict[str, Any]) -> str:

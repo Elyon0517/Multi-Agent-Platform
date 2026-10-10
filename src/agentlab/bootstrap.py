@@ -54,7 +54,9 @@ class Services:
 
     def setting_views(self) -> list[SettingView]:
         url, key = self.gateway()
-        return views({"AGENTLAB_LLM_BASE_URL": url, "AGENTLAB_LLM_API_KEY": key})
+        return views({"AGENTLAB_LLM_BASE_URL": url, "AGENTLAB_LLM_API_KEY": key,
+                      "AGENTLAB_EMBEDDING_BASE_URL": self.env.read().get("AGENTLAB_EMBEDDING_BASE_URL"),
+                      "AGENTLAB_EMBEDDING_API_KEY": self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")})
 
     def runtime(self, name: str | None = None, cfg: AppConfig | None = None) -> AgentRuntime:
         cfg = cfg or self.cfg
@@ -83,12 +85,19 @@ class Services:
         sandbox = self.sandbox()
         return [ConfigGate(g, sandbox, lambda text: self.blobs.put(text)[0]) for g in self.cfg.gates.values()]
 
-    def driver(self, workspace: Path, runtime: str | None = None, language: str | None = None) -> Driver:
+    def driver(
+        self, workspace: Path, runtime: str | None = None, language: str | None = None, project_id: str | None = None
+    ) -> Driver:
         cfg = self.cfg.model_copy(update={"frozen_prompts": {r: self.cfg.prompt(r) for r in self.cfg.agents}})
+        project = self.projects.get(project_id) if project_id else None
+        if project and project.settings:
+            from agentlab.core.project_config import project_config
+
+            cfg = project_config(cfg, project.settings)
         key = self.gateway()[1]
         ws = GitWorkspace(
             workspace,
-            secrets=(key,) if key else (),
+            secrets=tuple(v for v in (key, self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")) if v),
             snapshot_dir=self.settings.data_dir.resolve() / "snapshots" / uuid4().hex,
         )
         if (runtime or self.settings.runtime) == "fake":
@@ -102,8 +111,9 @@ class Services:
             "runtime": runtime or self.settings.runtime,
             "sandbox": self.settings.sandbox,
             "gate": gate.cfg.model_dump(mode="json"),
+            "project_settings": project.settings.model_dump(mode="json") if project and project.settings else None,
         }
-        driver.runtime_factory = lambda: self.runtime(runtime, cfg)
+        driver.runtime_factory = lambda: self.runtime(runtime, driver.cfg)
         return driver
 
     def restore_driver(self, run_id: str) -> Driver:
@@ -115,12 +125,14 @@ class Services:
         options = data["options"]
         key = self.gateway()[1]
         workspace = GitWorkspace(
-            Path(run.workspace), secrets=(key,) if key else (), snapshot_dir=Path(data["workspace"]["snapshot_dir"])
+            Path(run.workspace),
+            secrets=tuple(v for v in (key, self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")) if v),
+            snapshot_dir=Path(data["workspace"]["snapshot_dir"])
         )
         if run.status not in {"DONE", "CANCELLED"}:
             workspace.restore_state(data["workspace"])
 
-        def runtime_factory() -> AgentRuntime:
+        def runtime_factory(config: AppConfig = cfg) -> AgentRuntime:
             if options["runtime"] == "fake":
                 from agentlab.demo import demo_scripts
 
@@ -130,10 +142,11 @@ class Services:
                 raise MissingGatewayConfig("gateway credentials required to resume")
             if options["runtime"] == "adk":
                 from agentlab.adapters.runtime.adk import AdkRuntime
-                return AdkRuntime(cfg, url, secret)
+
+                return AdkRuntime(config, url, secret)
             from agentlab.adapters.runtime.raw import RawRuntime
 
-            return RawRuntime(cfg, url, secret)
+            return RawRuntime(config, url, secret)
 
         sandbox = DockerSandbox(default_image="python:3.12-slim") if options["sandbox"] == "docker" else LocalSandbox()
         if options["runtime"] == "fake":
@@ -141,7 +154,7 @@ class Services:
         gate = ConfigGate(GateCfg.model_validate(options["gate"]), sandbox, lambda text: self.blobs.put(text)[0])
         runtime = FakeRuntime({}) if run.status in {"WAITING_HUMAN", "DONE", "CANCELLED"} else runtime_factory()
         driver = Driver(cfg, self.store, self.blobs, self.bus, runtime, gate, workspace, self.hooks)
-        driver.runtime_factory = runtime_factory
+        driver.runtime_factory = lambda: runtime_factory(driver.cfg)
         driver.restore_checkpoint(data)
         return driver
 
@@ -150,7 +163,10 @@ def build_services(settings: Settings | None = None) -> Services:
     s = settings or Settings()
     cfg = load_config(s.config_dir)
     env = EnvFile(s.env_file)
-    embedder = OpenAICompatEmbedder(lambda: gateway_creds(env, s), cfg.models.embedding.model)
+    embedder = OpenAICompatEmbedder(
+        lambda: (env.read().get("AGENTLAB_EMBEDDING_BASE_URL"), env.read().get("AGENTLAB_EMBEDDING_API_KEY")),
+        cfg.models.embedding.model, cfg.models.embedding.dimensions, cfg.models.embedding.version,
+    )
     store: Store = InMemoryStore()
     if s.store_backend not in {"auto", "memory", "postgres"}:
         raise ValueError("store_backend must be auto, memory or postgres")

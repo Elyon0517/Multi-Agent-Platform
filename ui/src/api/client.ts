@@ -26,6 +26,7 @@ export interface Run {
   tokens_out: number;
   paused_reason: string | null;
   project_id: string;
+  thread_id?: string | null;
   created_at: string;
 }
 
@@ -102,6 +103,7 @@ export interface MemoryStats {
   embedded: number;
   embedding_model: string | null;
   embedding_ready: boolean;
+  last_error?: string | null;
 }
 
 export interface DocumentSummary {
@@ -126,7 +128,16 @@ export interface ProjectPhase {
   steps: ProjectStep[];
 }
 
+export interface ProjectSettings {
+  mode: 'auto' | 'manual'; root_alias: string; allowed_aliases: string[];
+  bindings: Record<string, { alias: string; task: string }>;
+  budget_cents: number; max_iter: number; retrieval: 'off' | 'keyword' | 'hybrid'; retrieval_k: number;
+}
+export interface Conversation { id: string; project_id: string; title: string; messages: { id: string; author: string; text: string; run_id: string | null }[] }
+export interface ModelCatalog { aliases: Record<string, { model: string }>; roles: ProjectSettings['bindings']; root_alias: string }
+
 export interface Project {
+  settings?: ProjectSettings | null;
   id: string;
   name: string;
   goal: string;
@@ -141,6 +152,7 @@ export interface CreateRunBody {
   workspace?: string;
   project_id?: string;
   step_id?: string;
+  thread_id?: string;
 }
 
 const BASE = '/api';
@@ -164,8 +176,8 @@ const post = <T>(path: string, body: unknown, method = 'POST') =>
   json<T>(path, { method, body: JSON.stringify(body) });
 
 export const api = {
-  roster: () => json<RosterEntry[]>('/roster'),
-  runs: () => json<Run[]>('/runs'),
+  roster: (projectId?: string) => json<RosterEntry[]>(`/roster${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
+  runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),
   createRun: (body: CreateRunBody) => post<Run>('/runs', body),
   decide: (id: string, decision: 'approve' | 'reject' | 'abort', feedback?: string,
@@ -175,14 +187,14 @@ export const api = {
     json<{ kind: string; content: string }>(`/artifacts/${runId}/${artifactId}`),
   settings: () => json<SettingView[]>('/settings'),
   saveSettings: (values: Record<string, string>) => post<SettingView[]>('/settings', { values }, 'PUT'),
-  documents: () => json<DocumentSummary[]>('/knowledge'),
-  uploadDocument: (file: File) => {
+  documents: (projectId?: string) => json<DocumentSummary[]>(`/knowledge${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
+  uploadDocument: (file: File, projectId?: string) => {
     const form = new FormData();
     form.append('file', file);
-    return json<DocumentSummary>('/knowledge', { method: 'POST', body: form });
+    return json<DocumentSummary>(`/knowledge${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`, { method: 'POST', body: form });
   },
-  deleteDocument: (source: string) =>
-    json<{ deleted: number }>(`/knowledge/${encodeURIComponent(source)}`, { method: 'DELETE' }),
+  deleteDocument: (source: string, projectId?: string) =>
+    json<{ deleted: number }>(`/knowledge/${encodeURIComponent(source)}${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`, { method: 'DELETE' }),
   memory: (scope: MemoryScope, opts: { projectId?: string; role?: string } = {}) => {
     const q = new URLSearchParams({ scope });
     if (opts.projectId) q.set('project_id', opts.projectId);
@@ -193,10 +205,19 @@ export const api = {
     post<MemoryItem>('/memory', body),
   searchMemory: (body: { query: string; role?: string; project_id?: string; k?: number }) =>
     post<MemoryHit[]>('/memory/search', body),
+  probeEmbedding: () => post<MemoryStats>('/memory/probe', {}),
+  reindexGlobalKnowledge: () => post<MemoryStats>('/knowledge/reindex', {}),
+  reindexKnowledge: (id: string) => post<MemoryStats>(`/projects/${id}/knowledge/reindex`, {}),
   memoryStats: () => json<MemoryStats>('/memory/status'),
+  projectProfile: async (id: string) => { const response = await fetch(`${BASE}/projects/${id}/profile`); if (!response.ok) throw new Error('Cannot export project profile'); return response.text(); },
+  importProjectProfile: (id: string, yaml_text: string) => post<Project>(`/projects/${id}/profile`, { yaml_text }, 'PUT'),
+  models: () => json<ModelCatalog>('/models'),
+  updateProjectSettings: (id: string, settings: ProjectSettings) => post<Project>(`/projects/${id}/settings`, settings, 'PUT'),
+  threads: (id: string) => json<Conversation[]>(`/projects/${id}/threads`),
+  createThread: (id: string, title: string) => post<Conversation>(`/projects/${id}/threads`, { title }),
   projects: () => json<Project[]>('/projects'),
   project: (id: string) => json<Project>(`/projects/${id}`),
-  createProject: (body: { name: string; goal: string; workspace: string; runtime?: string }) =>
+  createProject: (body: { name: string; goal: string; workspace: string; runtime?: string; settings?: ProjectSettings }) =>
     post<Project>('/projects', body),
   patchStep: (projectId: string, stepId: string, status: StepStatus) =>
     post<Project>(`/projects/${projectId}/steps/${stepId}`, { status }, 'PATCH'),

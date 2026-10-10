@@ -1,22 +1,22 @@
-# Agent Converge
+# Multi-Agent Platform
 
 Local multi-agent convergence loop with objective gates, independent model reviews, and human signoff.
 
-Repository: `agent-converge`. The Python package, CLI, and `AGENTLAB_*` settings retain their existing names for compatibility.
+Repository: `multi-agent-platform`. The Python package, CLI, and `AGENTLAB_*` settings retain their existing names for compatibility.
 
 Workflow:
 
 ```
-Task -> Planner -> Coder -> [objective Gate] -> [LLM review panel x3] -> Arbiter -> Human -> Done
+Task -> [Root dispatch in auto mode] -> Planner -> Coder -> [objective Gate] -> [LLM review panel x3] -> Arbiter -> Human -> Done
 ```
 
 Design doc (source of truth): [`docs/DISCOVERY.md`](docs/DISCOVERY.md). Phases and progress: section 16.
 
 ## Current status
 
-P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and knowledge/project services. P2 PostgreSQL persistence and CLI resume are implemented. The real gateway and Docker Python gate are connected; project-specific scheduling modes remain on the roadmap.
+P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and knowledge/project services. P2 PostgreSQL persistence and CLI resume are implemented. The real gateway and Docker Python gate are connected; project-specific auto/manual scheduling and persistent conversations are now connected to the UI.
 
-Verified on 2026-10-10: 167 backend tests (including 15 persistence integration cases), 17 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runs, projects, memory versions, model attempts and recovery checkpoints persist when PostgreSQL is configured. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
+Verified on 2026-10-10: 179 backend tests (including 16 persistence integration cases), 19 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runs, projects, memory versions, model attempts and recovery checkpoints persist when PostgreSQL is configured. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
 
 Execution failures pause for human intervention. Only reviewed signoff plus the full gate can be approved as complete; budget pauses require an explicit increase. The console approval panel accepts budget and iteration limits. SSE resumes from Last-Event-ID and deduplicates replayed usage. Diffs are based on the run-start snapshot without changing the Git index. Alembic adopts the existing bootstrap SQL and applies subsequent migrations automatically.
 
@@ -100,3 +100,13 @@ docker compose --profile gateway up -d litellm
 See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md). The Office Floor visualization is adapted from
 [munder-difflin](https://github.com/chaitanyagiri/munder-difflin) (MIT). Pixel art tilesets by
 [LimeZu](https://limezu.itch.io/).
+
+## Projects, conversations and memory
+
+Create a project with an existing, independent repository root. Choose **Root assigns models and tasks** or **Manually assign every agent** in the project form. The console edits future-run settings and exports/imports a YAML profile for Git version control. Automatic dispatch is validated and persisted; manual bindings have no fallback. All current aliases resolve to the same model ID, so model diversity awaits additional provider configuration.
+
+The left sidebar selects a project and its conversations. Submitting a goal starts a run in the selected conversation. Finish or abort an unfinished run before starting another in the same workspace; use separate worktrees for parallel projects. Switching projects resets approval, tasks, telemetry, agent activity and private retrieval context. Inspect the actual diff in the run artifacts before human signoff.
+
+Memory has explicit global sharing, project-private documents and project × role notes. Keyword retrieval works without embedding credentials and is the default. To use hybrid retrieval, provide `AGENTLAB_EMBEDDING_BASE_URL` and `AGENTLAB_EMBEDDING_API_KEY` in Settings or `.env`, and configure the embedding model/dimensions/version in `config/models.yaml`. Test the endpoint, select hybrid in project settings, then reindex existing project/agent chunks and shared knowledge separately. Readiness requires an actual successful embedding call; failure degrades to keyword retrieval. Vector ranking currently runs in Python over persisted payloads; pgvector HNSW and physical per-project schemas are pending.
+
+The DISCOVERY §16.4 table records implemented UX paths, verification and remaining decisions. New dispatch has fake and PostgreSQL recovery coverage; real-provider dispatch and vector retrieval still require separate smoke acceptance.

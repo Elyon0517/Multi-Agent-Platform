@@ -1,5 +1,5 @@
 role: supervisor
-output: plan
+output: dispatch
 prompt: prompts/supervisor.md
 tool_grants: [read_artifact]
 kind: worker

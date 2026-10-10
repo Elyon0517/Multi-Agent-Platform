@@ -193,6 +193,7 @@ class RunStatus(StrEnum):
 
 
 class Run(Strict):
+    thread_id: str | None = None
     id: str = Field(default_factory=new_id)
     project_id: str = "default"
     goal: str
@@ -244,7 +245,7 @@ class Step(Strict):
     response_ref: str | None = None
 
 
-ArtifactKind = Literal["plan", "diff", "review", "gate", "arbiter", "feedback", "memory"]
+ArtifactKind = Literal["dispatch", "plan", "diff", "review", "gate", "arbiter", "feedback", "memory"]
 
 
 class Artifact(Strict):

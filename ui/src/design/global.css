@@ -369,3 +369,17 @@ canvas, img, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
 .cth-md-card hr { margin: 0.8em 0; }
 .cth-md-card table { margin: 0.5em 0; }
 .cth-md-card th, .cth-md-card td { padding: 3px 7px; font-size: 0.9em; }
+
+/* Project navigation stays visible while the console moves below on smaller windows. */
+.app-layout { grid-template-columns: 200px minmax(0, 1fr) 460px !important; }
+@media (max-width: 1150px) {
+  .app-layout { grid-template-columns: 160px minmax(0, 1fr) !important; height: auto !important; min-height: 100vh; }
+  .workspace-main { min-height: 650px !important; }
+  .workspace-console { grid-column: 1 / -1; min-height: 350px !important; }
+}
+@media (max-width: 550px) {
+  .app-layout { grid-template-columns: minmax(0, 1fr) !important; }
+  .app-layout > nav { max-height: 200px; }
+}
+
+#root { overflow: auto; }

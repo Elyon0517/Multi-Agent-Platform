@@ -21,6 +21,9 @@ import { ProjectView } from '@/views/ProjectView';
 import { SettingsView } from '@/views/SettingsView';
 import { Status, errorText } from '@/views/ui';
 
+import { ArtifactViewer } from '@/views/ArtifactViewer';
+import { ProjectSidebar, ConversationView } from '@/views/ProjectSidebar';
+
 const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
   { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
@@ -30,19 +33,24 @@ const TABS: { key: ConsoleTab; label: string }[] = [
 export function App() {
   const { t, i18n } = useTranslation();
   const { activeRunId, runs, setRoster, setRuns, setActiveRun, applyEvent, commandCenterTab: tab,
-    requestCommandCenterTab: setTab, selectedId, activeProjectId } = useStore();
+    requestCommandCenterTab: setTab, selectedId, activeProjectId, activeThreadId, setActiveThread } = useStore();
   const [goal, setGoal] = useState('make test_add pass');
+  const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState(false);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const runtime = demo ? 'fake' : undefined;
 
   useEffect(() => {
-    api.roster().then(setRoster).catch((e) => setError(errorText(e)));
-    api.runs().then(setRuns).catch(() => undefined);
-  }, [setRoster, setRuns]);
+    let alive = true;
+    api.roster(activeProjectId ?? undefined).then(x => { if (alive) setRoster(x); }).catch(e => { if (alive) setError(errorText(e)); });
+    api.runs(activeProjectId ?? undefined).then(x => { if (alive) setRuns(activeProjectId ? x : x.filter(r => r.project_id === 'default')); }).catch(() => undefined);
+    setError(null); setGoal('');
+    return () => { alive = false; };
+  }, [activeProjectId, setRoster, setRuns]);
 
   useEffect(() => {
+    setDetail(null);
     if (!activeRunId) { setDetail(null); return; }
     const refresh = () => api.run(activeRunId).then((next) => {
       if (useStore.getState().activeRunId !== activeRunId) return;
@@ -58,46 +66,55 @@ export function App() {
   }, [activeRunId, applyEvent, setRuns]);
 
   const openRun = async (id: string) => {
-    setRuns(await api.runs());
+    const projectId = useStore.getState().activeProjectId;
+    const next = await api.runs(projectId ?? undefined);
+    if (useStore.getState().activeProjectId !== projectId || !next.some(r => r.id === id && (!projectId || r.project_id === projectId))) return;
+    setRuns(projectId ? next : next.filter(r => r.project_id === 'default'));
     setActiveRun(id);
     setTab('runs');
   };
 
   const start = async () => {
-    setError(null);
+    if (busy || !goal.trim()) return;
+    setBusy(true); setError(null);
     try {
-      const run = await api.createRun({ goal, runtime, project_id: activeProjectId ?? undefined });
-      await openRun(run.id);
+      const projectId = activeProjectId;
+      let threadId = activeThreadId;
+      if (projectId && !threadId) { const thread = await api.createThread(projectId, goal.slice(0, 80) || t('lab.newConversation')); threadId = thread.id; if (useStore.getState().activeProjectId === projectId) setActiveThread(thread.id); }
+      const run = await api.createRun({ goal, runtime, project_id: projectId ?? undefined, thread_id: threadId ?? undefined });
+      if (useStore.getState().activeProjectId === projectId) await openRun(run.id);
     } catch (e) {
       setError(errorText(e));
-    }
+    } finally { setBusy(false); }
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 460px', height: '100vh', gap: 8, padding: 8, boxSizing: 'border-box' }}>
-      <main style={{ display: 'grid', gridTemplateRows: 'auto 1fr auto auto', gap: 8, minHeight: 0 }}>
-        <PixelPanel title="Agent Converge">
-          <form onSubmit={(e) => { e.preventDefault(); void start(); }} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+    <div className="app-layout" style={{ display: 'grid', gridTemplateColumns: '200px minmax(300px, 1fr) 460px', height: '100vh', gap: 8, padding: 8, boxSizing: 'border-box' }}>
+      <ProjectSidebar />
+      <main className="workspace-main" style={{ minWidth: 0, display: 'grid', gridTemplateRows: 'auto auto 1fr auto auto', gap: 8, minHeight: 0 }}>
+        <PixelPanel title="Multi-Agent Platform">
+          <form onSubmit={(e) => { e.preventDefault(); void start(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <label htmlFor="goal" style={{ position: 'absolute', left: -9999 }}>{t('lab.goal')}</label>
             <input id="goal" value={goal} onChange={(e) => setGoal(e.target.value)}
-              style={{ flex: 1, fontFamily: 'var(--cth-font-mono)', padding: 6 }} />
+              style={{ minWidth: 120, flex: 1, fontFamily: 'var(--cth-font-mono)', padding: 6 }} />
             <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', whiteSpace: 'nowrap' }}>
               <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} /> {t('lab.demoOffline')}
             </label>
             <select aria-label={t('lab.language')} value={i18n.resolvedLanguage ?? 'en'} onChange={(e) => setLanguage(e.target.value)}>
               {LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
             </select>
-            <PixelButton onClick={() => void start()}>{t('lab.run')}</PixelButton>
+            <PixelButton disabled={busy || !goal.trim()} onClick={() => void start()}>{t('lab.run')}</PixelButton>
           </form>
           <Status error={error} />
         </PixelPanel>
+        <ConversationView />
         <section aria-label={t('lab.officeFloor')} style={{ position: 'relative', minHeight: 0 }}>
           <OfficeFloor />
         </section>
-        {detail?.pending_approval && <ApprovalBar runId={detail.run.id} approval={detail.pending_approval} />}
+        {detail?.run.id === activeRunId && detail?.pending_approval && <ApprovalBar key={detail.pending_approval.id} runId={detail.run.id} approval={detail.pending_approval} />}
         <AgentStrip />
       </main>
-      <aside style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 8, minHeight: 0 }}>
+      <aside className="workspace-console" style={{ minWidth: 0, display: 'grid', gridTemplateRows: 'auto 1fr', gap: 8, minHeight: 0 }}>
         <nav role="tablist" aria-label={t('lab.console')} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {TABS.map((t) => (
             <PixelButton key={t.key} size="sm" variant={t.key === tab ? 'primary' : 'secondary'} onClick={() => setTab(t.key)}>
@@ -121,14 +138,15 @@ export function App() {
                   ))}
                 </ul>
               </PixelPanel>
-              {detail && <RunTimeline detail={detail} />}
-              {detail && <VerdictBoard detail={detail} />}
+              {detail?.run.id === activeRunId && <RunTimeline detail={detail} />}
+              {detail?.run.id === activeRunId && <VerdictBoard key={`verdict:${detail.run.id}`} detail={detail} />}
+              {detail?.run.id === activeRunId && <ArtifactViewer key={`artifact:${detail.run.id}`} detail={detail} />}
             </>
           )}
           {tab === 'project' && <ProjectView runtime={runtime} onRunStarted={(id) => void openRun(id)} />}
           {tab === 'tasks' && <TasksKanban />}
           {tab === 'human' && <AskMeTab />}
-          {tab === 'memory' && <KnowledgeView />}
+          {tab === 'memory' && <KnowledgeView key={activeProjectId ?? 'global'} />}
           {tab === 'graph' && (
             <MemoryGraphPanel godId="supervisor"
               onJumpToMemory={(id) => { useStore.getState().select(id); setTab('memory'); }} />

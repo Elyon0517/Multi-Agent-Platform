@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: { '/api': { target: 'http://127.0.0.1:8765', rewrite: (p) => p.replace(/^\/api/, '') } },
+    proxy: { '/api': { target: process.env.AGENTLAB_API_TARGET ?? 'http://127.0.0.1:8765', rewrite: (p) => p.replace(/^\/api/, '') } },
   },
   test: { environment: 'node', include: ['src/**/*.test.ts'] },
 });

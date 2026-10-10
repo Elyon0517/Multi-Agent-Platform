@@ -194,7 +194,8 @@ class PostgresStore:
                         "superseded_by",
                     )
                 }
-                | {"payload": data},
+                | {"payload": data, "embedding_model": data.get("embedding_model"),
+                   "embedding_version": data.get("embedding_version")},
             )
         else:
             self._query(

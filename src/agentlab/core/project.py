@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
+from agentlab.core.project_config import ProjectSettings
 from agentlab.core.schemas import Strict, new_id, utcnow
 
 
@@ -38,6 +39,7 @@ class ProjectPhase(Strict):
 
 
 class Project(Strict):
+    settings: ProjectSettings | None = None
     id: str = Field(default_factory=new_id)
     name: str
     goal: str

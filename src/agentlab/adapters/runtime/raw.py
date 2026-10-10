@@ -72,9 +72,14 @@ class OpenAICompatChat:
 class OpenAICompatEmbedder:
     BATCH = 64
 
-    def __init__(self, creds: Callable[[], tuple[str | None, str | None]], model: str) -> None:
+    def __init__(
+        self, creds: Callable[[], tuple[str | None, str | None]], model: str,
+        dimensions: int | None = None, version: int = 1
+    ) -> None:
         self._creds = creds
         self.model = model
+        self.dimensions = dimensions
+        self.version = version
 
     def available(self) -> bool:
         url, key = self._creds()
@@ -82,7 +87,7 @@ class OpenAICompatEmbedder:
 
     async def __call__(self, texts: list[str]) -> list[list[float]]:
         url, key = self._creds()
-        client = openai.AsyncOpenAI(base_url=url, api_key=key, max_retries=2)
+        client = openai.AsyncOpenAI(base_url=url, api_key=key, max_retries=0, timeout=30)
         out: list[list[float]] = []
         try:
             for i in range(0, len(texts), self.BATCH):
@@ -90,6 +95,8 @@ class OpenAICompatEmbedder:
                 out += [d.embedding for d in resp.data]
         except openai.OpenAIError as e:
             raise classify(e) from e
+        finally:
+            await client.close()
         return out
 
 

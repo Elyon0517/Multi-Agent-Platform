@@ -1,8 +1,8 @@
-# Agent Converge Discovery
+# Multi-Agent Platform Discovery
 
 > 状态：v1.5 · P0 / P1 / P2 完成，下一步 P3 与 §16.4 项目隔离 · 可持续更新
 > 最近更新：2026-10-10
-> 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
+> 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
 > 适用范围：个人本地 dev/研究工具，面向未来开源
 
@@ -211,7 +211,7 @@ override:
 
 ### 7.4 Embedding 与 Rerank（API）
 
-embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
+embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
 
 ---
 
@@ -385,7 +385,7 @@ agentlab/
 
 ### 15.2 从 munder-difflin 移植的内容（ADR-011）
 
-| munder 源 | Agent Converge 用途 | 改动 |
+| munder 源 | Multi-Agent Platform 用途 | 改动 |
 |---|---|---|
 | `scene/office/*`（OfficeFloor、Character、CharacterSprite、Camera、pathfinding、ThoughtBubble、ToolBubble、MessageEnvelope、DeskScreen、SeatPool、TiledMapRenderer、theme*、cast、portraitArt、glRecovery、cafeteriaLines） | Office Floor 主场景 | 数据源 `window.cth`(Electron IPC) → `EventSource` SSE；删 `pixi.js/unsafe-eval`（浏览器无需） |
 | `design/tokens.{ts,css}`, `global.css`, `fonts.css` | 像素风设计系统 | 原样 |
@@ -414,7 +414,7 @@ agentlab/
 
 Office Floor 只认事件流，映射规则集中在 `ui/src/scene/adapter/` 一处：
 
-| Agent Converge | munder Agent 字段 |
+| Multi-Agent Platform | munder Agent 字段 |
 |---|---|
 | supervisor | `isGod = true`（坐 Michael 的办公室） |
 | planner / coder / reviewer×3 / summarizer / arbiter | 普通工位，各分配一个 cast 角色与 accent |
@@ -446,7 +446,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
-| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆、PDF 上传 RAG、project phase/step 进度已实现（内存版）；Postgres/pgvector 落库、summarizer、导入导出未做 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
 | P8 | S6 Eval | 部分完成 | 已有 py-fix-add 固定任务与 smoke；完整评分卡待做 |
 
@@ -523,7 +523,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 持久化 | P2 已完成；配置数据库 URL 后启用，显式 memory 模式仍为临时数据 | 已完成 |
 | 浏览器内上传 | 自动化测试工具无法驱动 file input；API 层已测（curl + pytest） | — |
 | CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
-| supervisor（root）角色 | 配置与路由都有，Driver 尚未调用；调度目前是固定状态机 | P3 |
+| supervisor（root）角色 | 项目 auto 模式调用并持久化 Dispatch；角色模型与任务经过确定性校验，非法分配需人类填写反馈后 reject 重生成，phase 顺序仍由 Driver 执行 | 已接线 |
 | summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
 | 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 已配置，未强制执行 | P3 |
@@ -620,17 +620,30 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 隔离：project 各自拥有 workspace、模型/任务配置、对话、运行记录、预算与记忆；agent 私有记忆按 project × role 归属。global 知识为明确共享的个人知识，项目私有文档不得进入 global。切换 project 同步切换 run、agent 状态、事件、看板、审批和检索范围；后端校验 project/thread/run/step 归属。workspace 路径重叠需要检测；并发修改同一仓库需要独立 worktree/沙箱。
 
-workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse --show-toplevel`，拒绝已有 monorepo 内的非根目录 workspace，不创建嵌套仓库。子目录范围支持与项目间路径重叠检查仍属于本节。
+workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse --show-toplevel`，拒绝已有 monorepo 内的非根目录 workspace，不创建嵌套仓库。子目录范围支持仍未实现；本轮已拒绝项目 workspace 重叠，提示使用独立 worktree。
 
-当前检查结果（以上是目标，尚未完整实现）：
-- `auto/manual` YAML 有配置，Driver 尚未调用 supervisor，固定状态机仍负责调度。
-- `Project` 没有模式、角色模型与任务字段；runtime/roster 使用全局模型策略。
-- 非 global 记忆检索按 project_id 过滤；global 知识有意共享。
-- `/runs` 返回全量记录；UI runs/tasks/agent 状态没有完整按项目隔离，切换 project 只改 activeProjectId。
-- `/runs` 已根据 project_id 继承 workspace，并在创建 run 前验证 project/step 归属，拒绝不匹配的路径；完整项目隔离仍待实现。
-- 未实现对话 thread/message 数据模型；P2 已持久化现有运行、项目与记忆。完整项目隔离仍待本节实现。
+2026-10-10 UX / E2E 实现与检查结果：
 
-P2 持久化基础已完成；本节先修复项目归属/workspace/界面状态隔离，再实现项目配置、两种调度路径及选择界面，随后接入对话。run 的全局配置快照已在 P2 实现，项目专属配置仍待本节。
+| 用户路径 | 本轮实现 | 验证与边界 |
+|---|---|---|
+| 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 尚未接入循环 |
+| auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
+| 左侧 project → 对话 → run | Conversation/Message 持久化；thread 可关联多 run；用户目标与终止状态写入历史，最近 20 条作为下一 run 上下文 | project/thread 归属先验证，消息与 run 创建同事务；目前是任务对话，不是通用即时聊天 |
+| 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
+| 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
+| 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
+| memory 文档 | global 明确共享；project 上传/替换/移除仅影响本项目，保留历史版本；agent 私有记忆需 project | 相同文档名跨项目隔离测试，移除文档不误删同 source 的 note |
+| RAG | 项目选择 off / keyword / hybrid，默认 keyword；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
+| embedding 配置 | 独立 embedding URL/Key 保存至本机 .env；模型/维度/version 在 models.yaml；可测试接口、重建共享知识与项目/agent 记忆向量 | 有凭据不等于可用：只有实际调用成功才 ready；当前没有可用 embedding 服务，真实向量验收需用户补充 |
+| 配置即代码 | 控制台支持项目设置 YAML 导出/校验导入，适合提交 Git；run 固化完整配置 | 全局模型能力/价格仍在 config/*.yaml，项目选项是持久化运行数据。导入不改变已存在 run |
+
+本轮检查可复现：后端 `tests/unit/test_project_experience.py`、Postgres `test_project_dispatch_and_conversation_survive_postgres_restart`，前端 `store.test.ts`；浏览器在隔离 fake 服务验证了创建 auto/manual 项目、对话启动、审批、实际 diff 和项目切换。测试 workspace 与 UI 服务数据不写入生产项目。
+
+剩余需要产品确认或外部资料：
+- 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
+- 项目目前共享 Postgres 表，通过 project_id 隔离，并非 §9 目标中的每项目物理 schema；升级物理隔离需选迁移策略，不能对现有数据直接假定完成。
+- 当前所有聊天别名映射 gpt-6-astra；输入独立，不代表跨模型多样性。新增 Claude 等 provider 后仍需明确 provider/routing 配置。
+- ADK、工具白名单执行、危险操作审批、summarizer、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
 
 ---
 

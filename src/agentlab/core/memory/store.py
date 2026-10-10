@@ -45,6 +45,8 @@ class MemoryItem(Strict):
     pinned: bool = False
     embedding: list[float] | None = None
     embedding_model: str | None = None
+    embedding_version: int | None = None
+    embedding_dimensions: int | None = None
     created_at: str = Field(default_factory=lambda: utcnow().isoformat())
     valid_to: str | None = None
     superseded_by: str | None = None
@@ -110,6 +112,7 @@ def rrf(rankings: list[list[MemoryItem]], k: int) -> list[Hit]:
 class InMemoryMemoryStore:
     embedder: Embedder | None = None
     last_error: str | None = None
+    verified: bool = False
     _items: dict[str, MemoryItem] = field(default_factory=dict)
 
     def flush(self) -> None:
@@ -122,17 +125,29 @@ class InMemoryMemoryStore:
         if self.embedder is None or not self._can_embed():
             return None
         try:
-            return await self.embedder(texts)
+            vectors = await self.embedder(texts)
+            dimensions = getattr(self.embedder, "dimensions", None)
+            if len(vectors) != len(texts) or any(
+                not v or (dimensions is not None and len(v) != dimensions) or not all(math.isfinite(n) for n in v)
+                for v in vectors
+            ):
+                raise ValueError("invalid embedding batch or dimensions")
+            self.verified = True
+            self.last_error = None
+            return vectors
         except Exception as e:  # memory must never break a run; degrade to keyword search
-            log.warning("embedding failed, falling back to keyword search: %s", e)
-            self.last_error = str(e)
+            log.warning("embedding failed, falling back to keyword search: %s", type(e).__name__)
+            self.last_error = type(e).__name__
+            self.verified = False
             return None
 
-    async def add(self, items: list[MemoryItem]) -> list[MemoryItem]:
-        vectors = await self._embed([i.text for i in items]) if items else None
+    async def add(self, items: list[MemoryItem], embed: bool = True) -> list[MemoryItem]:
+        vectors = await self._embed([i.text for i in items]) if items and embed else None
         if vectors is not None and self.embedder is not None:
             items = [
-                i.model_copy(update={"embedding": v, "embedding_model": self.embedder.model})
+                i.model_copy(update={"embedding": v, "embedding_model": self.embedder.model,
+                                     "embedding_version": getattr(self.embedder, "version", None),
+                                     "embedding_dimensions": len(v)})
                 for i, v in zip(items, vectors, strict=True)
             ]
         for i in items:
@@ -153,13 +168,19 @@ class InMemoryMemoryStore:
             "items": len(items),
             "embedded": sum(1 for i in items if i.embedding),
             "embedding_model": self.embedder.model if self.embedder else None,
-            "embedding_ready": self._can_embed(),
+            "embedding_ready": self._can_embed() and self.verified,
+            "embedding_configured": self._can_embed(),
             "last_error": self.last_error,
         }
 
-    def delete_source(self, namespace: str, source: str) -> int:
+    def delete_source(self, namespace: str, source: str, project_id: str | None = None) -> int:
         doomed = [
-            k for k, i in self._items.items() if i.valid_to is None and i.namespace == namespace and i.source == source
+            k
+            for k, i in self._items.items()
+            if i.valid_to is None
+            and i.namespace == namespace
+            and i.source == source
+            and (namespace == GLOBAL or i.project_id == project_id)
         ]
         for key in doomed:
             self._items[key].valid_to = utcnow().isoformat()
@@ -175,12 +196,16 @@ class InMemoryMemoryStore:
             and (i.namespace == GLOBAL or i.project_id == project_id)
         ]
 
-    async def search(self, project_id: str | None, namespaces: list[str], query: str, k: int = 8) -> list[Hit]:
+    async def search(
+        self, project_id: str | None, namespaces: list[str], query: str, k: int = 8, use_vectors: bool = True
+    ) -> list[Hit]:
         pool = self._scope(project_id, namespaces)
         rankings = [bm25_rank(query, pool)[:50]]
-        vec = [i for i in pool if i.embedding]
-        qvs = await self._embed([query]) if vec else None
+        vec = [i for i in pool if i.embedding and self.embedder and i.embedding_model == self.embedder.model
+               and i.embedding_version == getattr(self.embedder, "version", None)]
+        qvs = await self._embed([query]) if vec and use_vectors else None
         if qvs:
+            vec = [i for i in vec if len(i.embedding or []) == len(qvs[0])]
             rankings.append(sorted(vec, key=lambda i: -cosine(qvs[0], i.embedding or []))[:50])
         pinned = [i for i in pool if i.pinned]
         return rrf([*rankings, pinned], k)
@@ -216,9 +241,9 @@ class PersistentMemoryStore(InMemoryMemoryStore):
         self._refresh()
         return super()._scope(project_id, namespaces)
 
-    def delete_source(self, namespace: str, source: str) -> int:
+    def delete_source(self, namespace: str, source: str, project_id: str | None = None) -> int:
         self._refresh()
-        return super().delete_source(namespace, source)
+        return super().delete_source(namespace, source, project_id)
 
     def stats(self) -> dict[str, object]:
         self._refresh()

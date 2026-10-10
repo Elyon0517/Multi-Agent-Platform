@@ -12,9 +12,12 @@ export function VerdictBoard({ detail }: { detail: RunDetail }) {
   const reviewIds = detail.artifacts.filter((a) => a.kind === 'review').slice(-3).map((a) => a.id).join(',');
 
   useEffect(() => {
+    setVerdicts([]);
     if (!reviewIds) return;
+    let alive = true;
     void Promise.all(reviewIds.split(',').map((id) => api.artifact(detail.run.id, id)))
-      .then((arts) => setVerdicts(arts.map((a) => JSON.parse(a.content) as Verdict)));
+      .then((arts) => { if (alive) setVerdicts(arts.map((a) => JSON.parse(a.content) as Verdict)); }).catch(() => undefined);
+    return () => { alive = false; };
   }, [detail.run.id, reviewIds]);
 
   if (verdicts.length === 0) return null;
