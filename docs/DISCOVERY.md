@@ -806,6 +806,16 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
   - 验收：跑一个 fake 任务 + 一轮对话后，root / planner / coder / 三个 reviewer 的调用次数与 token 和 step、root_turn 记录一致；跨两个项目的数据合并显示
 - [x] openapi-typescript 生成类型，替换手写类型
 
+#### P4.5 · 终审报告（v1.10，ADR-032）
+到达 signoff 时，用确定性代码（不调用模型）生成一份简短报告，显示在审批卡片与对话总结中，只包含三项：
+1. **任务目标与验收标准**：run 目标 + planner 计划中的验收标准
+2. **自动检查**：FULL Gate 通过；或「未经过自动测试」（`automated_checks: not_run`）
+3. **未解决的 findings**：最后一轮评审中各 reviewer 仍保留的 findings（signoff 时不含 blocking / major，通常为 minor / nit）；没有则显示「无」
+
+- [ ] 生成报告并随 signoff 审批保存；审批卡片与对话总结显示
+- 验收：有 Gate / 无 Gate 各跑一个 fake 任务到 signoff，报告三项内容与 plan、Gate 结果、最后一轮 verdict 一致
+- 不做：费用、模型、迭代明细（Monitor 与 run 时间线已有）；联网 / Git 危险操作审批（目前没有任何 agent 工具能执行命令、联网或操作 Git，待以后新增 shell / MCP 工具时再做）
+
 #### P5 · Gate 可选（v1.9，ADR-029；取代原「S3 多语言 Gate」）
 - ~~`docker/` 下 node / jdk / cpp 镜像；实测 TypeScript → Java → C++~~（取消）
 - [x] 找不到匹配 Gate 时不报错：CODING 直接进入 REVIEWING，不跑 FULL Gate
@@ -1039,6 +1049,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-029 | Gate 改为可选：有匹配的 Gate 就运行，没有就跳过 GATING 与 FULL Gate，由评审 + 人工终审收敛，终审标明 `automated_checks: not_run`；取消 TS / Java / C++ Gate 镜像（取代 ADR-008） | 2026-10-10 | 用户要求：任务可能是任何语言（如 Go），不应因缺少语言配置而无法运行；参照 Claude Code 不预先为语言准备工具链。保留 Python Gate；自定义检查命令以后按需再做 |
 | ADR-030 | embedding / rerank 默认使用本地进程内中文小模型；Settings 的远程 OpenAI 兼容 URL 覆盖 embedding（Key 可选），远程失败回退本地；都不可用时降级为关键词，rerank 失败保留 RRF（ADR-003 的例外；远程 rerank 暂未实现） | 2026-10-10 | 用户要求其他用户能快速上手、不必申请 key；本地小模型 CPU 即可运行，比额外容器（如 TEI）少一个服务、无 Apple Silicon 镜像兼容问题 |
 | ADR-031 | 开源前替换所有可能侵权的内容：LimeZu tileset 与地图改为 CC0 拼装（2dPig + Kenney）或自绘，LimeZu 仅作用户自备的可选皮肤；删除《The Office》《Brooklyn Nine-Nine》主题、角色、台词与相关文案，改为原创；保留 munder-difflin MIT 署名与 OFL 字体 | 2026-10-10 | 用户决定：办公室与人物、影视主题等任何可能侵权的内容都要替换。LimeZu 许可禁止再分发；剧名、角色与台词属于权利人 |
+| ADR-032 | signoff 时生成确定性终审报告，只含任务目标与验收标准、自动检查结果（或未经过自动测试）、最后一轮未解决的 findings | 2026-10-10 | 用户要求精简：审核时只看这三项；不调用模型，内容不会编造 |
 
 
 ### 可靠性复核补充（2026-10-09）
