@@ -549,7 +549,12 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 #### P2 · S1 持久化 + 断点续跑（1–2 天）
 - [ ] `PostgresStore` 实现 `core/ports.py::Store`，与 `InMemoryStore` 跑同一套测试
-- [ ] Alembic 接管 `0001_init.sql`
+- [ ] Alembic 接管 `0001_init.sql` 与后续迁移（包含 `0002_model_alignment.sql`）
+- [ ] baseline tree 引用、独立 Git 对象库及 workspace/Git 根目录归属持久化；重启恢复沿用原 baseline，不重新捕获用户当前文件
+- [ ] 冻结的 reviewer batch 输入和已成功结果落库；恢复只补跑缺失 reviewer，不重新检索记忆或重复计费
+- [ ] run 费用/token、逐 attempt usage、预算/迭代上限调整与 project-planner 账目落库；未返回 usage 的在途请求显式记为结算未知，不声称 exactly-once 计费
+- [ ] 恢复操作使用事务与运行锁，防止多个 driver 同时续跑；重启后保留 WAITING_HUMAN 与 pending approval，不自动批准
+- [ ] 验收覆盖预算暂停、部分评审成功、execution_error 和 signoff 等断点，并验证 reject/abort/终止的缓存及对象库清理
 - [ ] prompt / response 写入 blob，`step.prompt_ref / response_ref` 落库
 - [ ] `kill -9` 后 `agentlab resume <run_id>` 从 `run.status` 继续
 - [ ] CLI：`resume / status / show / decide`
@@ -614,6 +619,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 界面：左侧常驻 project 列表，展开显示该项目的对话；中央显示当前对话与 Office，右侧控制台显示当前项目的模型、任务与审批。对话需独立 thread_id 与消息历史，thread 下可有多个 run；现有 run 时间线不等同于对话。
 
 隔离：project 各自拥有 workspace、模型/任务配置、对话、运行记录、预算与记忆；agent 私有记忆按 project × role 归属。global 知识为明确共享的个人知识，项目私有文档不得进入 global。切换 project 同步切换 run、agent 状态、事件、看板、审批和检索范围；后端校验 project/thread/run/step 归属。workspace 路径重叠需要检测；并发修改同一仓库需要独立 worktree/沙箱。
+
+待修的 workspace 子目录边界：`ensure_repo` 当前只检查 workspace 自身的 `.git`，可能在已有 monorepo 的包目录执行 `git init`，意外创建内嵌仓库。列入本节项目隔离工作：先用 `git rev-parse --show-toplevel` 判断祖先仓库；初版优先明确拒绝非仓库根目录的 workspace 并提示使用根目录，后续如支持子目录则分别保存 Git 根目录与 workspace 范围，限定所有快照、上下文和编辑路径。未落地前不得宣称此场景已支持。
 
 当前检查结果（以上是目标，尚未完整实现）：
 - `auto/manual` YAML 有配置，Driver 尚未调用 supervisor，固定状态机仍负责调度。
