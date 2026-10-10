@@ -6,8 +6,8 @@ const agent = (id: string, status: Agent['status'] = 'idle'): Agent => ({
   project: '', isGod: id === 'supervisor',
 });
 describe('actual floor activity', () => {
-  it('keeps an idle or completed floor empty', () => {
-    expect(activeFloorAgents([agent('supervisor'), agent('coder', 'success'), agent('reviewer', 'blocked')], false)).toEqual([]);
+  it('keeps Root resident while other idle or completed agents stay outside', () => {
+    expect(activeFloorAgents([agent('supervisor'), agent('coder', 'success'), agent('reviewer', 'blocked')], false).map(a => [a.id, a.status])).toEqual([['root', 'idle']]);
   });
   it('shows only root while chatting', () => {
     expect(activeFloorAgents([agent('supervisor'), agent('coder')], true).map(a => a.id)).toEqual(['root']);

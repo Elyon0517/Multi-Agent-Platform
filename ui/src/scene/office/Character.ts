@@ -30,7 +30,7 @@ export function paintCup(g: Graphics, x: number, y: number): void {
   g.rect(x, y - 4, 5, 1).fill(0xffffff);
 }
 
-const SPEED = 48; // pixels/sec (tileSize=16)
+const SPEED = 320; // pixels/sec (tileSize=16)
 // Slide the sprite when seated so it reads as "sitting on the chair" rather than
 // standing on the tile. The chair tile holds the chair/barrel, with the desk in
 // the tile the agent faces. The feet are anchored at the seat tile's bottom and

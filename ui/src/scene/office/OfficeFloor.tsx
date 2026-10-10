@@ -59,6 +59,7 @@ interface CoffeeRun {
 
 interface Runtime {
   character: Character;
+  exitElapsed?: number;
   seatIndex: number | null;
   waitTile: Tile;
   charName: string;
@@ -1404,7 +1405,7 @@ export function OfficeFloor() {
           frames,
           seatTile,
           seatDirection: facingForSeat(seatTile),
-          spawnTile: entrance, // walk in from the office door
+          spawnTile: agent.id === 'root' ? seatTile : entrance, // Root stays at its desk.
           glowColor: hexNum(colors.accent[agent.accent]) ?? hexToNumber(member.shirt),
           onClick: (id) => useStore.getState().select(id),
         });
@@ -1565,7 +1566,7 @@ export function OfficeFloor() {
           default:
             c.setStatusGlyph('none');
             // The god runs the floor from its desk; everyone else wanders when idle.
-            if (agent.isGod) { c.sitAtDesk(true); c.showThought(liveActivity(agent, t('office.activity.runningFloor'))); }
+            if (agent.isGod) { c.sitAtDesk(false); c.hideThought(); }
             else if (finishedWork) {
               // Task done → a quick cheer on the spot, then back to roaming.
               c.startWandering();
@@ -1585,12 +1586,25 @@ export function OfficeFloor() {
         const agents = floorAgents();
         const present = new Set(agents.map((a) => a.id));
         for (const id of Array.from(runtimes.keys())) {
-          if (!present.has(id)) removeCharacter(id);
+          if (!present.has(id)) {
+            const rt = runtimes.get(id)!;
+            if (id === 'root') removeCharacter(id);
+            else if (rt.exitElapsed === undefined) {
+              rt.exitElapsed = 0;
+              releaseBreak(rt); releaseErrand(rt); releaseRun(rt);
+              rt.character.setStatusGlyph('none');
+              rt.character.hideThought();
+              rt.character.walkToAndThen(entrance, () => {
+                if (rt.exitElapsed !== undefined) removeCharacter(id);
+              });
+            }
+          }
         }
         for (const agent of agents) {
           const rt = runtimes.get(agent.id);
           if (!rt) void addCharacter(agent);
           else {
+            if (rt.exitElapsed !== undefined) { rt.exitElapsed = undefined; rt.prevStatus = undefined; }
             rt.character.setName(agent.name);
             applyState(agent, rt);
           }
@@ -1695,15 +1709,17 @@ export function OfficeFloor() {
         // Thought clouds counter-scale against the camera so their text never
         // renders below 1:1 screen size when the window/world shrinks.
         const zoom = world.scale.x;
-        for (const rt of runtimes.values()) {
+        for (const [id, rt] of runtimes) {
+          if (rt.exitElapsed !== undefined) {
+            rt.exitElapsed += dt;
+            if (rt.exitElapsed >= 2) { removeCharacter(id); continue; }
+          }
           rt.character.setBubbleZoom(zoom);
           rt.character.update(dt);
         }
-        updateCafeteria(dt);
-        updateCoffeeRuns(dt);
-        updateErrands(dt);
-        updateBossAura(dt);
-        updateDeskLife(dt);
+        // Ambient behaviour is disabled for the live execution view.
+        void updateCafeteria; void updateCoffeeRuns; void updateErrands;
+        void updateBossAura; void updateDeskLife;
         updateBoardMoves(dt);
         resolveBubbleOverlaps();
         for (let i = envelopes.length - 1; i >= 0; i--) {
