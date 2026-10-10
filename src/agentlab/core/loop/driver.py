@@ -268,12 +268,20 @@ class Driver:
             if settings.mode == "auto" and not self.store.records("dispatch_" + run.id):
                 context = {
                     "available_models": {
-                        a: self.cfg.models.aliases[a].model_dump(mode="json")
+                        a: {**self.cfg.models.aliases[a].model_dump(mode="json"), "tier": self.cfg.models.tiers[a]}
                         for a in settings.allowed_aliases or self.cfg.models.aliases
                     },
                     "roles": sorted(set(self.cfg.model_policy.roles) - {"supervisor", "project-planner"}),
+                    "reviewer_max_tiers": {
+                        role: max(self.cfg.models.tiers[self.cfg.model_policy.roles[role].primary],
+                                  self.cfg.model_policy.override.reviewer_min_tier)
+                        for role in self.cfg.reviewer_roles
+                    },
                     "instruction": ("Assign each worker a model alias and task. Keep all reviewers independent; "
-                                    "never skip gates or approvals."),
+                                    "never skip gates or approvals. "
+                                    "When available models contain at least two distinct model IDs, "
+                                    "assign correctness-reviewer and arch-reviewer different model IDs. "
+                                    "Different aliases for the same model ID do not count."),
                 }
                 result = await self._agent(
                     run, "supervisor", self._input(run, context=context, feedback=self._latest_text(run, "feedback")),

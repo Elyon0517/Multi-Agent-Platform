@@ -205,6 +205,8 @@ override:
   must_log: true
 ```
 
+auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束取代；目录有至少两个不同 model id 时，correctness 和 arch reviewer 必须使用不同 model id（不同 alias 不代表不同模型）。manual 模式同样校验模型多样性。
+
 ### 7.3 Retry（retry = 3）
 
 `num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前预留预算（并行请求共享预留量）；网关返回的 usage 逐次即时记账，包括空响应、拒绝与 JSON 修复失败。没有 usage 的传输失败无法准确计费，不伪造 token；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
@@ -591,7 +593,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [ ] 把以上三块落到 Postgres（`memory` 表 + pgvector HNSW + tsvector；`project` 表加 phases JSONB）
 - [ ] summarizer 接入，每轮自动抽 episodic
 - [ ] `pin_memory` 工具；rerank
-- [ ] per-project schema、`pg_dump -n` 导入导出
+- [x] per-project schema，既有数据一次性迁移；`pg_dump -n` 导出/数据库级恢复验证
+- [ ] 完整项目导入 UI/CLI（目录注册、共享依赖与 blobs/snapshots 一起恢复）
 - 演示：第二个 project 复用第一个 project 沉淀的经验
 
 #### P7 · S5b 可视化 v2 + 可观测（2–3 天）
@@ -641,7 +644,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 
 剩余需要产品确认或外部资料：
 - 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
-- 项目目前共享 Postgres 表，通过 project_id 隔离，并非 §9 目标中的每项目物理 schema；升级物理隔离需选迁移策略，不能对现有数据直接假定完成。
+- 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
 - 当前所有聊天别名映射 gpt-6-astra；输入独立，不代表跨模型多样性。新增 Claude 等 provider 后仍需明确 provider/routing 配置。
 - ADK、工具白名单执行、危险操作审批、summarizer、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
 
@@ -773,3 +776,16 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - 真实网关 + Docker 恢复 smoke：run `6b2e0c696274`，付费 planner 返回后 kill -9，CLI resume 后 FULL Gate 通过、停在 signoff；planner step 仍为 1，累计 8451 input / 631 output tokens，按配置估算 5.4875c。未代替用户批准最终 signoff。
 - Smoke workspace 放在 `~/.agentlab-workspaces`，避免 macOS 临时路径无法被 Colima 挂载，以及在父仓库中意外创建嵌套仓库。
 - 历史 §16.1d–g 中“P2 待持久化”的说明记录的是当时状态；由本节更新。当前总验收：后端 167 项、前端 17 项，ruff / mypy / UI build 通过。
+
+
+### 16.1i · 项目 schema 与调度修正（2026-10-10）
+
+- 项目有效模型目录包含 ≥2 个不同 model id 时，auto Dispatch 和 manual 配置都要求 correctness/arch reviewer 的 model id 不同；alias 不算多样性。单模型目录仍可运行。auto override 由模型目录、reviewer 档位与此规则约束，root 输入包含可用模型 ID/档位和 reviewer 档位上限。
+- `/roster?run_id=...` 使用该 run 的 checkpoint 配置，反映已保存的实际 Dispatch，不受之后编辑项目设置影响；切换/取消选择 run 会重载对应 roster。
+- global 文档上传会尝试生成 embedding，不再依赖 project；未配置或调用失败仍降级。项目文档按项目 hybrid 设置生成向量，支持手动重建。
+- `agentlab.db.isolation` 是可重复执行的一次性迁移入口，db-upgrade/启动也会检查。所有已有项目统一迁移，不存在新旧双轨运行路径。锁旧表、复制完整记录、逐表核对行数和内容，任何失败回滚；只读 `legacy_projects` 保留旧数据，不自动删除。public 中空的旧项目表作为建表模板，触发器禁止旧客户端再次写入项目数据。
+- `proj_<id>` 包含 project/agent_def/run/iteration/step/artifact/blackboard/memory/approval/event/run_checkpoint/state_record。项目记忆、对话、Dispatch、attempt、规划调用账目均按归属迁移。public 保留全局知识、共享记录、project_schema/run_directory 路由元数据；模型目录仍以 YAML 为准。项目内外键、serial 序列与 ownership CHECK 不依赖其他项目。
+- 本地迁移：既有 4 个 default run、9 个 iteration、28 个 step、33 个 artifact、4 条 memory、4 个 approval、163 个 event、4 个 checkpoint、8 个 state_record 全部迁入 `proj_default`；完整记录比对通过。真实 run `6b2e0c696274` 保持 WAITING_HUMAN/signoff，cost=5.4875c，恢复 driver 成功。
+- `pg_dump -n proj_default` 已在临时数据库恢复，并核对 4 run / 163 event / 4 checkpoint。恢复到新环境仍需共享 vector 扩展、路由目录注册与 `.agentlab` 中的对象/内容文件；完整导入工具尚待实现。后续 Alembic 结构变更必须同步项目 schemas，不能只更新 public 模板。
+
+本轮验证：后端 183 项（包含 17 个持久化集成用例）、前端 19 项，ruff/mypy/config-check/UI build 全部通过；新增模型 ID 多样性、global 上传 embedding、frozen roster、既有数据迁移/只读备份/失败回滚测试。

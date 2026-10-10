@@ -175,8 +175,14 @@ def build_router(svc: Services) -> APIRouter:
             raise HTTPException(413, "file larger than 20 MB")
         try:
             settings = svc.projects.get(project_id).settings if project_id else None
-            return (await svc.knowledge.ingest(file.filename or "upload", data, project_id,
-                                               embed=bool(settings and settings.retrieval == "hybrid"))).__dict__
+            return (
+                await svc.knowledge.ingest(
+                    file.filename or "upload",
+                    data,
+                    project_id,
+                    embed=project_id is None or bool(settings and settings.retrieval == "hybrid"),
+                )
+            ).__dict__
         except UnsupportedDocument as e:
             raise HTTPException(422, str(e)) from e
 
@@ -205,9 +211,13 @@ def build_router(svc: Services) -> APIRouter:
         settings = svc.projects.get(body.project_id).settings if body.project_id else None
         if settings and settings.retrieval == "off":
             return []
-        hits = await svc.knowledge.search(body.project_id, body.role, body.query,
-                                          settings.retrieval_k if settings else body.k,
-                                          use_vectors=bool(settings and settings.retrieval == "hybrid"))
+        hits = await svc.knowledge.search(
+            body.project_id,
+            body.role,
+            body.query,
+            settings.retrieval_k if settings else body.k,
+            use_vectors=bool(settings and settings.retrieval == "hybrid"),
+        )
         return [h.model_copy(update={"item": h.item.model_copy(update={"embedding": None})}) for h in hits]
 
     @r.post("/memory/probe")
@@ -230,8 +240,11 @@ def build_router(svc: Services) -> APIRouter:
             raise HTTPException(422, "enable hybrid retrieval for this project first")
         if not svc.knowledge.memory._can_embed():
             raise HTTPException(422, "configure the separate embedding URL and API key first")
-        items = [i for namespace in [PROJECT, *(agent_ns(role) for role in svc.cfg.agents)]
-                 for i in svc.knowledge.memory.items_in(namespace, project_id)]
+        items = [
+            i
+            for namespace in [PROJECT, *(agent_ns(role) for role in svc.cfg.agents)]
+            for i in svc.knowledge.memory.items_in(namespace, project_id)
+        ]
         # Preserve ids and history; refreshed embeddings are persisted with the same chunks.
         await svc.knowledge.memory.add(items)
         return svc.knowledge.memory.stats()

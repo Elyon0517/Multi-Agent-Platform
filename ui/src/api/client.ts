@@ -176,7 +176,7 @@ const post = <T>(path: string, body: unknown, method = 'POST') =>
   json<T>(path, { method, body: JSON.stringify(body) });
 
 export const api = {
-  roster: (projectId?: string) => json<RosterEntry[]>(`/roster${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
+  roster: (projectId?: string, runId?: string) => json<RosterEntry[]>(`/roster?${new URLSearchParams({ ...(projectId ? { project_id: projectId } : {}), ...(runId ? { run_id: runId } : {}) })}`),
   runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),
   createRun: (body: CreateRunBody) => post<Run>('/runs', body),

@@ -24,3 +24,7 @@ def upgrade(database_url: str) -> None:
                 connection.commit()
     finally:
         engine.dispose()
+
+    from agentlab.db.isolation import migrate
+
+    migrate(database_url)

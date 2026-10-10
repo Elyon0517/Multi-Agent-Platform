@@ -43,11 +43,18 @@ export function App() {
 
   useEffect(() => {
     let alive = true;
-    api.roster(activeProjectId ?? undefined).then(x => { if (alive) setRoster(x); }).catch(e => { if (alive) setError(errorText(e)); });
     api.runs(activeProjectId ?? undefined).then(x => { if (alive) setRuns(activeProjectId ? x : x.filter(r => r.project_id === 'default')); }).catch(() => undefined);
     setError(null); setGoal('');
     return () => { alive = false; };
   }, [activeProjectId, setRoster, setRuns]);
+
+  useEffect(() => {
+    let alive = true;
+    api.roster(activeProjectId ?? undefined, activeRunId ?? undefined)
+      .then(x => { if (alive) setRoster(x); })
+      .catch(e => { if (alive) setError(errorText(e)); });
+    return () => { alive = false; };
+  }, [activeProjectId, activeRunId, setRoster]);
 
   useEffect(() => {
     setDetail(null);
@@ -55,6 +62,9 @@ export function App() {
     const refresh = () => api.run(activeRunId).then((next) => {
       if (useStore.getState().activeRunId !== activeRunId) return;
       setDetail(next);
+      void api.roster(next.run.project_id === 'default' ? undefined : next.run.project_id, activeRunId)
+        .then(x => { if (useStore.getState().activeRunId === activeRunId) setRoster(x); })
+        .catch(() => undefined);
       const current = useStore.getState().runs;
       setRuns(current.map((run) => run.id === next.run.id ? next.run : run));
     }).catch(() => undefined);

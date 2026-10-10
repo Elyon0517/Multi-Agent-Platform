@@ -210,3 +210,60 @@ async def test_invalid_dispatch_requires_feedback_instead_of_replaying_paid_inva
     await driver._planning(svc.store.get_run(run.id))
     assert driver.recovery_options["assignments"]["coder"]["alias"] == "strong"
     driver.workspace.close()
+
+
+def test_reviewer_diversity_compares_model_ids_not_aliases(tmp_path: Path) -> None:
+    svc = services(tmp_path)
+    bindings = {r: Binding(alias="strong", task="task") for r in worker_roles(svc.cfg)}
+    bindings["arch-reviewer"] = Binding(alias="strong-alt", task="task")
+    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())  # all aliases share one ID
+    svc.cfg.models.aliases["root"].model = "second-model"
+    with pytest.raises(ValueError, match="different model IDs"):
+        Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())
+    with pytest.raises(ValueError, match="different model IDs"):
+        project_config(svc.cfg, ProjectSettings(mode="manual", bindings=bindings))
+    bindings["arch-reviewer"] = Binding(alias="root", task="task")
+    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())
+    project_config(svc.cfg, ProjectSettings(mode="manual", bindings=bindings))
+    # A project deliberately selecting a single model still works.
+    bindings["arch-reviewer"] = Binding(alias="strong", task="task")
+    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong"]))
+
+
+def test_global_upload_embeds_without_project(tmp_path: Path) -> None:
+    svc = services(tmp_path)
+
+    class Embedder:
+        model = "test-embedding"
+        dimensions = 2
+        version = 1
+
+        def available(self):
+            return True
+
+        async def __call__(self, texts):
+            return [[1.0, 0.0] for _ in texts]
+
+    svc.knowledge.memory.embedder = Embedder()
+    with TestClient(create_app(svc)) as client:
+        response = client.post("/knowledge", files={"file": ("global.md", "shared apples")})
+        assert response.status_code == 200, response.text
+        assert svc.knowledge.memory.stats()["embedded"] == 1
+        assert svc.knowledge.memory.stats()["embedding_ready"] is True
+
+
+async def test_roster_uses_frozen_dispatch_not_current_project_defaults(tmp_path: Path) -> None:
+    svc = services(tmp_path)
+    ws = seed_demo_workspace(tmp_path / "roster")
+    project = svc.projects.create("auto", "fix", str(ws))
+    project.settings = ProjectSettings()
+    svc.projects.save(project)
+    driver = svc.driver(ws, "fake", "python", project.id)
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async("fix", project_id=project.id)
+    await driver._planning(run)
+    with TestClient(create_app(svc)) as client:
+        entries = {item["role"]: item for item in client.get(f"/roster?run_id={run.id}").json()}
+        assert entries["arch-reviewer"]["alias"] == "strong"
+        assert client.get(f"/roster?project_id={project.id}").json() != list(entries.values())
+        assert client.get("/roster?run_id=missing").status_code == 404

@@ -38,6 +38,16 @@ def validate_settings(settings: ProjectSettings, cfg: AppConfig) -> None:
         raise ValueError("unknown worker role")
     if any(b.alias not in allowed for b in settings.bindings.values()):
         raise ValueError("worker model is outside the project model catalog")
+    if settings.mode == "manual":
+        validate_reviewer_diversity(settings.bindings, cfg, allowed)
+
+
+def validate_reviewer_diversity(bindings: dict[str, Binding], cfg: AppConfig, allowed: set[str]) -> None:
+    if len({cfg.models.aliases[a].model for a in allowed}) < 2:
+        return
+    roles = ("correctness-reviewer", "arch-reviewer")
+    if len({cfg.models.aliases[bindings[r].alias].model for r in roles}) < 2:
+        raise ValueError("correctness and arch reviewers must use different model IDs")
 
 
 def project_config(cfg: AppConfig, settings: ProjectSettings) -> AppConfig:
@@ -71,3 +81,5 @@ class Dispatch(Strict):
                 )
                 if cfg.models.tiers[binding.alias] > limit:
                     raise ValueError("supervisor downgraded reviewer below its allowed tier")
+
+        validate_reviewer_diversity(self.assignments, cfg, allowed)

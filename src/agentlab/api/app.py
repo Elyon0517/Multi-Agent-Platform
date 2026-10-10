@@ -84,7 +84,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         return {"ok": True, "agents": sorted(svc.cfg.agents)}
 
     @app.get("/roster")
-    def roster(project_id: str | None = None) -> list[dict[str, str | int]]:
+    def roster(project_id: str | None = None, run_id: str | None = None) -> list[dict[str, str | int]]:
         cfg = svc.cfg
         if project_id:
             try:
@@ -95,6 +95,15 @@ def create_app(svc: Services | None = None) -> FastAPI:
                 from agentlab.core.project_config import project_config
 
                 cfg = project_config(cfg, project.settings)
+        if run_id:
+            run = get_run(run_id)
+            if project_id and run.project_id != project_id:
+                raise HTTPException(422, "run belongs to another project")
+            checkpoint = svc.store.checkpoint(run_id)
+            if checkpoint:
+                from agentlab.core.config import AppConfig
+
+                cfg = AppConfig.model_validate(checkpoint["config"])
         policy = cfg.model_policy.roles
         aliases = cfg.models.aliases
         out: list[dict[str, str | int]] = []
