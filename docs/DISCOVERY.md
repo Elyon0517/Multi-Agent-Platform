@@ -64,7 +64,7 @@
 
 **结论**：自研 Loop Driver + Google ADK 作为 Agent 执行层的分层方案。复杂部分（Gate、severity 收敛、震荡、熔断、人工卡点）全是确定性逻辑；框架只需做好：调模型、挂工具、并行跑 reviewer。
 
-### 三层切分
+### 分层结构
 
 ```
 Layer 4  Root Session（交互层 · v1.6，§2.5）
@@ -523,13 +523,13 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P0 | 架构骨架 | **完成** | 2026-10-09；fake 模型下 loop 端到端跑通，UI 可视化可演示 |
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
-| P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 未开始 | 对话目前只记录用户原话与 run 状态，没有 root 回复；每条消息都会进入编码流水线 |
+| P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
-| P8 | S6 Eval | 部分完成 | 已有 py-fix-add 固定任务与 smoke；完整评分卡待做 |
+| P8 | S6 Eval | 基线完成 | 10 个固定修复 + 5 条 Root 对话；agentlab eval 输出评分卡；fake 不代表模型语义质量 |
 
 ### 16.1 已完成（P0 · 2026-10-09）
 
@@ -644,13 +644,13 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 #### P2.5 · Root 会话层（v1.6，约 2 天）
 目标：在对话中提问能直接得到回答；提出编码需求时 root 把任务分给 multi-agent 团队，进度与审批都回到对话里（§2.5）。
 
-- [ ] 对话消息逐条落库（`thread` / `message` / `root_turn`），支持 user / assistant / system 三种作者
-- [ ] `config/agents/root.yaml` + `prompts/root.md`：输出 `RootTurn`，模型跟随项目 root
-- [ ] root 能力：读项目文件、检索记忆、任务进行中查看进度与 diff
-- [ ] 上网搜索：先用 `agentlab ping` 确认网关是否支持模型自带搜索；支持就打开，不支持时 root 如实说明
-- [ ] 默认上限：每轮最多 8 次工具调用 + 单轮预算
-- [ ] 回复流式输出；任务进度消息由 run 事件自动生成；审批卡片显示在对话中；任务结束由 root 总结
-- [ ] UI：对话窗口为主入口
+- [x] 对话消息逐条落库（`thread` / `message` / `root_turn`），支持 user / assistant / system 三种作者
+- [x] `config/agents/root.yaml` + `prompts/root.md`：输出 `RootTurn`，模型跟随项目 root
+- [x] root 能力：读项目文件、检索记忆、任务进行中查看进度与 diff
+- [x] 上网搜索：先用 `agentlab ping` 确认网关是否支持模型自带搜索；支持就打开，不支持时 root 如实说明
+- [x] 默认上限：每轮最多 8 次工具调用 + 单轮预算
+- [x] 回复流式输出；任务进度消息由 run 事件自动生成；审批卡片显示在对话中；任务结束由 root 总结
+- [x] UI：对话窗口为主入口
 
 验收（加入 P8 评测集）：
 - 「这个仓库的入口文件是哪个？」→ 直接回答并引用文件，不创建任务
@@ -663,9 +663,9 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] 3 个 reviewer 并行、互相不可见（fake 下验证）
 - [x] Arbiter 冲突打包升级（fake 下验证）
 - [x] 审批流：approval 表结构 + API 审批
-- [ ] 3 个 reviewer 用不同模型别名真实运行
+- [x] 3 个 reviewer 用不同模型 ID 真实运行（gpt-6-astra / gpt-6.1-sol / gpt-6-sol，2026-10-10）
 - [ ] supervisor 接入：仅在 policy 允许处做调度 / override 决策，决策写 `routing_reason`
-- [ ] 工具层（MCP）+ `tool_grants` 强制 + 危险操作走 approval
+- [x] Raw function calling 工具层 + `tool_grants` 强制；Coder 读写 / Gate，其他角色只读 / 记忆；越界写仍走 approval。外部 MCP 接入另行扩展
 - [ ] LiteLLM Proxy + per-project virtual key
 - [ ] `AdkRuntime`（ParallelAgent + before_model_callback 熔断）
 - 演示：一个带安全隐患的改动，三方结果并排展示
@@ -700,7 +700,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [ ] Langfuse（OTel）
 
 #### P8 · S6 Eval（持续，P1 起就开始积累）
-- [ ] 10 个固定回归任务；`agentlab eval` 输出评分卡
+- [x] 10 个固定回归任务 + 5 条 Root 对话；`agentlab eval` 输出评分卡
 - 评分卡结构（摘自 homerail `scorecard.ts`，无需再查原 repo）：每项 check = `{name, passed, severity(hard|soft), gate, source_type, detail}`；汇总 = `{run_id, passed, verdict, score, total, hard_error_count, soft_warning_count, blind_spot_count, categories: {name: passed}}`；任一 hard 失败即 FAIL，soft 只计数；CLI 退出码 = passed ? 0 : 1，便于 CI
 
 ---
@@ -728,7 +728,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 |---|---|---|
 | 创建 project → 配置 agent | 新建表单与控制台均可选 auto/manual、root、模型目录、各角色任务、budget/max_iter、检索模式/k | manual 必须绑定全部 worker，禁用 fallback；project-planner 使用项目 root。角色集合固定，summarizer 尚未接入循环 |
 | auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
-| 左侧 project → 对话 → run | Conversation/Message 持久化；thread 可关联多 run；用户目标与终止状态写入历史，最近 20 条作为下一 run 上下文 | project/thread 归属先验证，消息与 run 创建同事务；目前每条消息都会创建 run，root 不回复——由 v1.6 Root 会话层（§2.5、P2.5）补齐回答 / 澄清 / 任务分流 |
+| 左侧 project → 对话 → run | 逐条消息与 RootTurn 持久化；最近 20 条历史 + 项目信息 + 记忆；回答 / 澄清 / 任务分流 | project/thread 归属先验证；编码任务复用 run service，进度 / 审批 / 总结回到对话。项目外可聊天 |
 | 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
 | 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
 | 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
@@ -791,7 +791,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - [ ] C++ Gate 的 GTest 发现策略：CTest 注册 vs 直接跑二进制
 - [ ] Java 项目 Maven 与 Gradle 优先级
 - [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
-- [ ] （v1.6）确认当前网关是否支持模型自带的联网搜索（P2.5 实现时用 `agentlab ping` 检测）
+- [x] （v1.6）`agentlab ping --search` 实测 Responses `web_search` 可用；Chat 无搜索证据，不启用
 - [x] （v1.6）root 每轮默认最多 8 次工具调用、使用默认单轮预算（用户确认）
 - [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**LimeZu 素材替换方案**
 
@@ -913,3 +913,16 @@ revision 统一导入 `agentlab.db.migration_scope.is_project_scope()`；基础�
 env.py 实际读取 migration_scope；项目范围执行前后比较基础 schema 的表/列/默认值/约束/索引/触发器定义，发现变化即报错，由外层事务整体回滚。它不能拦住绕过辅助函数的任意共享表 UPDATE；基础数据迁移仍必须遵守 scope 与限定 schema 约定。
 
 守护测试从空项目 schema 重放当前 upgrade head，要求基础表结构及路由目录数据不变；并注入一条未限定 schema 的 ALTER TABLE run_directory，验证环境守护检测和回滚。GitHub Checks 配置 PostgreSQL/pgvector，确保此集成测试在 CI 中执行，不因未提供数据库 URL 而跳过。
+
+
+### v1.6 实现验收（2026-10-10）
+
+- Root：最多 8 次工具调用，单轮预算 100c；工具前预算检查，prompt / response blob、工具调用 / 返回与 usage 可回放。搜索工具费用由 `budget.ask.web_search_cents` 配置，模型价格仍为原有估算。
+- PostgreSQL：新增 `thread` / `message` / `root_turn` 表；保留旧 JSON 备份并迁移消息。`root_alignment` 修复既有项目 schema 缺少 `run.thread_id` 的历史漂移；所有项目迁移均通过基础 schema 守护。
+- API：Root 回答 / 澄清不创建 run；任务复用 `create_run_service`；工作区占用由 assistant 解释。项目外 `/threads` 只聊天，修改要求选项目。
+- UI：项目 / 全局聊天、增量回复、Markdown 来源、run 进度与内联 approve / reject / abort；浏览器验证收到 Root 回复。
+- 真实 Root：文件入口 / 上传设计记忆 / 芝加哥天气附 NWS 来源 / 明确修复任务 / 模糊检查请求，五条均符合预期。
+- 真实三模型 smoke：run `f8debe5af7cd`，1 轮到 signoff，Docker FULL Gate 通过，测试保持不变；Coder 实际调用 `workspace_write`、`gate_run`，工具事件与结果 blob 已保存。未自动批准。
+- `gpt-5.6-luna`、`gpt-5.6-terra` 网关探测返回 503，第三 reviewer 使用已验证的 `gpt-6-sol`。
+- P3 尚余 LiteLLM virtual key、ADK runtime 等未包含在本次实现。
+- 最终自动验证：199 项 Python（含真实 PostgreSQL）、19 项 Vitest、UI production build、Ruff、mypy 全部通过；固定评分卡 15/15（fake blind spots 明确为 15），见 `evals/baseline-scorecard.json`。

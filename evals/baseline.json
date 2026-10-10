@@ -1,0 +1,107 @@
+{
+  "tasks": [
+    {
+      "id": "py-fix-add",
+      "goal": "Fix calc.add so all tests pass. Preserve the tests.",
+      "solution": "def add(a, b):\n    \"\"\"Compute add.\"\"\"\n    return a + b\n"
+    },
+    {
+      "id": "py-fix-subtract",
+      "goal": "Fix calc.subtract so all tests pass. Preserve the tests.",
+      "solution": "def subtract(a, b):\n    \"\"\"Compute subtract.\"\"\"\n    return a - b\n"
+    },
+    {
+      "id": "py-fix-multiply",
+      "goal": "Fix calc.multiply so all tests pass. Preserve the tests.",
+      "solution": "def multiply(a, b):\n    \"\"\"Compute multiply.\"\"\"\n    return a * b\n"
+    },
+    {
+      "id": "py-fix-divide",
+      "goal": "Fix calc.divide so all tests pass. Preserve the tests.",
+      "solution": "def divide(a, b):\n    \"\"\"Compute divide.\"\"\"\n    return a / b\n"
+    },
+    {
+      "id": "py-fix-negate",
+      "goal": "Fix calc.negate so all tests pass. Preserve the tests.",
+      "solution": "def negate(a):\n    \"\"\"Compute negate.\"\"\"\n    return -a\n"
+    },
+    {
+      "id": "py-fix-absolute",
+      "goal": "Fix calc.absolute so all tests pass. Preserve the tests.",
+      "solution": "def absolute(a):\n    \"\"\"Compute absolute.\"\"\"\n    return abs(a)\n"
+    },
+    {
+      "id": "py-fix-minimum",
+      "goal": "Fix calc.minimum so all tests pass. Preserve the tests.",
+      "solution": "def minimum(a, b):\n    \"\"\"Compute minimum.\"\"\"\n    return min(a, b)\n"
+    },
+    {
+      "id": "py-fix-maximum",
+      "goal": "Fix calc.maximum so all tests pass. Preserve the tests.",
+      "solution": "def maximum(a, b):\n    \"\"\"Compute maximum.\"\"\"\n    return max(a, b)\n"
+    },
+    {
+      "id": "py-fix-clamp",
+      "goal": "Fix calc.clamp so all tests pass. Preserve the tests.",
+      "solution": "def clamp(a, lo, hi):\n    \"\"\"Compute clamp.\"\"\"\n    return min(max(a, lo), hi)\n"
+    },
+    {
+      "id": "py-fix-square",
+      "goal": "Fix calc.square so all tests pass. Preserve the tests.",
+      "solution": "def square(a):\n    \"\"\"Compute square.\"\"\"\n    return a * a\n"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "root-entry",
+      "text": "这个仓库的入口文件是哪个？",
+      "intent": "answer",
+      "tool": "file_read",
+      "arguments": {
+        "path": "calc.py"
+      },
+      "reply": "入口是 calc.py。",
+      "sources": [
+        {
+          "kind": "file",
+          "ref": "calc.py"
+        }
+      ]
+    },
+    {
+      "id": "root-document",
+      "text": "上传的文档里关于 Python 是怎么说的？",
+      "intent": "answer",
+      "tool": "memory_search",
+      "arguments": {
+        "query": "Python"
+      },
+      "reply": "文档说明项目使用 Python。",
+      "sources": [
+        {
+          "kind": "memory",
+          "ref": "fixture"
+        }
+      ]
+    },
+    {
+      "id": "root-weather",
+      "text": "今天天气怎么样？",
+      "intent": "clarify",
+      "reply": "无法获取实时天气。请提供位置。"
+    },
+    {
+      "id": "root-task",
+      "text": "把 calc.add 修好让测试通过",
+      "intent": "task",
+      "reply": "交给团队修复 calc.add。",
+      "task": "Fix calc.add so tests pass"
+    },
+    {
+      "id": "root-inspect",
+      "text": "帮我看看这个函数",
+      "intent": "clarify",
+      "reply": "你想检查哪个函数？"
+    }
+  ]
+}

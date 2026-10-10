@@ -1,0 +1,1082 @@
+{
+  "run_id": "baseline",
+  "passed": true,
+  "verdict": "PASS",
+  "score": 15,
+  "total": 15,
+  "hard_error_count": 0,
+  "soft_warning_count": 0,
+  "blind_spot_count": 15,
+  "categories": {
+    "py-fix-add": true,
+    "py-fix-subtract": true,
+    "py-fix-multiply": true,
+    "py-fix-divide": true,
+    "py-fix-negate": true,
+    "py-fix-absolute": true,
+    "py-fix-minimum": true,
+    "py-fix-maximum": true,
+    "py-fix-clamp": true,
+    "py-fix-square": true,
+    "root-entry": true,
+    "root-document": true,
+    "root-weather": true,
+    "root-task": true,
+    "root-inspect": true
+  },
+  "checks": [
+    {
+      "name": "py-fix-add",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-add",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-subtract",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-subtract",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-multiply",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-multiply",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-divide",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-divide",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-negate",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-negate",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-absolute",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-absolute",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-minimum",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-minimum",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-maximum",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-maximum",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-clamp",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-clamp",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "py-fix-square",
+      "passed": true,
+      "severity": "hard",
+      "gate": "py-fix-square",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "root-entry",
+      "passed": true,
+      "severity": "hard",
+      "gate": "root-entry",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "root-document",
+      "passed": true,
+      "severity": "hard",
+      "gate": "root-document",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "root-weather",
+      "passed": true,
+      "severity": "hard",
+      "gate": "root-weather",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "root-task",
+      "passed": true,
+      "severity": "hard",
+      "gate": "root-task",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    },
+    {
+      "name": "root-inspect",
+      "passed": true,
+      "severity": "hard",
+      "gate": "root-inspect",
+      "source_type": "scorecard",
+      "detail": "PASS"
+    }
+  ],
+  "runtime": "fake",
+  "scorecards": [
+    {
+      "run_id": "py-fix-add",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-subtract",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-multiply",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-divide",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-negate",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-absolute",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-minimum",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-maximum",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-clamp",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "py-fix-square",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 5,
+      "total": 5,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "signoff": true,
+        "tests_preserved": true,
+        "budget": true,
+        "review_panel": true,
+        "gate": true
+      },
+      "checks": [
+        {
+          "name": "signoff",
+          "passed": true,
+          "severity": "hard",
+          "gate": "signoff",
+          "source_type": "runtime",
+          "detail": "WAITING_HUMAN/signoff"
+        },
+        {
+          "name": "tests_preserved",
+          "passed": true,
+          "severity": "hard",
+          "gate": "tests_preserved",
+          "source_type": "workspace",
+          "detail": "Original test bytes"
+        },
+        {
+          "name": "budget",
+          "passed": true,
+          "severity": "hard",
+          "gate": "budget",
+          "source_type": "runtime",
+          "detail": "0.500c"
+        },
+        {
+          "name": "review_panel",
+          "passed": true,
+          "severity": "hard",
+          "gate": "review_panel",
+          "source_type": "runtime",
+          "detail": "Three reviewers"
+        },
+        {
+          "name": "gate",
+          "passed": true,
+          "severity": "hard",
+          "gate": "gate",
+          "source_type": "gate",
+          "detail": "Objective tests"
+        }
+      ]
+    },
+    {
+      "run_id": "root-entry",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 6,
+      "total": 6,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "intent": true,
+        "reply": true,
+        "sources": true,
+        "no_run_for_answer": true,
+        "task_progress_and_approval": true,
+        "replay": true
+      },
+      "checks": [
+        {
+          "name": "intent",
+          "passed": true,
+          "severity": "hard",
+          "gate": "intent",
+          "source_type": "runtime",
+          "detail": "answer"
+        },
+        {
+          "name": "reply",
+          "passed": true,
+          "severity": "hard",
+          "gate": "reply",
+          "source_type": "runtime",
+          "detail": "入口是 calc.py。"
+        },
+        {
+          "name": "sources",
+          "passed": true,
+          "severity": "hard",
+          "gate": "sources",
+          "source_type": "runtime",
+          "detail": "Source references"
+        },
+        {
+          "name": "no_run_for_answer",
+          "passed": true,
+          "severity": "hard",
+          "gate": "no_run_for_answer",
+          "source_type": "runtime",
+          "detail": "Task dispatch uses the shared run service"
+        },
+        {
+          "name": "task_progress_and_approval",
+          "passed": true,
+          "severity": "hard",
+          "gate": "task_progress_and_approval",
+          "source_type": "runtime",
+          "detail": "Conversation progress and inline approval"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "severity": "hard",
+          "gate": "replay",
+          "source_type": "runtime",
+          "detail": "Prompt/response blobs"
+        }
+      ]
+    },
+    {
+      "run_id": "root-document",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 6,
+      "total": 6,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "intent": true,
+        "reply": true,
+        "sources": true,
+        "no_run_for_answer": true,
+        "task_progress_and_approval": true,
+        "replay": true
+      },
+      "checks": [
+        {
+          "name": "intent",
+          "passed": true,
+          "severity": "hard",
+          "gate": "intent",
+          "source_type": "runtime",
+          "detail": "answer"
+        },
+        {
+          "name": "reply",
+          "passed": true,
+          "severity": "hard",
+          "gate": "reply",
+          "source_type": "runtime",
+          "detail": "文档说明项目使用 Python。"
+        },
+        {
+          "name": "sources",
+          "passed": true,
+          "severity": "hard",
+          "gate": "sources",
+          "source_type": "runtime",
+          "detail": "Source references"
+        },
+        {
+          "name": "no_run_for_answer",
+          "passed": true,
+          "severity": "hard",
+          "gate": "no_run_for_answer",
+          "source_type": "runtime",
+          "detail": "Task dispatch uses the shared run service"
+        },
+        {
+          "name": "task_progress_and_approval",
+          "passed": true,
+          "severity": "hard",
+          "gate": "task_progress_and_approval",
+          "source_type": "runtime",
+          "detail": "Conversation progress and inline approval"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "severity": "hard",
+          "gate": "replay",
+          "source_type": "runtime",
+          "detail": "Prompt/response blobs"
+        }
+      ]
+    },
+    {
+      "run_id": "root-weather",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 6,
+      "total": 6,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "intent": true,
+        "reply": true,
+        "sources": true,
+        "no_run_for_answer": true,
+        "task_progress_and_approval": true,
+        "replay": true
+      },
+      "checks": [
+        {
+          "name": "intent",
+          "passed": true,
+          "severity": "hard",
+          "gate": "intent",
+          "source_type": "runtime",
+          "detail": "clarify"
+        },
+        {
+          "name": "reply",
+          "passed": true,
+          "severity": "hard",
+          "gate": "reply",
+          "source_type": "runtime",
+          "detail": "无法获取实时天气。请提供位置。"
+        },
+        {
+          "name": "sources",
+          "passed": true,
+          "severity": "hard",
+          "gate": "sources",
+          "source_type": "runtime",
+          "detail": "Source references"
+        },
+        {
+          "name": "no_run_for_answer",
+          "passed": true,
+          "severity": "hard",
+          "gate": "no_run_for_answer",
+          "source_type": "runtime",
+          "detail": "Task dispatch uses the shared run service"
+        },
+        {
+          "name": "task_progress_and_approval",
+          "passed": true,
+          "severity": "hard",
+          "gate": "task_progress_and_approval",
+          "source_type": "runtime",
+          "detail": "Conversation progress and inline approval"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "severity": "hard",
+          "gate": "replay",
+          "source_type": "runtime",
+          "detail": "Prompt/response blobs"
+        }
+      ]
+    },
+    {
+      "run_id": "root-task",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 6,
+      "total": 6,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "intent": true,
+        "reply": true,
+        "sources": true,
+        "no_run_for_answer": true,
+        "task_progress_and_approval": true,
+        "replay": true
+      },
+      "checks": [
+        {
+          "name": "intent",
+          "passed": true,
+          "severity": "hard",
+          "gate": "intent",
+          "source_type": "runtime",
+          "detail": "task"
+        },
+        {
+          "name": "reply",
+          "passed": true,
+          "severity": "hard",
+          "gate": "reply",
+          "source_type": "runtime",
+          "detail": "交给团队修复 calc.add。"
+        },
+        {
+          "name": "sources",
+          "passed": true,
+          "severity": "hard",
+          "gate": "sources",
+          "source_type": "runtime",
+          "detail": "Source references"
+        },
+        {
+          "name": "no_run_for_answer",
+          "passed": true,
+          "severity": "hard",
+          "gate": "no_run_for_answer",
+          "source_type": "runtime",
+          "detail": "Task dispatch uses the shared run service"
+        },
+        {
+          "name": "task_progress_and_approval",
+          "passed": true,
+          "severity": "hard",
+          "gate": "task_progress_and_approval",
+          "source_type": "runtime",
+          "detail": "Conversation progress and inline approval"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "severity": "hard",
+          "gate": "replay",
+          "source_type": "runtime",
+          "detail": "Prompt/response blobs"
+        }
+      ]
+    },
+    {
+      "run_id": "root-inspect",
+      "passed": true,
+      "verdict": "PASS",
+      "score": 6,
+      "total": 6,
+      "hard_error_count": 0,
+      "soft_warning_count": 0,
+      "blind_spot_count": 1,
+      "categories": {
+        "intent": true,
+        "reply": true,
+        "sources": true,
+        "no_run_for_answer": true,
+        "task_progress_and_approval": true,
+        "replay": true
+      },
+      "checks": [
+        {
+          "name": "intent",
+          "passed": true,
+          "severity": "hard",
+          "gate": "intent",
+          "source_type": "runtime",
+          "detail": "clarify"
+        },
+        {
+          "name": "reply",
+          "passed": true,
+          "severity": "hard",
+          "gate": "reply",
+          "source_type": "runtime",
+          "detail": "你想检查哪个函数？"
+        },
+        {
+          "name": "sources",
+          "passed": true,
+          "severity": "hard",
+          "gate": "sources",
+          "source_type": "runtime",
+          "detail": "Source references"
+        },
+        {
+          "name": "no_run_for_answer",
+          "passed": true,
+          "severity": "hard",
+          "gate": "no_run_for_answer",
+          "source_type": "runtime",
+          "detail": "Task dispatch uses the shared run service"
+        },
+        {
+          "name": "task_progress_and_approval",
+          "passed": true,
+          "severity": "hard",
+          "gate": "task_progress_and_approval",
+          "source_type": "runtime",
+          "detail": "Conversation progress and inline approval"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "severity": "hard",
+          "gate": "replay",
+          "source_type": "runtime",
+          "detail": "Prompt/response blobs"
+        }
+      ]
+    }
+  ]
+}

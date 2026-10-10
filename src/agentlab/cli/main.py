@@ -78,6 +78,7 @@ def demo(auto_approve: Annotated[bool, typer.Option()] = True) -> None:
 def config_check() -> None:
     from agentlab.core.config import load_config
     from agentlab.settings import Settings
+
     cfg = load_config(Settings().config_dir)
     typer.echo(f"ok: {len(cfg.agents)} agents, {len(cfg.gates)} gates, aliases={sorted(cfg.models.aliases)}")
     for role, pol in cfg.model_policy.roles.items():
@@ -92,7 +93,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 
 @app.command()
-def ping() -> None:
+def ping(search: Annotated[bool, typer.Option(help="Probe native search and save capabilities")] = False) -> None:
     """Check each configured alias using the gateway's Chat Completions API."""
     import openai
 
@@ -123,6 +124,7 @@ def ping() -> None:
                             {
                                 "alias": alias,
                                 "model": model.model,
+                                "response_model": result.model,
                                 "ok": good,
                                 "tokens": usage.total_tokens if usage else None,
                             }
@@ -142,6 +144,11 @@ def ping() -> None:
                             }
                         )
                     )
+        if search:
+            from agentlab.adapters.runtime.search import probe_search
+
+            search_result = await probe_search(svc)
+            typer.echo(json.dumps({k: v for k, v in search_result.items() if k != "base_url"}))
         return passed
 
     if not asyncio.run(probe()):
@@ -277,7 +284,7 @@ def show(run_id: str) -> None:
                 "run": svc.store.get_run(run_id).model_dump(mode="json"),
                 "iterations": [x.model_dump(mode="json") for x in svc.store.iterations(run_id)],
                 "steps": [x.model_dump(mode="json") for x in svc.store.steps(run_id)],
-            "attempts": [x for x in svc.store.records("attempt") if x.get("run_id") == run_id],
+                "attempts": [x for x in svc.store.records("attempt") if x.get("run_id") == run_id],
                 "artifacts": [x.model_dump(mode="json") for x in svc.store.artifacts(run_id)],
                 "events": [x.model_dump(mode="json") for x in svc.store.events(run_id)],
                 "pending_approval": a.model_dump(mode="json") if (a := svc.store.pending_approval(run_id)) else None,
@@ -285,3 +292,22 @@ def show(run_id: str) -> None:
             indent=2,
         )
     )
+
+
+@app.command("eval")
+def evaluate_baseline(
+    manifest: Annotated[Path, typer.Option()] = Path("evals/baseline.json"),
+    runtime: Annotated[str, typer.Option(help="fake | raw")] = "fake",
+    output: Annotated[Path | None, typer.Option()] = None,
+) -> None:
+    """Run fixed regression tasks and root conversations; emit CI-compatible scorecards."""
+    from agentlab.evaluation.baseline import evaluate
+
+    result = asyncio.run(evaluate(manifest, runtime))
+    rendered = json.dumps(result, ensure_ascii=False, indent=2)
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered + "\n")
+    typer.echo(rendered)
+    if not result["passed"]:
+        raise typer.Exit(1)

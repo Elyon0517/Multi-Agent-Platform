@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
@@ -67,8 +69,11 @@ class KnowledgeService:
         return [DocumentSummary(s, len(items), sum(len(i.text) for i in items)) for s, items in by_source.items()]
 
     def delete(self, source: str, project_id: str | None = None) -> int:
-        items = [i for i in self.memory.items_in(PROJECT if project_id else GLOBAL, project_id)
-                 if i.kind == MemoryKind.DOCUMENT and i.source == source]
+        items = [
+            i
+            for i in self.memory.items_in(PROJECT if project_id else GLOBAL, project_id)
+            if i.kind == MemoryKind.DOCUMENT and i.source == source
+        ]
         for item in items:
             item.valid_to = utcnow().isoformat()
         self.memory.flush()
@@ -245,6 +250,64 @@ class MemoryHooks:
     def __init__(self, knowledge: KnowledgeService, projects: ProjectService) -> None:
         self.knowledge = knowledge
         self.projects = projects
+        self.session_services: Any = None
+
+    def on_event(self, event: Any) -> None:
+        if not self.session_services or event.run_id.startswith("thread:"):
+            return
+        if event.type not in {
+            "step.finished",
+            "gate.finished",
+            "arbiter.decision",
+            "approval.requested",
+            "approval.decided",
+            "run.status",
+        }:
+            return
+        try:
+            from agentlab.core.conversation import Message
+            from agentlab.core.schemas import Event, EventType
+            from agentlab.core.session.store import append_message, get_thread
+
+            store = self.projects.store
+            if not store:
+                return
+            run = store.get_run(event.run_id)
+            if not run.thread_id:
+                return
+            thread = get_thread(store, run.thread_id, run.project_id)
+            key = f"event:{event.run_id}:{event.seq}"
+            if any(m.id == key for m in thread.messages):
+                return
+            text = f"{event.type}: {json.dumps(event.payload, ensure_ascii=False)}"[:20000]
+            payload = dict(event.payload)
+            if event.type == "approval.requested":
+                approval = store.pending_approval(run.id)
+                if approval:
+                    payload["approval_id"] = approval.id
+            message = append_message(
+                store,
+                run.thread_id,
+                run.project_id,
+                Message(
+                    id=key,
+                    author="system",
+                    kind="approval" if event.type == "approval.requested" else "progress",
+                    text=text,
+                    run_id=run.id,
+                    payload=payload,
+                ),
+            )
+            self.session_services.bus.publish(
+                Event(
+                    run_id="thread:" + run.thread_id,
+                    type=EventType.MESSAGE_CREATED,
+                    actor="system",
+                    payload={"message": message.model_dump(mode="json")},
+                )
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("conversation progress hook failed")
 
     async def context_for(self, run: Run, role: str, inp: AgentInput) -> dict[str, Any]:
         project_settings = (
@@ -254,6 +317,7 @@ class MemoryHooks:
         )
         if inp.context.get("retrieval_settings"):
             from agentlab.core.project_config import ProjectSettings
+
             project_settings = ProjectSettings.model_validate(inp.context["retrieval_settings"])
         if project_settings and project_settings.retrieval == "off":
             return {}
@@ -281,25 +345,50 @@ class MemoryHooks:
 
     async def on_finished(self, run: Run) -> None:
         self.projects.complete_run(run)
-        if run.thread_id:
-            from agentlab.core.conversation import Conversation, Message
+        if run.thread_id and self.projects.store:
+            from agentlab.core.conversation import Message
+            from agentlab.core.session.store import append_message, get_thread
 
             store = self.projects.store
-            if store:
-                with store.lock_run("thread:" + run.thread_id):
-                    thread = next(
-                        (
-                            Conversation.model_validate(t)
-                            for t in store.records("thread")
-                            if t["id"] == run.thread_id and t["project_id"] == run.project_id
-                        ),
-                        None,
-                    )
-                    if thread and not any(m.author == "system" and m.run_id == run.id for m in thread.messages):
-                        thread.messages.append(
-                            Message(author="system", text=f"Run {run.status}: {run.goal}"[:20000], run_id=run.id)
+            thread = get_thread(store, run.thread_id, run.project_id)
+            if not any(m.kind == "summary" and m.run_id == run.id for m in thread.messages):
+                gate_results = [e.payload for e in store.events(run.id) if e.type == "gate.finished"]
+                reply = (
+                    f"Run {run.status}: {run.goal}. Iterations: {len(store.iterations(run.id))}; "
+                    f"cost: {run.cost_cents:.2f}c. Gate: "
+                    f"{gate_results[-1].get('passed') if gate_results else 'not run'}."
+                )
+                sources = []
+                if self.session_services:
+                    try:
+                        from agentlab.core.session.service import SessionService
+
+                        turn, _ = await SessionService(self.session_services).answer(
+                            run.project_id,
+                            run.thread_id,
+                            f"Summarize this completed run using run_status. Do not create a task: {run.id}",
+                            summary=True,
                         )
-                        store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+                        reply, sources = turn.reply, turn.sources
+                    except Exception:
+                        pass
+                message = append_message(
+                    store,
+                    run.thread_id,
+                    run.project_id,
+                    Message(author="assistant", kind="summary", text=reply[:20000], sources=sources, run_id=run.id),
+                )
+                if self.session_services:
+                    from agentlab.core.schemas import Event, EventType
+
+                    self.session_services.bus.publish(
+                        Event(
+                            run_id="thread:" + run.thread_id,
+                            type=EventType.MESSAGE_CREATED,
+                            actor="root",
+                            payload={"message": message.model_dump(mode="json")},
+                        )
+                    )
         outcome = "approved" if run.status == RunStatus.DONE else f"ended as {run.status}"
         text = f"Run {run.id} '{run.goal}' {outcome}."
         if not any(

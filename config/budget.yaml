@@ -4,3 +4,7 @@ default_project_weekly_cents: 5000
 loop:
   max_iter: 5
   blocking_confidence_threshold: 0.7
+
+ask:
+  max_turn_cents: 100
+  web_search_cents: 1 # configurable per gateway native-search fee; token usage is billed separately

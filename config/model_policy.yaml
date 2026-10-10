@@ -1,4 +1,5 @@
 roles:
+  root:                 { primary: root, temperature: 0.2, fallback: [] }
   supervisor:           { primary: root, temperature: 0.2, fallback: [strong] }
   project-planner:      { primary: root, temperature: 0.2, fallback: [strong] }
   planner:              { primary: strong, temperature: 0.2, fallback: [root] }

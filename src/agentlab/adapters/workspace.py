@@ -236,10 +236,10 @@ class GitWorkspace:
             if pending:
                 # Sanitized copies avoid Git filters and prevent secrets entering even temporary blobs.
                 paths = b"".join(os.fsencode(path) + b"\n" for _, _, _, path in pending)
-                owned_env = {k: v for k, v in self._snapshot_env().items()
-                             if k != "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
-                oids = self._git_bytes("hash-object", "-w", "--no-filters", "--stdin-paths",
-                                       data=paths, env=owned_env).splitlines()
+                owned_env = {k: v for k, v in self._snapshot_env().items() if k != "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+                oids = self._git_bytes(
+                    "hash-object", "-w", "--no-filters", "--stdin-paths", data=paths, env=owned_env
+                ).splitlines()
                 if len(oids) != len(pending):
                     raise RuntimeError("incomplete batch hashing")
                 for (rel, mode, kind, _), batch_oid in zip(pending, oids, strict=True):
@@ -298,6 +298,42 @@ class GitWorkspace:
         if res.exit_code != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {res.stderr.strip()}")
         return res.stdout
+
+    async def source_files(self) -> list[str]:
+        try:
+            paths = (await self._git("ls-files", "-z", "--cached", "--others", "--exclude-standard")).split("\0")
+        except RuntimeError:
+            # Read-only conversations also work before a project has been initialized as Git.
+            paths = []
+            for directory, dirs, names in os.walk(self.root, followlinks=False):
+                dirs[:] = [
+                    name for name in dirs if not self._sensitive(name) and not (Path(directory) / name).is_symlink()
+                ]
+                paths.extend((Path(directory) / name).relative_to(self.root).as_posix() for name in names)
+                if len(paths) >= 5000:
+                    break
+        files = []
+        for rel in sorted(set(paths)):
+            if not rel or (self.root / rel).is_symlink():
+                continue
+            try:
+                path = self._resolve(rel)
+                if path.is_file():
+                    files.append(rel)
+            except (OSError, WorkspaceEscape):
+                continue
+            if len(files) >= 5000:
+                break
+        return files
+
+    def read_source(self, rel: str) -> str:
+        path = self._resolve(rel)
+        if (self.root / rel).is_symlink() or not path.is_file() or path.stat().st_size > 100_000:
+            raise WorkspaceEscape("unreadable source")
+        text = self.read(rel)
+        if "\0" in text or self._secret_text(text):
+            raise WorkspaceEscape("secret or binary content")
+        return text[:12000]
 
     async def context_files(self) -> dict[str, str]:
         """Bounded source context; never include secret files, symlinks or binaries."""

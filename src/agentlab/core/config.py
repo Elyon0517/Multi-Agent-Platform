@@ -105,7 +105,13 @@ class LoopCfg(Strict):
     blocking_confidence_threshold: float = Field(ge=0.0, le=1.0)
 
 
+class AskBudgetCfg(Strict):
+    max_turn_cents: float = Field(default=100, gt=0)
+    web_search_cents: float = Field(default=1, ge=0)
+
+
 class BudgetCfg(Strict):
+    ask: AskBudgetCfg = Field(default_factory=AskBudgetCfg)
     default_run_budget_cents: float
     warn_ratio: float = Field(gt=0.0, lt=1.0)
     default_project_weekly_cents: float

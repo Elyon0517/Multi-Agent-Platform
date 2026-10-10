@@ -22,6 +22,9 @@ TABLES = (
     "event",
     "run_checkpoint",
     "state_record",
+    "thread",
+    "message",
+    "root_turn",
 )
 
 
@@ -82,6 +85,12 @@ def clone_tables(c: Any, base: str, target: str) -> None:
 
 def provision(c: Any, base: str, project_id: str) -> str:
     c.execute("SELECT pg_advisory_xact_lock_shared(712460801)")
+    row = c.execute(
+        sql.SQL("SELECT schema_name FROM {} WHERE project_id=%s").format(sql.Identifier(base, "project_schema")),
+        (project_id,),
+    ).fetchone()
+    if row:
+        return str(row["schema_name"])
     c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (base + ":schema:" + project_id,))
     row = c.execute(
         sql.SQL("SELECT schema_name FROM {} WHERE project_id=%s").format(sql.Identifier(base, "project_schema")),
@@ -91,7 +100,7 @@ def provision(c: Any, base: str, project_id: str) -> str:
         return str(row["schema_name"])
     target = schema_name(base, project_id)
     clone_tables(c, base, target)
-    for table in ("project", "run", "memory", "agent_def", "blackboard"):
+    for table in ("project", "run", "memory", "agent_def", "blackboard", "thread", "message", "root_turn"):
         column = "id" if table == "project" else "project_id"
         c.execute(
             sql.SQL("ALTER TABLE {} ADD CONSTRAINT project_ownership CHECK ({} IS NOT NULL AND {} = {})").format(
@@ -162,7 +171,7 @@ def migrate(database_url: str) -> dict[str, Any]:
             for table in TABLES:
                 if table == "project":
                     predicate = "id=%s"
-                elif table in {"run", "memory", "agent_def", "blackboard"}:
+                elif table in {"run", "memory", "agent_def", "blackboard", "thread", "message", "root_turn"}:
                     predicate = "project_id=%s"
                 elif table == "state_record":
                     predicate = (
@@ -239,6 +248,8 @@ def migrate(database_url: str) -> dict[str, Any]:
             condition = " WHERE project_id IS NOT NULL" if table == "agent_def" else ""
             c.execute(sql.SQL("DELETE FROM {}" + condition).format(sql.Identifier(base, table)))
         c.execute("DELETE FROM memory WHERE project_id IS NOT NULL")
+        for table in ("message", "root_turn", "thread"):
+            c.execute(sql.SQL("DELETE FROM {} WHERE project_id IS NOT NULL").format(sql.Identifier(base, table)))
         for row in projects:
             target = schema_name(base, row["project_id"])
             c.execute(

@@ -33,7 +33,11 @@ class FakeRuntime:
             result = Dispatch(
                 assignments={
                     r: Binding(
-                        alias=("strong" if "strong" in available else available[0]), task=f"Perform {r} for: {inp.goal}"
+                        alias=(
+                            inp.context.get("default_aliases", {}).get(r)
+                            or ("strong" if "strong" in available else available[0])
+                        ),
+                        task=f"Perform {r} for: {inp.goal}",
                     )
                     for r in inp.context["roles"]
                 }

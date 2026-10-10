@@ -133,7 +133,8 @@ export interface ProjectSettings {
   bindings: Record<string, { alias: string; task: string }>;
   budget_cents: number; max_iter: number; retrieval: 'off' | 'keyword' | 'hybrid'; retrieval_k: number;
 }
-export interface Conversation { id: string; project_id: string; title: string; messages: { id: string; author: string; text: string; run_id: string | null }[] }
+export interface Message { id: string; author: string; text: string; run_id: string | null; kind?: string; payload?: Record<string, unknown>; sources?: {kind: string; ref: string; title: string}[] }
+export interface Conversation { id: string; project_id: string | null; title: string; messages: Message[] }
 export interface ModelCatalog { aliases: Record<string, { model: string }>; roles: ProjectSettings['bindings']; root_alias: string }
 
 export interface Project {
@@ -213,8 +214,17 @@ export const api = {
   importProjectProfile: (id: string, yaml_text: string) => post<Project>(`/projects/${id}/profile`, { yaml_text }, 'PUT'),
   models: () => json<ModelCatalog>('/models'),
   updateProjectSettings: (id: string, settings: ProjectSettings) => post<Project>(`/projects/${id}/settings`, settings, 'PUT'),
-  threads: (id: string) => json<Conversation[]>(`/projects/${id}/threads`),
-  createThread: (id: string, title: string) => post<Conversation>(`/projects/${id}/threads`, { title }),
+  sendMessage: (id: string, tid: string, text: string) => post<{message: Message; run: Run | null}>(`${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/messages`, { text }),
+  threadEvents: (id: string, tid: string, callback: (type: string, payload: Record<string, unknown>) => void) => {
+    const es = new EventSource(`${BASE}${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/events`);
+    es.onopen = () => callback('sync', {});
+    for (const type of ['message.created', 'message.delta', 'turn.finished']) {
+      es.addEventListener(type, (e) => callback(type, JSON.parse((e as MessageEvent).data).payload));
+    }
+    return () => es.close();
+  },
+  threads: (id: string) => json<Conversation[]>(`${id === 'global' ? '' : `/projects/${id}`}/threads`),
+  createThread: (id: string, title: string) => post<Conversation>(`${id === 'global' ? '' : `/projects/${id}`}/threads`, { title }),
   projects: () => json<Project[]>('/projects'),
   project: (id: string) => json<Project>(`/projects/${id}`),
   createProject: (body: { name: string; goal: string; workspace: string; runtime?: string; settings?: ProjectSettings }) =>

@@ -48,6 +48,8 @@ class Services:
 
     def __post_init__(self) -> None:
         self.hooks = MemoryHooks(self.knowledge, self.projects)
+        self.hooks.session_services = self
+        self.bus.listeners.append(self.hooks.on_event)
 
     def gateway(self) -> tuple[str | None, str | None]:
         return gateway_creds(self.env, self.settings)

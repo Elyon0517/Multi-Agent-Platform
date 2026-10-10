@@ -4,7 +4,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -23,6 +23,7 @@ class Completion:
     text: str
     tokens_in: int
     tokens_out: int
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 ChatFn = Callable[..., Awaitable[Completion]]
@@ -46,6 +47,9 @@ class StructuredCaller:
         ctx: RunContext,
         override: Override | None = None,
     ) -> AgentResult[T]:
+        if ctx.tool_factory:
+            specs, execute = ctx.tool_factory(role)
+            ctx = replace(ctx, tool_specs=specs, execute_tool=execute)
         route = self._router.resolve(role, override)
         total_usage = Usage()
         recorded = ctx.record_usage is not None
@@ -62,9 +66,10 @@ class StructuredCaller:
         log = AttemptLog()
         started = time.monotonic()
         last: Exception | None = None
+        tool_counter = [0]
         for alias in route.chain:
             try:
-                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
+                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log, tool_counter)
                 result = AgentResult[output_type](  # type: ignore[valid-type]
                     role=role,
                     output=output,
@@ -94,17 +99,20 @@ class StructuredCaller:
         output_type: type[T],
         ctx: RunContext,
         log: AttemptLog,
+        tool_counter: list[int],
     ) -> tuple[T, Usage]:
         alias_cfg = self._cfg.models.aliases[alias]
         system = self._cfg.prompt(role)
-        messages = [{"role": "user", "content": render_user_message(inp)}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": render_user_message(inp)}]
         usage = Usage()
         schema = output_type.model_json_schema()
-        for _ in range(self._cfg.retry.structured_output_repair.max_repairs + 1):
+        repairs = 0
+        while repairs <= self._cfg.retry.structured_output_repair.max_repairs:
             prompt_chars = (
                 len(system.encode())
                 + len(json.dumps(schema).encode())
-                + sum(len(m["content"].encode()) for m in messages)
+                + len(json.dumps(ctx.tool_specs or []).encode())
+                + len(json.dumps(messages, ensure_ascii=False).encode())
                 + 256
             )
             estimate = estimate_cents(alias_cfg, prompt_chars)
@@ -116,7 +124,7 @@ class StructuredCaller:
                     ctx.check_budget(estimate)
 
             async def attempt(
-                estimate: float = estimate, messages: tuple[dict[str, str], ...] = tuple(messages)
+                estimate: float = estimate, messages: tuple[dict[str, Any], ...] = tuple(messages)
             ) -> Completion:
                 nonlocal usage
                 attempt_id = (
@@ -125,10 +133,15 @@ class StructuredCaller:
                             "role": role,
                             "alias": alias,
                             "model": alias_cfg.model,
-                            "prompt": {"system": system, "messages": list(messages), "schema": schema,
-                                       "temperature": route.temperature,
-                                       "max_output_tokens": alias_cfg.max_output_tokens,
-                                       "output_token_parameter": alias_cfg.output_token_parameter},
+                            "prompt": {
+                                "system": system,
+                                "messages": list(messages),
+                                "schema": schema,
+                                "tools": ctx.tool_specs or [],
+                                "temperature": route.temperature,
+                                "max_output_tokens": alias_cfg.max_output_tokens,
+                                "output_token_parameter": alias_cfg.output_token_parameter,
+                            },
                         }
                     )
                     if ctx.attempt_started
@@ -143,6 +156,8 @@ class StructuredCaller:
                         schema=schema,
                         max_output_tokens=alias_cfg.max_output_tokens,
                         output_token_parameter=alias_cfg.output_token_parameter,
+                        **({"tools": ctx.tool_specs} if ctx.tool_specs else {}),
+                        **({"on_delta": ctx.on_delta} if ctx.on_delta else {}),
                     )
                     charged = Usage(
                         tokens_in=completion.tokens_in,
@@ -181,15 +196,53 @@ class StructuredCaller:
                             {
                                 "status": "completed",
                                 "response": completion.text,
+                                "tool_calls": completion.tool_calls,
                                 "usage": charged.model_dump(mode="json"),
                             },
                         )
                 return completion
 
             completion = await call_with_retry(attempt, self._cfg.retry.llm_call, log, check_attempt)
+            if completion.tool_calls:
+                if not ctx.execute_tool:
+                    raise LlmError("tools_unavailable")
+                messages.append(
+                    {"role": "assistant", "content": completion.text or None, "tool_calls": completion.tool_calls}
+                )
+                for tool in completion.tool_calls:
+                    if tool_counter[0] >= ctx.max_tool_calls:
+                        raise LlmError("tool_call_limit")
+                    ctx.check_budget(0)
+                    tool_counter[0] += 1
+                    function = tool["function"]
+                    entry: dict[str, Any] = {
+                        "id": tool["id"],
+                        "name": function["name"],
+                        "arguments": function["arguments"],
+                        "role": role,
+                    }
+                    if ctx.record_tool:
+                        ctx.record_tool({**entry, "status": "started"})
+                    try:
+                        args = json.loads(function["arguments"])
+                        if not isinstance(args, dict):
+                            raise ValueError("arguments must be an object")
+                        value = await ctx.execute_tool(function["name"], args)
+                    except (ValueError, KeyError, OSError) as exc:
+                        if isinstance(exc, PermissionError) and role != "root":
+                            if ctx.record_tool:
+                                ctx.record_tool({**entry, "status": "failed", "error": type(exc).__name__})
+                            raise
+                        value = {"error": type(exc).__name__}
+                    result_text = json.dumps(value, ensure_ascii=False)
+                    if ctx.record_tool:
+                        ctx.record_tool({**entry, "status": "completed", "result": value})
+                    messages.append({"role": "tool", "tool_call_id": tool["id"], "content": result_text})
+                continue
             try:
                 return output_type.model_validate_json(completion.text), usage
             except ValidationError as e:
+                repairs += 1
                 log.reasons.append("structured_output_invalid")
                 messages += [
                     {"role": "assistant", "content": completion.text},

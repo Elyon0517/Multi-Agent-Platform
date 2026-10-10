@@ -221,7 +221,18 @@ class PostgresStore:
         return rows[0]["data"] if rows else None
 
     def put_record(self, kind: str, key: str, data: dict[str, Any]) -> None:
-        if kind == "project":
+        if kind == "thread":
+            with self.transaction():
+                metadata = {k: v for k, v in data.items() if k != "messages"}
+                self._upsert("thread", {"id": key, "project_id": data.get("project_id"), "payload": metadata})
+                for seq, message in enumerate(data.get("messages", []), 1):
+                    self._upsert("message", {"id": message["id"], "thread_id": key,
+                                 "project_id": data.get("project_id"), "seq": seq,
+                                 "author": message["author"], "payload": {**message, "seq": seq}})
+        elif kind == "root_turn":
+            self._upsert("root_turn", {"id": key, "thread_id": data["thread_id"],
+                         "project_id": data.get("project_id"), "payload": data})
+        elif kind == "project":
             self._upsert(
                 "project",
                 {
@@ -269,7 +280,16 @@ class PostgresStore:
         rows: list[dict[str, Any]] = []
         scopes: list[str | None] = [None, *self._schemas()]
         for pid in scopes:
-            if kind in {"project", "memory"}:
+            if kind in {"thread", "root_turn"}:
+                found = self._query(sql.SQL("SELECT payload AS data FROM {} ORDER BY id").format(
+                    sql.Identifier(kind)), project_id=pid)
+                if kind == "thread":
+                    for item in found:
+                        item["data"]["messages"] = [r["payload"] for r in self._query(
+                            "SELECT payload FROM message WHERE thread_id=%s ORDER BY seq", (item["data"]["id"],),
+                            project_id=pid)]
+                rows.extend(found)
+            elif kind in {"project", "memory"}:
                 rows.extend(
                     self._query(
                         sql.SQL("SELECT payload AS data FROM {} WHERE payload IS NOT NULL ORDER BY id").format(

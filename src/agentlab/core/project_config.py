@@ -25,7 +25,7 @@ class ProjectSettings(Strict):
 
 
 def worker_roles(cfg: AppConfig) -> set[str]:
-    return set(cfg.model_policy.roles) - {"supervisor", "project-planner"}
+    return set(cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}
 
 
 def validate_settings(settings: ProjectSettings, cfg: AppConfig) -> None:
@@ -43,9 +43,18 @@ def validate_settings(settings: ProjectSettings, cfg: AppConfig) -> None:
 
 
 def validate_reviewer_diversity(bindings: dict[str, Binding], cfg: AppConfig, allowed: set[str]) -> None:
-    if len({cfg.models.aliases[a].model for a in allowed}) < 2:
-        return
     roles = ("correctness-reviewer", "arch-reviewer")
+    eligible = {
+        a
+        for a in allowed
+        if all(
+            cfg.models.tiers[a]
+            <= max(cfg.models.tiers[cfg.model_policy.roles[r].primary], cfg.model_policy.override.reviewer_min_tier)
+            for r in roles
+        )
+    }
+    if len({cfg.models.aliases[a].model for a in eligible}) < 2:
+        return
     if len({cfg.models.aliases[bindings[r].alias].model for r in roles}) < 2:
         raise ValueError("correctness and arch reviewers must use different model IDs")
 
@@ -53,7 +62,7 @@ def validate_reviewer_diversity(bindings: dict[str, Binding], cfg: AppConfig, al
 def project_config(cfg: AppConfig, settings: ProjectSettings) -> AppConfig:
     validate_settings(settings, cfg)
     data = cfg.model_dump(mode="json")
-    for role in ("supervisor", "project-planner"):
+    for role in ("root", "supervisor", "project-planner"):
         data["model_policy"]["roles"][role]["primary"] = settings.root_alias
         data["model_policy"]["roles"][role]["fallback"] = []
     if settings.mode == "manual":

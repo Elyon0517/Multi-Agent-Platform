@@ -2,36 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import tempfile
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from agentlab.adapters.gates.config_gate import NoGateDetected
 from agentlab.adapters.store.memory import NotFound
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.loop.driver import Decision, Driver
-from agentlab.core.ports import RunBusy, execution_error_reason
+from agentlab.core.ports import RunBusy
 from agentlab.core.schemas import Approval, Artifact, Event, Iteration, Run, Step
-from agentlab.demo import seed_demo_workspace
+from agentlab.run_service import CreateRun
 
 log = logging.getLogger(__name__)
 
 
-class CreateRun(BaseModel):
-    goal: str
-    thread_id: str | None = None
-    workspace: str | None = None
-    runtime: str | None = None
-    language: str | None = None
-    project_id: str | None = None
-    step_id: str | None = None
+class MessageBody(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
 
 
 class DecideBody(BaseModel):
@@ -123,88 +114,126 @@ def create_app(svc: Services | None = None) -> FastAPI:
 
     @app.post("/runs", response_model=Run)
     async def create_run(body: CreateRun) -> Run:
-        if body.project_id:
-            try:
-                project = svc.projects.get(body.project_id)
-                if body.step_id:
-                    project.find_step(body.step_id)
-            except (KeyError, StopIteration) as e:
-                raise HTTPException(404, "project or step not found") from e
-            if body.workspace and Path(body.workspace).resolve() != Path(project.workspace).resolve():
-                raise HTTPException(422, "workspace must match the selected project")
-            body.workspace = project.workspace
-        elif body.step_id:
-            raise HTTPException(422, "step_id requires project_id")
-        conversation = None
-        new_conversation = False
-        if body.thread_id:
-            from agentlab.core.conversation import Conversation
-            conversation = next((Conversation.model_validate(t) for t in svc.store.records("thread")
-                                 if t["id"] == body.thread_id and t["project_id"] == body.project_id), None)
-            if conversation is None:
-                raise HTTPException(404, "conversation not found in this project")
-            if len(conversation.messages) >= 998:
-                raise HTTPException(409, "conversation is full; start a new conversation")
-        elif body.project_id:
-            from agentlab.core.conversation import Conversation
-            conversation = Conversation(project_id=body.project_id, title=body.goal.strip()[:80] or "New conversation")
-            body.thread_id = conversation.id
-            new_conversation = True
-        if not body.goal.strip() or len(body.goal) > 20000:
-            raise HTTPException(422, "goal must contain 1 to 20000 characters")
-        ws = (
-            Path(body.workspace)
-            if body.workspace
-            else seed_demo_workspace(Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
-        )
-        try:
-            driver = svc.driver(ws, body.runtime, body.language, body.project_id)
-            if conversation:
-                driver.recovery_options["conversation"] = [
-                    m.model_dump(mode="json") for m in conversation.messages[-20:]
-                ]
-        except (MissingGatewayConfig, NoGateDetected) as e:
-            raise HTTPException(400, f"{type(e).__name__}: {e}") from e
+        from agentlab.run_service import create_run_service
 
-        def record_conversation(run: Run) -> None:
-            if not conversation:
-                return
-            from agentlab.core.conversation import Conversation, Message
-
-            with svc.store.lock_run("thread:" + conversation.id):
-                latest = conversation if new_conversation else next(
-                    Conversation.model_validate(t) for t in svc.store.records("thread") if t["id"] == conversation.id
-                )
-                if len(latest.messages) >= 998:
-                    raise HTTPException(409, "conversation is full; start a new conversation")
-                latest.messages.append(Message(author="user", text=body.goal, run_id=run.id))
-                svc.store.put_record("thread", latest.id, latest.model_dump(mode="json"))
-
-        try:
-            await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
-            run = await driver.create_async(
-                body.goal, project_id=body.project_id or "default", thread_id=body.thread_id,
-                on_create=record_conversation
-            )
-        except RunBusy as exc:
-            driver.workspace.close()  # type: ignore[attr-defined]
-            raise HTTPException(409, str(exc)) from exc
-        except HTTPException:
-            driver.workspace.close()  # type: ignore[attr-defined]
-            raise
-        except Exception as exc:
-            driver.workspace.close()  # type: ignore[attr-defined]
-            reason = execution_error_reason(exc)
-            status = 422 if reason in {"workspace_unreadable", "workspace_escape", "workspace_root_required"} else 503
-            raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
-        if body.project_id and body.step_id:
-            try:
-                svc.projects.link_run(body.project_id, body.step_id, run.id)
-            except (KeyError, StopIteration) as e:
-                raise HTTPException(404, "project or step not found") from e
+        run, driver = await create_run_service(svc, body)
         drivers[run.id] = driver
         spawn(driver, run.id)
         return run
+
+    @app.post("/projects/{project_id}/threads/{thread_id}/messages")
+    async def send_message(project_id: str | None, thread_id: str, body: MessageBody) -> dict[str, Any]:
+        from agentlab.core.conversation import Message
+        from agentlab.core.schemas import EventType
+        from agentlab.core.session.service import SessionService
+        from agentlab.core.session.store import append_message, get_thread
+        from agentlab.run_service import create_run_service
+
+        if not body.text.strip():
+            raise HTTPException(422, "message cannot be empty")
+        try:
+            if project_id:
+                svc.projects.get(project_id)
+            if len(get_thread(svc.store, thread_id, project_id).messages) >= 998:
+                raise HTTPException(409, "conversation is full; start a new conversation")
+        except KeyError as exc:
+            raise HTTPException(404, "conversation not found in this project") from exc
+        try:
+            with svc.store.lock_run("turn:" + thread_id):
+                turn, turn_id = await SessionService(svc).answer(project_id, thread_id, body.text)
+                run = None
+                if turn.intent == "task":
+                    try:
+                        run, driver = await create_run_service(
+                            svc,
+                            CreateRun(project_id=project_id, thread_id=thread_id, goal=turn.task or body.text),
+                            record_user=False,
+                        )
+                        drivers[run.id] = driver
+                        spawn(driver, run.id)
+                    except HTTPException as exc:
+                        if exc.status_code == 409:
+                            turn.reply = (
+                                turn.reply[:19800] + "\n\n工作区已有未完成任务。请先完成或中止它,或使用独立 worktree。"
+                            )
+                        else:
+                            turn.reply = turn.reply[:19800] + "\n\n任务未创建,请检查工作区、Gate 和网关配置。"
+                message = append_message(
+                    svc.store,
+                    thread_id,
+                    project_id,
+                    Message(
+                        author="assistant",
+                        text=turn.reply,
+                        sources=turn.sources,
+                        turn_id=turn_id,
+                        run_id=run.id if run else None,
+                    ),
+                )
+                svc.bus.publish(
+                    Event(
+                        run_id="thread:" + thread_id,
+                        type=EventType.MESSAGE_CREATED,
+                        actor="root",
+                        payload={"thread_id": thread_id, "message": message.model_dump(mode="json")},
+                    )
+                )
+                svc.bus.publish(
+                    Event(
+                        run_id="thread:" + thread_id,
+                        type=EventType.TURN_FINISHED,
+                        actor="root",
+                        payload={"thread_id": thread_id, "turn_id": turn_id},
+                    )
+                )
+                return {"message": message, "turn": turn, "run": run}
+        except RunBusy as exc:
+            raise HTTPException(409, "conversation is answering another message") from exc
+
+    @app.get("/threads")
+    def global_threads() -> list[Any]:
+        from agentlab.core.conversation import Conversation
+
+        return [
+            Conversation.model_validate(row) for row in svc.store.records("thread") if row.get("project_id") is None
+        ]
+
+    @app.post("/threads")
+    def create_global_thread(body: dict[str, str]) -> Any:
+        from agentlab.core.conversation import Conversation
+
+        thread = Conversation(project_id=None, title=body.get("title", "New conversation"))
+        svc.store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+        return thread
+
+    @app.post("/threads/{thread_id}/messages")
+    async def global_message(thread_id: str, body: MessageBody) -> dict[str, Any]:
+        return await send_message(None, thread_id, body)
+
+    @app.get("/threads/{thread_id}/events")
+    async def global_events(thread_id: str, request: Request) -> EventSourceResponse:
+        return await thread_events(None, thread_id, request)
+
+    @app.get("/projects/{project_id}/threads/{thread_id}/events")
+    async def thread_events(project_id: str | None, thread_id: str, request: Request) -> EventSourceResponse:
+        from agentlab.core.session.store import get_thread
+
+        try:
+            get_thread(svc.store, thread_id, project_id)
+        except KeyError as exc:
+            raise HTTPException(404, "conversation not found") from exc
+
+        async def stream() -> AsyncIterator[dict[str, str]]:
+            subscription = svc.bus.subscribe("thread:" + thread_id)
+            try:
+                async for event in subscription:
+                    if await request.is_disconnected():
+                        break
+                    yield {"event": str(event.type), "data": event.model_dump_json()}
+            finally:
+                await subscription.aclose()
+
+        return EventSourceResponse(stream())
 
     @app.get("/runs", response_model=list[Run])
     def list_runs(project_id: str | None = None) -> list[Run]:

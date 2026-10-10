@@ -18,13 +18,14 @@ def services(tmp: Path):
 
 def test_manual_routing_has_exact_bindings_and_no_fallback(tmp_path: Path) -> None:
     svc = services(tmp_path)
-    bindings = {r: Binding(alias="strong-alt", task=f"Specific task for {r}") for r in worker_roles(svc.cfg)}
+    bindings = {r: Binding(alias=svc.cfg.model_policy.roles[r].primary, task=f"Specific task for {r}")
+                for r in worker_roles(svc.cfg)}
     settings = ProjectSettings(mode="manual", root_alias="strong", bindings=bindings, budget_cents=321, max_iter=3)
     cfg = project_config(svc.cfg, settings)
     assert cfg.budget.default_run_budget_cents == 321
     assert cfg.budget.loop.max_iter == 3
     assert cfg.model_policy.roles["project-planner"].primary == "strong"
-    assert all(cfg.model_policy.roles[r].primary == "strong-alt" and not cfg.model_policy.roles[r].fallback
+    assert all(cfg.model_policy.roles[r].primary == bindings[r].alias and not cfg.model_policy.roles[r].fallback
                for r in bindings)
     with pytest.raises(ValueError, match="every worker"):
         project_config(svc.cfg, settings.model_copy(update={"bindings": {}}))
@@ -73,7 +74,7 @@ async def test_auto_dispatch_is_checkpointed_and_manual_settings_frozen(tmp_path
     observer = svc.restore_driver(run.id)
     await driver._planning(run)
     observer._reload_checkpoint(run.id)
-    assert observer.cfg.model_policy.roles["arch-reviewer"].primary == "strong"
+    assert observer.cfg.model_policy.roles["arch-reviewer"].primary == "strong-alt"
     assert len(svc.store.artifacts(run.id, "dispatch")) == 1
     assert svc.store.steps(run.id)[0].role == "supervisor"
     checkpoint = svc.store.checkpoint(run.id)
@@ -177,10 +178,11 @@ def test_project_step_run_gets_a_conversation_and_terminal_message(tmp_path: Pat
         assert client.post(f'/runs/{run["id"]}/decision', json={"decision": "approve"}).status_code == 200
         for _ in range(100):
             messages = client.get(f"/projects/{project.id}/threads").json()[0]["messages"]
-            if len(messages) == 2:
+            if any(m.get("kind") == "summary" for m in messages):
                 break
             time.sleep(0.05)
-        assert messages[1]["author"] == "system" and "DONE" in messages[1]["text"]
+        assert any(m["author"] == "assistant" and m.get("kind") == "summary" and "DONE" in m["text"] for m in messages)
+        assert any(m.get("kind") == "approval" for m in messages)
 
 
 async def test_invalid_dispatch_requires_feedback_instead_of_replaying_paid_invalid_output(tmp_path: Path) -> None:
@@ -214,6 +216,8 @@ async def test_invalid_dispatch_requires_feedback_instead_of_replaying_paid_inva
 
 def test_reviewer_diversity_compares_model_ids_not_aliases(tmp_path: Path) -> None:
     svc = services(tmp_path)
+    for alias in svc.cfg.models.aliases.values():
+        alias.model = "shared-model"
     bindings = {r: Binding(alias="strong", task="task") for r in worker_roles(svc.cfg)}
     bindings["arch-reviewer"] = Binding(alias="strong-alt", task="task")
     Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())  # all aliases share one ID
@@ -264,6 +268,9 @@ async def test_roster_uses_frozen_dispatch_not_current_project_defaults(tmp_path
     await driver._planning(run)
     with TestClient(create_app(svc)) as client:
         entries = {item["role"]: item for item in client.get(f"/roster?run_id={run.id}").json()}
-        assert entries["arch-reviewer"]["alias"] == "strong"
+        assert entries["arch-reviewer"]["alias"] == "strong-alt"
+        project.settings = ProjectSettings(root_alias="strong-alt")
+        svc.projects.save(project)
         assert client.get(f"/roster?project_id={project.id}").json() != list(entries.values())
+        assert {item["role"]: item for item in client.get(f"/roster?run_id={run.id}").json()} == entries
         assert client.get("/roster?run_id=missing").status_code == 404

@@ -100,7 +100,7 @@ def build_router(svc: Services) -> APIRouter:
             "roles": {
                 r: {"alias": p.primary, "task": f"Perform {r}"}
                 for r, p in svc.cfg.model_policy.roles.items()
-                if r not in {"supervisor", "project-planner"}
+                if r not in {"root", "supervisor", "project-planner"}
             },
             "root_alias": svc.cfg.model_policy.roles["supervisor"].primary,
         }
@@ -131,6 +131,18 @@ def build_router(svc: Services) -> APIRouter:
         except (ValueError, yaml.YAMLError) as exc:
             raise HTTPException(422, "invalid project settings YAML") from exc
         return update_project_settings(project_id, settings)
+
+    @r.get("/projects/{project_id}/usage")
+    def project_usage(project_id: str) -> dict[str, Any]:
+        validate_scope(project_id)
+        runs = [run for run in svc.store.list_runs() if run.project_id == project_id]
+        turns = [turn for turn in svc.store.records("root_turn") if turn.get("project_id") == project_id]
+        run_cost = sum(run.cost_cents for run in runs)
+        conversation_cost = sum(float(turn.get("cost_cents", 0)) for turn in turns)
+        return {"run_cost_cents": run_cost, "conversation_cost_cents": conversation_cost,
+                "cost_cents": run_cost + conversation_cost,
+                "tokens_in": sum(run.tokens_in for run in runs) + sum(int(t.get("tokens_in", 0)) for t in turns),
+                "tokens_out": sum(run.tokens_out for run in runs) + sum(int(t.get("tokens_out", 0)) for t in turns)}
 
     @r.get("/projects/{project_id}/threads", response_model=list[Conversation])
     def threads(project_id: str) -> list[Conversation]:

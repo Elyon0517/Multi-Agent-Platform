@@ -1,4 +1,4 @@
-# Initial gateway validation: all chat roles use verified gpt-6-astra.
+# Gateway catalog: separate model IDs for the three reviewers.
 # Alias tiers remain routing labels; prices/context/tools below are provisional
 # estimates inherited from the prototype, not verified gateway metadata.
 # Embedding availability has not been verified.
@@ -32,7 +32,7 @@ aliases:
     cost_in_per_1m_cents: 500
     cost_out_per_1m_cents: 2000
   strong-alt:
-    model: gpt-6-astra
+    model: gpt-6.1-sol
     # Budget reservation estimates; actual returned usage remains authoritative.
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5
@@ -44,7 +44,7 @@ aliases:
     cost_in_per_1m_cents: 500
     cost_out_per_1m_cents: 2000
   cheap:
-    model: gpt-6-astra
+    model: gpt-6-sol
     # Budget reservation estimates; actual returned usage remains authoritative.
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5

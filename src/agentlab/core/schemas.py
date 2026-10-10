@@ -278,6 +278,9 @@ class Approval(Strict):
 
 
 class EventType(StrEnum):
+    MESSAGE_CREATED = "message.created"
+    MESSAGE_DELTA = "message.delta"
+    TURN_FINISHED = "turn.finished"
     RUN_CREATED = "run.created"
     RUN_STATUS = "run.status"
     STEP_STARTED = "step.started"

@@ -116,8 +116,10 @@ class Driver:
             return self._create(goal, **overrides)
 
     def _check_workspace_available(self) -> None:
-        if any(r.workspace == str(self.workspace.root) and r.status not in {S.DONE, S.CANCELLED}
-               for r in self.store.list_runs()):
+        if any(
+            r.workspace == str(self.workspace.root) and r.status not in {S.DONE, S.CANCELLED}
+            for r in self.store.list_runs()
+        ):
             raise RunBusy("workspace already has an unfinished run; finish or abort it before starting another")
 
     def _create(self, goal: str, on_create: Callable[[Run], None] | None = None, **overrides: Any) -> Run:
@@ -204,8 +206,11 @@ class Driver:
             raise ValueError("budget must be positive")
         if max_iter is not None and not 1 <= max_iter <= 50:
             raise ValueError("max_iter must be between 1 and 50")
-        if (approval.reason == "dispatch_invalid" and decision != "abort"
-                and (decision != "reject" or not (feedback or "").strip())):
+        if (
+            approval.reason == "dispatch_invalid"
+            and decision != "abort"
+            and (decision != "reject" or not (feedback or "").strip())
+        ):
             raise ValueError("reject with feedback to regenerate invalid model/task assignments")
         if decision == "approve":
             if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
@@ -271,20 +276,31 @@ class Driver:
                         a: {**self.cfg.models.aliases[a].model_dump(mode="json"), "tier": self.cfg.models.tiers[a]}
                         for a in settings.allowed_aliases or self.cfg.models.aliases
                     },
-                    "roles": sorted(set(self.cfg.model_policy.roles) - {"supervisor", "project-planner"}),
+                    "default_aliases": {
+                        r: p.primary
+                        for r, p in self.cfg.model_policy.roles.items()
+                        if p.primary in (settings.allowed_aliases or self.cfg.models.aliases)
+                    },
+                    "roles": sorted(set(self.cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}),
                     "reviewer_max_tiers": {
-                        role: max(self.cfg.models.tiers[self.cfg.model_policy.roles[role].primary],
-                                  self.cfg.model_policy.override.reviewer_min_tier)
+                        role: max(
+                            self.cfg.models.tiers[self.cfg.model_policy.roles[role].primary],
+                            self.cfg.model_policy.override.reviewer_min_tier,
+                        )
                         for role in self.cfg.reviewer_roles
                     },
-                    "instruction": ("Assign each worker a model alias and task. Keep all reviewers independent; "
-                                    "never skip gates or approvals. "
-                                    "When available models contain at least two distinct model IDs, "
-                                    "assign correctness-reviewer and arch-reviewer different model IDs. "
-                                    "Different aliases for the same model ID do not count."),
+                    "instruction": (
+                        "Assign each worker a model alias and task. Keep all reviewers independent; "
+                        "never skip gates or approvals. "
+                        "When tier-eligible reviewer models contain at least two distinct model IDs, "
+                        "assign correctness-reviewer and arch-reviewer different model IDs. "
+                        "Different aliases for the same model ID do not count."
+                    ),
                 }
                 result = await self._agent(
-                    run, "supervisor", self._input(run, context=context, feedback=self._latest_text(run, "feedback")),
+                    run,
+                    "supervisor",
+                    self._input(run, context=context, feedback=self._latest_text(run, "feedback")),
                     Dispatch,
                 )
                 try:
@@ -539,8 +555,36 @@ class Driver:
             with self._atomic():
                 completed(r)
 
+        def tool_factory(role: str) -> Any:
+            from agentlab.core.llm.tools import WorkerTools
+
+            async def search(query: str) -> dict[str, Any]:
+                return await self.hooks.context_for(
+                    run.model_copy(update={"goal": query}), role, inp.model_copy(update={"goal": query})
+                )
+
+            tools = WorkerTools(role, self.cfg.agents[role].tool_grants, self.workspace, self.gate, search)
+            return tools.specs, tools.execute
+
+        def record_tool(payload: dict[str, Any]) -> None:
+            with self._atomic():
+                ref, _ = self.blobs.put(json.dumps(payload, ensure_ascii=False))
+                self._emit(
+                    run,
+                    EventType.STEP_TOOL_CALL,
+                    actor=payload.get("role", "agent"),
+                    role=payload.get("role"),
+                    tool=payload["name"],
+                    status=payload["status"],
+                    tool_call_id=payload["id"],
+                    content_ref=ref,
+                )
+                self._checkpoint(run)
+
         ctx = replace(
             ctx,
+            tool_factory=tool_factory,
+            record_tool=record_tool,
             on_result=committed,
             attempt_started=lambda data: self._attempt_started(run, {**data, "batch_key": list(batch_key)}),
             attempt_finished=self._attempt_finished,

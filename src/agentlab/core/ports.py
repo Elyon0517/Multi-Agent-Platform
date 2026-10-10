@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +64,14 @@ class RunContext:
     attempt_started: Callable[[dict[str, Any]], str] | None = None
     attempt_finished: Callable[[str, dict[str, Any]], None] | None = None
     usage_transaction: Callable[[], AbstractContextManager[None]] = nullcontext
+    tool_specs: list[dict[str, Any]] | None = None
+    execute_tool: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None
+    record_tool: Callable[[dict[str, Any]], None] | None = None
+    max_tool_calls: int = 8
+    on_delta: Callable[[str], None] | None = None
+    tool_factory: (
+        Callable[[str], tuple[list[dict[str, Any]], Callable[[str, dict[str, Any]], Awaitable[Any]]]] | None
+    ) = None
 
 
 class AgentRuntime(Protocol):

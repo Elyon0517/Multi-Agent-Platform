@@ -20,9 +20,12 @@ class Subscription(AsyncIterator[Event]):
 
 class InProcessEventBus:
     def __init__(self) -> None:
+        self.listeners: list[Callable[[Event], None]] = []
         self._subs: dict[str, set[asyncio.Queue[Event]]] = defaultdict(set)
 
     def publish(self, event: Event) -> None:
+        for listener in self.listeners:
+            listener(event)
         for q in list(self._subs[event.run_id]) + list(self._subs["*"]):
             q.put_nowait(event)
 

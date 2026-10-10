@@ -569,7 +569,7 @@ def test_new_revision_upgrades_existing_project_schemas_atomically(database_url,
     revision = scripts / "versions/schema_regression.py"
     revision.write_text("""from alembic import op
 revision = "schema_regression"
-down_revision = "project_threads"
+down_revision = "root_alignment"
 def upgrade():
     op.execute("ALTER TABLE run ADD COLUMN regression_marker text")
 """)
@@ -677,7 +677,7 @@ def test_project_upgrade_head_preserves_base_schema(database_url, tmp_path):
                 assert base_data() == rows_before
             (scripts / "versions/unsafe_base.py").write_text("""from alembic import op
 revision = "unsafe_base"
-down_revision = "project_threads"
+down_revision = "root_alignment"
 def upgrade():
     op.execute("ALTER TABLE run_directory ADD COLUMN unsafe_marker text")
 """)
@@ -688,3 +688,40 @@ def upgrade():
             c.rollback()
     finally:
         engine.dispose()
+
+
+def test_root_messages_are_rows_and_legacy_threads_are_migrated(database_url):
+    import json
+
+    import psycopg
+    from psycopg import sql
+
+    from agentlab.adapters.store.postgres import PostgresStore
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.db.isolation import schema_name
+    from agentlab.db.migrate import upgrade
+
+    store = PostgresStore(database_url)
+    thread = Conversation(project_id='root_rows', title='legacy', messages=[
+        Message(author='user', text='question'), Message(author='system', text='progress')])
+    # Provision current schema, then restore the exact old conversation representation.
+    store.put_record('thread', thread.id, thread.model_dump(mode='json'))
+    with psycopg.connect(database_url) as c:
+        base = c.execute('SELECT current_schema()').fetchone()[0]
+        target = schema_name(base, 'root_rows')
+        c.execute(sql.SQL('SET LOCAL search_path TO {}, {}').format(sql.Identifier(target), sql.Identifier(base)))
+        c.execute('DROP TABLE root_turn, message, thread')
+        c.execute("UPDATE alembic_version SET version_num='project_threads'")
+        c.execute("INSERT INTO state_record(kind,key,data) VALUES ('thread',%s,%s::jsonb)",
+                  (thread.id, json.dumps(thread.model_dump(mode='json'))))
+    upgrade(database_url)
+    restored = next(t for t in store.records('thread') if t['id'] == thread.id)
+    assert [m['text'] for m in restored['messages']] == ['question', 'progress']
+    restored['messages'].append(Message(author='assistant', text='answer').model_dump(mode='json'))
+    store.put_record('thread', thread.id, restored)
+    with psycopg.connect(database_url) as c:
+        rows = c.execute(sql.SQL('SELECT author,seq FROM {} WHERE thread_id=%s ORDER BY seq').format(
+            sql.Identifier(target, 'message')), (thread.id,)).fetchall()
+        assert rows == [('user', 1), ('system', 2), ('assistant', 3)]
+        # Project migration did not rewrite the public/global row set.
+        assert c.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(base, 'thread'))).fetchone()[0] == 0

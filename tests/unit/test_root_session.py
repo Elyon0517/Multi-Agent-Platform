@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agentlab.adapters.runtime.raw import RawRuntime
+from agentlab.api.app import create_app
+from agentlab.core.budget import BudgetGuard
+from agentlab.core.conversation import RootTurn
+from agentlab.core.llm.retry import LlmError
+from agentlab.core.llm.structured import Completion, StructuredCaller
+from agentlab.core.ports import RunContext
+from agentlab.core.schemas import AgentInput, Run
+from agentlab.core.session.tools import SessionTools
+from agentlab.demo import seed_demo_workspace
+from tests.unit.test_project_experience import services
+
+
+def call(name, args=None):
+    return Completion(
+        "", 10, 5, [{"id": "t1", "type": "function", "function": {"name": name, "arguments": json.dumps(args or {})}}]
+    )
+
+
+def root_runtime(cfg, completions):
+    runtime = object.__new__(RawRuntime)
+    runtime._caller = StructuredCaller(cfg, AsyncMock(side_effect=completions))
+    return runtime
+
+
+@pytest.mark.parametrize("case", ["entry", "document", "weather", "task", "inspect"])
+def test_five_discovery_conversations(tmp_path: Path, case: str):
+    svc = services(tmp_path)
+    ws = seed_demo_workspace(tmp_path / "ws")
+    project = svc.projects.create("calc", "fix add", str(ws))
+    turn = {
+        "entry": RootTurn(intent="answer", reply="入口是 calc.py", sources=[{"kind": "file", "ref": "calc.py"}]),
+        "document": RootTurn(intent="answer", reply="文档说使用 Python", sources=[{"kind": "memory", "ref": "doc"}]),
+        "weather": RootTurn(intent="clarify", reply="无法获取实时天气,请提供位置。"),
+        "task": RootTurn(intent="task", reply="交给团队修复 add", task="Fix calc.add so tests pass"),
+        "inspect": RootTurn(intent="clarify", reply="你想检查哪个函数?"),
+    }[case]
+    completions = []
+    if case == "entry":
+        completions.append(call("file_read", {"path": "calc.py"}))
+    if case == "document":
+        import asyncio
+
+        asyncio.run(svc.knowledge.ingest("design.md", b"Python is the project implementation language", project.id))
+        item = svc.knowledge.memory.items_in("project", project.id)[0]
+        turn.sources[0].ref = item.id
+        completions.append(call("memory_search", {"query": "Python"}))
+    completions.append(Completion(turn.model_dump_json(), 10, 5))
+    root = root_runtime(svc.cfg, completions)
+    original = svc.runtime
+    svc.runtime = lambda name=None, cfg=None: root if name is None else original(name, cfg)
+    # Driver calls runtime(None), so use a dispatcher that retains the fake loop runtime.
+    loop_runtime = original("fake")
+
+    class Runtime:
+        async def run_agent(self, role, inp, out, ctx):
+            return await (root if role == "root" else loop_runtime).run_agent(role, inp, out, ctx)
+
+        async def run_parallel(self, inputs, out, ctx):
+            return await loop_runtime.run_parallel(inputs, out, ctx)
+
+    svc.runtime = lambda name=None, cfg=None: Runtime()
+    with TestClient(create_app(svc)) as client:
+        thread = client.post(f"/projects/{project.id}/threads", json={"title": "chat"}).json()
+        result = client.post(f"/projects/{project.id}/threads/{thread['id']}/messages", json={"text": case})
+        assert result.status_code == 200, result.text
+        data = result.json()
+        assert data["turn"]["intent"] == turn.intent
+        assert data["message"]["author"] == "assistant"
+        assert bool(data["run"]) == (case == "task")
+        if case != "task":
+            assert not svc.store.list_runs()
+        else:
+            import time
+
+            for _ in range(100):
+                messages = client.get(f"/projects/{project.id}/threads").json()[0]["messages"]
+                if any(m["kind"] == "approval" for m in messages):
+                    break
+                time.sleep(0.05)
+            assert any(m["kind"] == "progress" for m in messages)
+            assert any(m["kind"] == "approval" for m in messages)
+        turns = svc.store.records("root_turn")
+        assert turns[0]["cost_cents"] > 0 and turns[0]["attempts"][0]["prompt_ref"]
+        if completions[:-1]:
+            assert turns[0]["tool_calls"][0]["status"] == "started"
+            assert turns[0]["tool_calls"][1]["status"] == "completed"
+        if case == "document":
+            assert "Python" in turns[0]["tool_calls"][1]["result"][0]["text"]
+            assert data["message"]["sources"][0]["ref"] == item.id
+        usage = client.get(f"/projects/{project.id}/usage").json()
+        assert usage["conversation_cost_cents"] > 0
+
+
+async def test_tools_are_bounded_budgeted_and_replayed(cfg):
+    cfg = cfg.model_copy(deep=True)
+    cfg.model_policy.roles["root"].fallback = []
+    calls = AsyncMock(return_value=call("file_list"))
+    run = Run(goal="inspect", workspace=".")
+    guard = BudgetGuard(run, 0.8, lambda _: None)
+    execute = AsyncMock(return_value=["calc.py"])
+    records = []
+    checks = []
+
+    def check(estimate):
+        checks.append(estimate)
+        guard.check(estimate)
+
+    ctx = RunContext(
+        run, check, guard.record, tool_specs=[{"type": "function"}], execute_tool=execute, record_tool=records.append
+    )
+    with pytest.raises(LlmError, match="tool_call_limit"):
+        await StructuredCaller(cfg, calls).call(
+            "root", AgentInput(run_id=run.id, iteration=0, goal="inspect"), RootTurn, ctx
+        )
+    assert execute.await_count == 8 and len(records) == 16
+    assert checks.count(0) == 8
+    assert run.tokens_in == 90
+    transcript = calls.call_args.kwargs["messages"]
+    assert len([m for m in transcript if m["role"] == "tool"]) == 8
+
+
+async def test_tools_reuse_workspace_boundaries_and_scope(tmp_path):
+    svc = services(tmp_path)
+    ws = seed_demo_workspace(tmp_path / "ws")
+    (ws / ".env").write_text("SECRET=hidden")
+    (ws / "escape.py").symlink_to(tmp_path / "outside")
+    from agentlab.adapters.workspace import GitWorkspace
+
+    workspace = GitWorkspace(ws)
+    await workspace.ensure_repo()
+    tools = SessionTools(workspace, svc.knowledge, svc.store, "p", "t")
+    assert ".env" not in await tools.execute("file_list", {})
+    with pytest.raises(PermissionError):
+        await tools.execute("file_read", {"path": ".env"})
+    with pytest.raises(PermissionError):
+        await tools.execute("file_read", {"path": "../outside"})
+    for project, thread in [("p", "other"), ("other", "t")]:
+        svc.store.save_run(Run(project_id=project, thread_id=thread, workspace=str(ws), goal="secret"))
+    assert await tools.execute("run_status", {}) == []
+    workspace.close()
+
+
+def test_global_chat_and_busy_workspace_reply(tmp_path):
+    svc = services(tmp_path)
+    original = svc.runtime
+
+    class Runtime:
+        async def run_agent(self, role, inp, out, ctx):
+            if role == "root":
+                from agentlab.core.schemas import AgentResult, Usage
+
+                return AgentResult(
+                    role=role,
+                    output=RootTurn(intent="task", reply="Will fix add", task="Fix add"),
+                    alias="fake",
+                    model="fake",
+                    usage=Usage(cost_cents=0.1),
+                )
+            return await original("fake").run_agent(role, inp, out, ctx)
+
+        async def run_parallel(self, inputs, out, ctx):
+            return await original("fake").run_parallel(inputs, out, ctx)
+
+    svc.runtime = lambda name=None, cfg=None: Runtime()
+    with TestClient(create_app(svc)) as client:
+        global_thread = client.post("/threads", json={"title": "global"}).json()
+        result = client.post(f"/threads/{global_thread['id']}/messages", json={"text": "fix add"}).json()
+        assert result["turn"]["intent"] == "clarify" and result["run"] is None
+        assert not svc.store.list_runs()
+        ws = seed_demo_workspace(tmp_path / "busy")
+        project = svc.projects.create("busy", "fix", str(ws))
+        thread = client.post(f"/projects/{project.id}/threads", json={"title": "busy"}).json()
+        svc.store.create_run(Run(project_id=project.id, workspace=str(ws), goal="existing"))
+        result = client.post(f"/projects/{project.id}/threads/{thread['id']}/messages", json={"text": "fix add"}).json()
+        assert result["run"] is None and "worktree" in result["message"]["text"]
+        assert len(svc.store.list_runs()) == 1
+        # A foreign project cannot read or post to this conversation.
+        foreign = svc.projects.create("foreign", "fix", str(seed_demo_workspace(tmp_path / "foreign")))
+        assert (
+            client.post(f"/projects/{foreign.id}/threads/{thread['id']}/messages", json={"text": "hi"}).status_code
+            == 404
+        )
+
+
+def test_scorecards_fail_only_on_hard_errors():
+    from agentlab.evaluation.baseline import check, scorecard
+
+    soft = scorecard("soft", [check("warning", False, "warning", severity="soft")], 1)
+    assert soft["passed"] and soft["soft_warning_count"] == 1 and soft["blind_spot_count"] == 1
+    hard = scorecard("hard", [check("test", False, "failed")])
+    assert not hard["passed"] and hard["verdict"] == "FAIL" and hard["hard_error_count"] == 1
+
+
+async def test_coder_tools_write_check_and_checkpoint(tmp_path):
+    svc = services(tmp_path)
+    ws = seed_demo_workspace(tmp_path / "tools")
+    driver = svc.driver(ws, "fake", "python")
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async("Fix add")
+    fixed = 'def add(a, b):\n    """Add numbers."""\n    return a + b\n'
+    raw = root_runtime(
+        driver.cfg,
+        [
+            call("workspace_read", {"path": "calc.py"}),
+            call("workspace_write", {"path": "calc.py", "content": fixed}),
+            call("gate_run"),
+            Completion('{"edits":[]}', 20, 10),
+        ],
+    )
+    fake = driver.runtime
+
+    class Runtime:
+        async def run_agent(self, role, inp, out, ctx):
+            return await (raw if role == "coder" else fake).run_agent(role, inp, out, ctx)
+
+        async def run_parallel(self, inputs, out, ctx):
+            return await fake.run_parallel(inputs, out, ctx)
+
+    driver.runtime = Runtime()
+    finished = await driver.run(run.id)
+    assert finished.paused_reason == "signoff"
+    assert (ws / "calc.py").read_text() == fixed
+    tool_events = [e for e in svc.store.events(run.id) if e.type == "step.tool_call"]
+    assert len(tool_events) == 6 and all(e.actor == "coder" for e in tool_events)
+    assert svc.blobs.get(tool_events[-1].payload["content_ref"])
+    assert "calc.py" in svc.store.checkpoint(run.id)["workspace"]["edited_paths"]
+    driver.workspace.close()
+
+
+async def test_worker_grants_and_sensitive_writes(tmp_path):
+    from agentlab.core.llm.tools import WorkerTools
+
+    svc = services(tmp_path)
+    driver = svc.driver(seed_demo_workspace(tmp_path / "grants"), "fake", "python")
+
+    async def memory(query):
+        return {}
+
+    reviewer = WorkerTools(
+        "arch-reviewer", ["workspace_read", "workspace_write", "gate_run"], driver.workspace, driver.gate, memory
+    )
+    assert [s["function"]["name"] for s in reviewer.specs] == ["workspace_read"]
+    with pytest.raises(ValueError, match="not granted"):
+        await reviewer.execute("workspace_write", {"path": "calc.py", "content": "unsafe"})
+    coder = WorkerTools("coder", ["workspace_write"], driver.workspace, driver.gate, memory)
+    with pytest.raises(PermissionError):
+        await coder.execute("workspace_write", {"path": ".env", "content": "unsafe"})
+    driver.workspace.close()
+
+
+def test_reviewer_diversity_ignores_models_below_reviewer_tier(tmp_path):
+    from agentlab.core.project_config import Binding, Dispatch, ProjectSettings, worker_roles
+
+    svc = services(tmp_path)
+    bindings = {role: Binding(alias="strong", task="review") for role in worker_roles(svc.cfg)}
+    bindings["test-style-reviewer"] = Binding(alias="cheap", task="review style")
+    # Cheap is a distinct model, but cannot be assigned to correctness/architecture.
+    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong", "cheap"]))
+    with pytest.raises(ValueError, match="different model IDs"):
+        Dispatch(assignments=bindings).validate_for(
+            svc.cfg, ProjectSettings(allowed_aliases=["strong", "strong-alt", "cheap"])
+        )
+
+
+def test_schema_provision_fast_path_and_race_recheck():
+    from agentlab.db.isolation import provision
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self, existing):
+            self.existing, self.statements, self.reads = existing, [], 0
+
+        def execute(self, statement, params=()):
+            text = statement if isinstance(statement, str) else statement.as_string()
+            self.statements.append(text)
+            if "SELECT schema_name" in text:
+                self.reads += 1
+                return Result({"schema_name": "proj_existing"} if self.existing or self.reads > 1 else None)
+            return Result(None)
+
+    existing = Connection(True)
+    assert provision(existing, "public", "p") == "proj_existing"
+    assert not any("pg_advisory_xact_lock(hashtext" in sql for sql in existing.statements)
+    race = Connection(False)
+    assert provision(race, "public", "p") == "proj_existing"
+    assert race.reads == 2 and any("pg_advisory_xact_lock(hashtext" in sql for sql in race.statements)
