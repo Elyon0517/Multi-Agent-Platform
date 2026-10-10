@@ -30,6 +30,14 @@ class WorkspaceUnreadable(OSError):
     kind = "workspace_unreadable"
 
 
+def execution_error_reason(exc: Exception) -> str:
+    if isinstance(exc, WorkspaceUnreadable):
+        return "workspace_unreadable"
+    if isinstance(exc, PermissionError) and getattr(exc, "kind", None) == "workspace_escape":
+        return "workspace_escape"
+    return "execution_error"
+
+
 class BudgetCheck(Protocol):
     def __call__(self, estimate_cents: float) -> None: ...
 

@@ -17,6 +17,7 @@ from agentlab.adapters.store.memory import NotFound
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.loop.driver import Decision, Driver
+from agentlab.core.ports import execution_error_reason
 from agentlab.core.schemas import Approval, Artifact, Event, Iteration, Run, Step
 from agentlab.demo import seed_demo_workspace
 
@@ -108,12 +109,14 @@ def create_app(svc: Services | None = None) -> FastAPI:
             driver = svc.driver(ws, body.runtime, body.language)
         except (MissingGatewayConfig, NoGateDetected) as e:
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
         try:
+            await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
             run = await driver.create_async(body.goal, project_id=body.project_id or "default")
-        except OSError as exc:
+        except Exception as exc:
             driver.workspace.close()  # type: ignore[attr-defined]
-            raise HTTPException(422, {"reason": "workspace_unreadable", "error_type": type(exc).__name__}) from exc
+            reason = execution_error_reason(exc)
+            status = 422 if reason in {"workspace_unreadable", "workspace_escape"} else 503
+            raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
         if body.project_id and body.step_id:
             try:
                 svc.projects.link_run(body.project_id, body.step_id, run.id)

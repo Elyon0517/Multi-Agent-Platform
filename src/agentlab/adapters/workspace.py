@@ -180,6 +180,20 @@ class GitWorkspace:
         if any(self._secret_text(edit.content) for edit in edits):
             raise WorkspaceEscape("edit contains secret material")
         targets = [(self._resolve(e.path), e) for e in edits]
+        stages = self._git_bytes("ls-files", "--stage", "-z")
+        gitlinks = {os.fsdecode(item.split(b"\t", 1)[1]).casefold()
+                    for item in stages.split(b"\0") if item.startswith(b"160000 ")}
+        for path, _ in targets:
+            rel = path.relative_to(self.root).as_posix().casefold()
+            if any(rel == link or rel.startswith(link + "/") for link in gitlinks):
+                raise WorkspaceEscape("nested repository requires its own project")
+            for parent in (path, *path.parents):
+                if parent == self.root:
+                    break
+                if (parent / ".git").exists() or ((parent / "HEAD").is_file()
+                                                 and (parent / "objects").is_dir()
+                                                 and (parent / "refs").is_dir()):
+                    raise WorkspaceEscape("nested repository requires its own project")
         for path, edit in targets:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit.content)

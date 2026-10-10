@@ -724,10 +724,19 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 ### 子仓库与快照性能复核（2026-10-10）
 
-- 子模块和内嵌仓库使用原生 mode `160000` + 子仓库 HEAD；未初始化的 gitlink 保留 index 中的 commit。无 HEAD 的内嵌仓库展示可见标记；dirty 子仓库展示状态/patch 指纹，内部详细评审需在该子仓库运行独立 project。
+- 子模块和内嵌仓库使用原生 mode `160000` + 子仓库 HEAD；未初始化的 gitlink 保留 index 中的 commit。无 HEAD 的内嵌仓库展示可见标记；dirty 子仓库展示状态/patch 指纹，父 project 的 Coder 禁止写入子仓库（包含 gitlink 根路径、后代路径和符号链接别名），统一 WorkspaceEscape 审批；内部编辑和详细评审必须在该子仓库运行独立 project。审批不授予父 project 对子仓库的写权限。
 - 文件先做密钥检测和脱敏，再通过单次 `hash-object -w --no-filters --stdin-paths` 批量哈希；index 与 object database 均隔离在临时目录，不往用户 `.git/objects` 写入快照对象。objects 通过只读 alternate 引用原仓库，run 终止/abort 释放临时对象，进程退出由临时目录生命周期回收。P2 须同时持久化对象库和 tree 引用，不能只保存 tree ID。
 - 本机 2000 小文件基准：begin_run 1.321s，单文件改变后的 diff 0.590s，父仓库新增对象 0。回归校验每次 snapshot 仅一个 hash-object 请求，父仓库 objects/index 不变；测试不依赖易波动的时间阈值。
 - 文件不可读使用 `workspace_unreadable`，与 `workspace_escape` 区分；API baseline 不可读返回 422 和安全错误类型，而非 500。
 - execution_error 批准重试仍保留同一批冻结输入和成功结果，避免再次付费；该批缓存不因反复批准而新增条目。成功交付、reject、abort、终止清理。P2 持久化须保留上述生命周期，并为长期暂停运行设计显式归档/清理机制。
 
-当前验收：后端 141 项、前端 17 项，ruff / mypy 通过；真实模型 Docker smoke 1/1，一轮 signoff，FULL Gate 通过，原测试未改。
+上一轮验收：后端 141 项、前端 17 项，ruff / mypy 通过；真实模型 Docker smoke 1/1，一轮 signoff，FULL Gate 通过，原测试未改。
+
+
+### 子仓库写入边界补充（2026-10-10）
+
+- apply_edits 在写入任何一个文件前验证全部路径：结合 parent index 中的 160000 gitlink 与解析后祖先目录的 .git 标记，拒绝父 project 的子仓库编辑。未初始化子模块和无 HEAD 的内嵌仓库同样受保护；独立子仓库 project 不受父仓库标记影响。
+- 仅 WorkspaceUnreadable 使用 workspace_unreadable；带 workspace_escape kind 的权限异常仍进入越界审批，磁盘写满等其他 OSError 使用 execution_error。
+- API 将仓库初始化和 baseline 捕获共同纳入错误处理；Git CalledProcessError / TimeoutExpired 返回 503 + 安全错误类型，并清理临时对象目录，不发布半创建的 run。明确的不可读/越界错误返回 422。
+
+本次验收：后端 152 项，ruff / mypy 通过；新增 11 个回归用例覆盖写入边界、独立子项目、磁盘写满与 API 创建失败清理。

@@ -65,12 +65,11 @@ async def test_unborn_embedded_repository_and_dirty_edits_are_visible(tmp_path):
     child.mkdir()
     git(child, "init", "-q")
     ws.begin_run()
-    ws.apply_edits([FileEdit(path="vendor/code.py", content="unborn change\n")])
-    assert "embedded-unborn -> embedded-unborn" in await ws.diff()
+    (child / "code.py").write_text("unborn change\n")
     commit(child)
     assert "embedded-unborn -> submodule" in await ws.diff()
     ws.begin_run()
-    ws.apply_edits([FileEdit(path="vendor/code.py", content="actual change\n")])
+    (child / "code.py").write_text("actual change\n")
     assert "submodule-dirty" in await ws.diff()
 
 

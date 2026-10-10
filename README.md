@@ -16,7 +16,7 @@ Design doc (source of truth): [`docs/DISCOVERY.md`](docs/DISCOVERY.md). Phases a
 
 P0 prototype is implemented: deterministic loop, independent reviewer panel, human approval, SSE office visualization, and in-memory knowledge/project services. The real gateway and Docker Python gate are connected. Next: P2 persistence and resume, followed by project-specific scheduling modes.
 
-Verified on 2026-10-10: 141 backend tests, 17 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runtime/project/memory state is not yet persisted. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
+Verified on 2026-10-10: 152 backend tests, 17 UI tests, UI typecheck/production build, and configuration validation. ADK remains a placeholder; runtime/project/memory state is not yet persisted. The Python repair smoke test verifies real-model convergence inside Docker. Other language gates remain unverified.
 
 Execution failures pause for human intervention. Only reviewed signoff plus the full gate can be approved as complete; budget pauses require an explicit increase. The console approval panel accepts budget and iteration limits. SSE resumes from Last-Event-ID and deduplicates replayed usage. Diffs are based on the run-start snapshot without changing the Git index. Apply `0002_model_alignment.sql` to an existing database before the future persistence adapter.
 

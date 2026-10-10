@@ -17,7 +17,16 @@ from agentlab.core.loop.arbiter import arbitrate
 from agentlab.core.loop.convergence import gate_fingerprints, is_oscillating, review_fingerprints
 from agentlab.core.loop.hooks import NoHooks, RunHooks
 from agentlab.core.loop.states import ACTIVE, TERMINAL, check_transition
-from agentlab.core.ports import AgentRuntime, BlobStore, EventBus, GateAdapter, RunContext, Store, Workspace
+from agentlab.core.ports import (
+    AgentRuntime,
+    BlobStore,
+    EventBus,
+    GateAdapter,
+    RunContext,
+    Store,
+    Workspace,
+    execution_error_reason,
+)
 from agentlab.core.schemas import (
     AgentInput,
     AgentResult,
@@ -103,7 +112,7 @@ class Driver:
                                on_approve=run.status)
             except Exception as exc:
                 # Exceptions can contain prompts/keys. Persist only a safe error class.
-                reason = getattr(exc, "kind", "workspace_unreadable") if isinstance(exc, OSError) else "execution_error"
+                reason = execution_error_reason(exc)
                 self._escalate(run, reason, {
                     "error_type": type(exc).__name__, "error_kind": getattr(exc, "kind", "execution_error")
                 }, on_approve=run.status)
