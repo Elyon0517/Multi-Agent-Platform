@@ -11,7 +11,9 @@ and the DISCOVERY P8 summary fields. Hard failures yield exit code 1; soft failu
 only increment warnings. JSON output is suitable for CI and comparisons.
 
 `--runtime raw` exercises the configured gateway and prompts. This performs paid model
-calls and changes only disposable fixture copies. Fake mode validates orchestration,
+calls and changes only disposable fixture copies. Both eval and smoke create workspaces
+under `~/.agentlab-workspaces`, outside the application Git checkout and visible to
+Colima. Raw eval uses the Docker sandbox; fake eval uses the local sandbox. Fake mode validates orchestration,
 tools, persistence and scoring; each fake case contributes one `blind_spot_count`,
 because scripted intent and reviewer outputs do not measure model/prompt quality.
 Do not interpret a fake PASS as evidence that a new root prompt is semantically correct.

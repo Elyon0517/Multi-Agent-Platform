@@ -170,8 +170,9 @@ def smoke(trials: Annotated[int, typer.Option(min=1, max=3)] = 3) -> None:
 
     async def evaluate() -> list[dict[str, object]]:
         results: list[dict[str, object]] = []
-        workspace_root = Path.home() / ".agentlab-workspaces"
-        workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from agentlab.workspaces import evaluation_workspace_root
+
+        workspace_root = evaluation_workspace_root()
         for index in range(trials):
             workspace = Path(tempfile.mkdtemp(prefix="py-fix-add-", dir=workspace_root))
             shutil.copytree(template, workspace, dirs_exist_ok=True)

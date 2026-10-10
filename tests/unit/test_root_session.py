@@ -358,7 +358,7 @@ def test_append_only_message_storage_does_not_scan_records(tmp_path):
 async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatch, runtime, sandbox):
     from agentlab.evaluation import baseline
 
-    monkeypatch.setenv("AGENTLAB_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(baseline, "evaluation_workspace_root", lambda: tmp_path)
     manifest = tmp_path / "baseline.json"
     manifest.write_text('{"tasks": []}')
 
@@ -367,7 +367,7 @@ async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatc
 
     def build(settings):
         assert settings.sandbox == sandbox
-        assert settings.data_dir.parent.parent == (tmp_path / "data" / "eval").resolve()
+        assert settings.data_dir.parent.parent == tmp_path
         raise StopBeforeExecution
 
     monkeypatch.setattr(baseline, "build_services", build)

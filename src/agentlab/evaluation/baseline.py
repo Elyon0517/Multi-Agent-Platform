@@ -15,6 +15,7 @@ from agentlab.core.schemas import CoderOutput, FileEdit, Plan, RunStatus
 from agentlab.core.session.service import SessionService
 from agentlab.demo import demo_scripts, seed_demo_workspace
 from agentlab.settings import Settings
+from agentlab.workspaces import evaluation_workspace_root
 
 
 def scorecard(run_id: str, checks: list[dict[str, Any]], blind_spots: int = 0) -> dict[str, Any]:
@@ -41,8 +42,7 @@ def check(name: str, passed: bool, detail: str, source: str = "runtime", severit
 async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
     data = json.loads(manifest.read_text())
     cards = []
-    eval_dir = Settings().data_dir.resolve() / "eval"
-    eval_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir = evaluation_workspace_root()
     with tempfile.TemporaryDirectory(prefix="agentlab-eval-", dir=eval_dir) as temp:
         root = Path(temp)
         svc = build_services(
