@@ -18,6 +18,10 @@ class WorkspaceEscape(PermissionError):
     kind = "workspace_escape"
 
 
+class WorkspaceNotFound(FileNotFoundError):
+    kind = "not_found"
+
+
 class PersistentDirectory:
     def __init__(self, path: Path) -> None:
         self.name = str(path.resolve())
@@ -328,12 +332,55 @@ class GitWorkspace:
 
     def read_source(self, rel: str) -> str:
         path = self._resolve(rel)
+        if not path.exists() and not (self.root / rel).is_symlink():
+            raise WorkspaceNotFound(f"source file not found: {rel}")
         if (self.root / rel).is_symlink() or not path.is_file() or path.stat().st_size > 100_000:
             raise WorkspaceEscape("unreadable source")
         text = self.read(rel)
         if "\0" in text or self._secret_text(text):
             raise WorkspaceEscape("secret or binary content")
         return text[:12000]
+
+    async def inspect_git(self, command: str, ref: str = "", path: str = "") -> str:
+        """Fixed read-only commands; callers cannot supply Git options or shell code."""
+        if command not in {"status", "log", "branch", "diff", "show"}:
+            raise ValueError("unsupported Git inspection")
+        if ref and not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_./@~^+-]*", ref):
+            raise ValueError("invalid Git revision")
+        if path:
+            self._resolve(path)
+            if Path(path).is_absolute() or ".." in Path(path).parts:
+                raise WorkspaceEscape(path)
+        base = ["--no-pager", "--no-optional-locks"]
+        if command == "status":
+            args = ["status", "--short", "--untracked-files=normal"]
+        elif command == "branch":
+            args = ["branch", "--all", "--no-color"]
+        elif command == "log":
+            args = ["log", "-30", "--format=%h %d %s", ref or "HEAD", "--"]
+        elif command == "show":
+            revision = ref or "HEAD"
+            if path:
+                args = ["show", "--no-ext-diff", "--no-textconv", f"{revision}:{path}"]
+            else:
+                args = ["ls-tree", "-r", "--name-only", revision, "--"]
+        else:
+            args = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"]
+            if not path:
+                args += ["--name-only"]
+            if ref:
+                args += [ref]
+            args += ["--"]
+            if path:
+                args += [":(literal)" + path]
+        output = await self._git(*base, *args)
+        if (command == "show" and not path) or (command == "diff" and not path):
+            output = "\n".join(line for line in output.splitlines() if not self._sensitive(line))
+        if command == "status":
+            output = "\n".join(line for line in output.splitlines() if not self._sensitive(line[3:]))
+        if "\0" in output or self._secret_text(output):
+            raise WorkspaceEscape("secret or binary Git content")
+        return output[:12000] + ("\n[truncated]" if len(output) > 12000 else "")
 
     async def context_files(self) -> dict[str, str]:
         """Bounded source context; never include secret files, symlinks or binaries."""
