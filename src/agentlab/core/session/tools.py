@@ -25,7 +25,10 @@ class SessionTools:
         text = {"type": "string"}
         specs = [
             tool_spec("memory_search", "Search uploaded documents and readable memories", {"query": text}),
-            tool_spec("run_status", "Inspect this conversation's runs, diffs and reviews", {}),
+            tool_spec(
+                "artifact_read", "Read one diff, gate report or review from this conversation", {"artifact_id": text}
+            ),
+            tool_spec("run_status", "Summarize this conversation's run status, gate and reviews", {}),
         ]
         if self.workspace:
             specs += [
@@ -45,6 +48,13 @@ class SessionTools:
         if name == "memory_search":
             hits = await self.knowledge.search(self.project_id, "root", args["query"][:4000])
             return [{"ref": h.item.id, "text": h.item.text, "source": h.item.source} for h in hits]
+        if name == "artifact_read":
+            for run in self.store.list_runs():
+                if run.project_id == self.project_id and run.thread_id == self.thread_id:
+                    for artifact in self.store.artifacts(run.id):
+                        if artifact.id == args["artifact_id"]:
+                            return {"content_ref": artifact.content_ref, "kind": artifact.kind}
+            raise KeyError("artifact not found in this conversation")
         if name == "run_status":
             runs = [
                 r for r in self.store.list_runs() if r.project_id == self.project_id and r.thread_id == self.thread_id
@@ -52,8 +62,12 @@ class SessionTools:
             return [
                 {
                     "run": r.model_dump(mode="json"),
-                    "artifacts": [a.model_dump(mode="json") for a in self.store.artifacts(r.id)[-8:]],
-                    "events": [e.model_dump(mode="json") for e in self.store.events(r.id)[-20:]],
+                    "artifacts": [{"id": a.id, "kind": a.kind} for a in self.store.artifacts(r.id)[-8:]],
+                    "events": [
+                        {"type": e.type, "actor": e.actor, "payload": e.payload}
+                        for e in self.store.events(r.id)
+                        if e.type in {"gate.finished", "arbiter.decision"}
+                    ][-2:],
                 }
                 for r in runs[-5:]
             ]

@@ -80,6 +80,22 @@ class InMemoryStore:
         with self._lock:
             self._records[kind, key] = copy.deepcopy(data)
 
+    def thread_record(self, thread_id: str, project_id: str | None) -> dict[str, Any] | None:
+        row = self._records.get(("thread", thread_id))
+        return copy.deepcopy(row) if row and row.get("project_id") == project_id else None
+
+    def append_thread_message(self, thread_id: str, project_id: str | None, data: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            row = self._records.get(("thread", thread_id))
+            if not row or row.get("project_id") != project_id:
+                raise KeyError(thread_id)
+            messages = row.setdefault("messages", [])
+            if len(messages) >= 1000:
+                raise ValueError("conversation is full")
+            data = {**data, "seq": len(messages) + 1}
+            messages.append(copy.deepcopy(data))
+            return data
+
     def records(self, kind: str) -> list[dict[str, Any]]:
         return [copy.deepcopy(data) for (k, _), data in self._records.items() if k == kind]
 

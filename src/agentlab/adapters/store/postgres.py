@@ -226,12 +226,22 @@ class PostgresStore:
                 metadata = {k: v for k, v in data.items() if k != "messages"}
                 self._upsert("thread", {"id": key, "project_id": data.get("project_id"), "payload": metadata})
                 for seq, message in enumerate(data.get("messages", []), 1):
-                    self._upsert("message", {"id": message["id"], "thread_id": key,
-                                 "project_id": data.get("project_id"), "seq": seq,
-                                 "author": message["author"], "payload": {**message, "seq": seq}})
+                    self._upsert(
+                        "message",
+                        {
+                            "id": message["id"],
+                            "thread_id": key,
+                            "project_id": data.get("project_id"),
+                            "seq": seq,
+                            "author": message["author"],
+                            "payload": {**message, "seq": seq},
+                        },
+                    )
         elif kind == "root_turn":
-            self._upsert("root_turn", {"id": key, "thread_id": data["thread_id"],
-                         "project_id": data.get("project_id"), "payload": data})
+            self._upsert(
+                "root_turn",
+                {"id": key, "thread_id": data["thread_id"], "project_id": data.get("project_id"), "payload": data},
+            )
         elif kind == "project":
             self._upsert(
                 "project",
@@ -276,18 +286,54 @@ class PostgresStore:
                 self._record_owner(kind, key, data),
             )
 
+    def thread_record(self, thread_id: str, project_id: str | None) -> dict[str, Any] | None:
+        rows = self._query("SELECT payload FROM thread WHERE id=%s", (thread_id,), project_id=project_id)
+        if not rows or rows[0]["payload"].get("project_id") != project_id:
+            return None
+        data: dict[str, Any] = rows[0]["payload"]
+        data["messages"] = [
+            row["payload"]
+            for row in self._query(
+                "SELECT payload FROM message WHERE thread_id=%s ORDER BY seq", (thread_id,), project_id=project_id
+            )
+        ]
+        return data
+
+    def append_thread_message(self, thread_id: str, project_id: str | None, data: dict[str, Any]) -> dict[str, Any]:
+        rows = self._query("SELECT payload FROM thread WHERE id=%s FOR UPDATE", (thread_id,), project_id=project_id)
+        if not rows or rows[0]["payload"].get("project_id") != project_id:
+            raise KeyError(thread_id)
+        seq = self._query(
+            "SELECT COALESCE(MAX(seq),0)+1 AS seq FROM message WHERE thread_id=%s", (thread_id,), project_id=project_id
+        )[0]["seq"]
+        if seq > 1000:
+            raise ValueError("conversation is full")
+        data = {**data, "seq": seq}
+        self._query(
+            "INSERT INTO message(id,thread_id,project_id,seq,author,payload) VALUES (%s,%s,%s,%s,%s,%s)",
+            (data["id"], thread_id, project_id, seq, data["author"], Jsonb(data)),
+            project_id=project_id,
+        )
+        return data
+
     def records(self, kind: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         scopes: list[str | None] = [None, *self._schemas()]
         for pid in scopes:
             if kind in {"thread", "root_turn"}:
-                found = self._query(sql.SQL("SELECT payload AS data FROM {} ORDER BY id").format(
-                    sql.Identifier(kind)), project_id=pid)
+                found = self._query(
+                    sql.SQL("SELECT payload AS data FROM {} ORDER BY id").format(sql.Identifier(kind)), project_id=pid
+                )
                 if kind == "thread":
                     for item in found:
-                        item["data"]["messages"] = [r["payload"] for r in self._query(
-                            "SELECT payload FROM message WHERE thread_id=%s ORDER BY seq", (item["data"]["id"],),
-                            project_id=pid)]
+                        item["data"]["messages"] = [
+                            r["payload"]
+                            for r in self._query(
+                                "SELECT payload FROM message WHERE thread_id=%s ORDER BY seq",
+                                (item["data"]["id"],),
+                                project_id=pid,
+                            )
+                        ]
                 rows.extend(found)
             elif kind in {"project", "memory"}:
                 rows.extend(

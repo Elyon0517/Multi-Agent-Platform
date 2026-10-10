@@ -44,7 +44,12 @@ async def evaluate(manifest: Path, runtime: str = "fake") -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="agentlab-eval-") as temp:
         root = Path(temp)
         svc = build_services(
-            Settings(store_backend="memory", data_dir=root / "state", runtime=runtime, sandbox="local")
+            Settings(
+                store_backend="memory",
+                data_dir=root / "state",
+                runtime=runtime,
+                sandbox="local" if runtime == "fake" else "docker",
+            )
         )
         for task in data["tasks"]:
             workspace = root / task["id"]

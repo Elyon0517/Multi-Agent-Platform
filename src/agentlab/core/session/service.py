@@ -119,10 +119,8 @@ class SessionService:
                 web_sources.extend(Source.model_validate(s) for s in result.get("sources", []))
                 return result
             result = await tools.execute(name, args)
-            if name == "run_status":
-                for entry in result:
-                    for artifact in entry["artifacts"]:
-                        artifact["content"] = svc.blobs.get(artifact["content_ref"])[:12000]
+            if name == "artifact_read":
+                return {"kind": result["kind"], "content": svc.blobs.get(result["content_ref"])[:15000]}
             return result
 
         def delta(content: str) -> None:
@@ -219,5 +217,15 @@ class SessionService:
             save()
             return fallback, turn_id
         finally:
+            from agentlab.core.schemas import Event, EventType
+
+            svc.bus.publish(
+                Event(
+                    run_id="thread:" + thread_id,
+                    type=EventType.TURN_FINISHED,
+                    actor="root",
+                    payload={"thread_id": thread_id, "turn_id": turn_id},
+                )
+            )
             if ws:
                 ws.close()

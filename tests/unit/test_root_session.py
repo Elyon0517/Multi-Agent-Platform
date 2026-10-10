@@ -11,7 +11,6 @@ from agentlab.adapters.runtime.raw import RawRuntime
 from agentlab.api.app import create_app
 from agentlab.core.budget import BudgetGuard
 from agentlab.core.conversation import RootTurn
-from agentlab.core.llm.retry import LlmError
 from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.ports import RunContext
 from agentlab.core.schemas import AgentInput, Run
@@ -69,6 +68,8 @@ def test_five_discovery_conversations(tmp_path: Path, case: str):
             return await loop_runtime.run_parallel(inputs, out, ctx)
 
     svc.runtime = lambda name=None, cfg=None: Runtime()
+    published = []
+    svc.bus.listeners.append(published.append)
     with TestClient(create_app(svc)) as client:
         thread = client.post(f"/projects/{project.id}/threads", json={"title": "chat"}).json()
         result = client.post(f"/projects/{project.id}/threads/{thread['id']}/messages", json={"text": case})
@@ -84,11 +85,14 @@ def test_five_discovery_conversations(tmp_path: Path, case: str):
 
             for _ in range(100):
                 messages = client.get(f"/projects/{project.id}/threads").json()[0]["messages"]
-                if any(m["kind"] == "approval" for m in messages):
+                if any(m["kind"] == "summary" for m in messages) and any(m["kind"] == "approval" for m in messages):
                     break
                 time.sleep(0.05)
             assert any(m["kind"] == "progress" for m in messages)
             assert any(m["kind"] == "approval" for m in messages)
+            assert any(m["kind"] == "summary" for m in messages)
+            assert all("step.finished:" not in m["text"] for m in messages)
+            assert len([e for e in published if e.type == "turn.finished"]) >= 2
         turns = svc.store.records("root_turn")
         assert turns[0]["cost_cents"] > 0 and turns[0]["attempts"][0]["prompt_ref"]
         if completions[:-1]:
@@ -104,8 +108,11 @@ def test_five_discovery_conversations(tmp_path: Path, case: str):
 async def test_tools_are_bounded_budgeted_and_replayed(cfg):
     cfg = cfg.model_copy(deep=True)
     cfg.model_policy.roles["root"].fallback = []
-    calls = AsyncMock(return_value=call("file_list"))
-    run = Run(goal="inspect", workspace=".")
+    calls = AsyncMock(
+        side_effect=[call("file_list") for _ in range(8)]
+        + [Completion(RootTurn(intent="answer", reply="Collected evidence").model_dump_json(), 10, 5)]
+    )
+    run = Run(goal="inspect", workspace=".", budget_cents=10000)
     guard = BudgetGuard(run, 0.8, lambda _: None)
     execute = AsyncMock(return_value=["calc.py"])
     records = []
@@ -118,10 +125,11 @@ async def test_tools_are_bounded_budgeted_and_replayed(cfg):
     ctx = RunContext(
         run, check, guard.record, tool_specs=[{"type": "function"}], execute_tool=execute, record_tool=records.append
     )
-    with pytest.raises(LlmError, match="tool_call_limit"):
-        await StructuredCaller(cfg, calls).call(
-            "root", AgentInput(run_id=run.id, iteration=0, goal="inspect"), RootTurn, ctx
-        )
+    result = await StructuredCaller(cfg, calls).call(
+        "root", AgentInput(run_id=run.id, iteration=0, goal="inspect"), RootTurn, ctx
+    )
+    assert result.output.reply == "Collected evidence"
+    assert "tools" not in calls.call_args.kwargs
     assert execute.await_count == 8 and len(records) == 16
     assert checks.count(0) == 8
     assert run.tokens_in == 90
@@ -300,3 +308,66 @@ def test_schema_provision_fast_path_and_race_recheck():
     race = Connection(False)
     assert provision(race, "public", "p") == "proj_existing"
     assert race.reads == 2 and any("pg_advisory_xact_lock(hashtext" in sql for sql in race.statements)
+
+
+@pytest.mark.parametrize("error", [False, True])
+async def test_tool_errors_and_large_results_allow_answer(cfg, error):
+    cfg = cfg.model_copy(deep=True)
+    cfg.model_policy.roles["root"].fallback = []
+    chat = AsyncMock(
+        side_effect=[
+            call("web_search"),
+            Completion(
+                RootTurn(intent="answer", reply="Search unavailable" if error else "Found evidence").model_dump_json(),
+                10,
+                5,
+            ),
+        ]
+    )
+    execute = (
+        AsyncMock(side_effect=RuntimeError("private gateway details"))
+        if error
+        else AsyncMock(return_value={"text": "x" * 100000})
+    )
+    run = Run(goal="search", workspace=".")
+    ctx = RunContext(run, lambda _: None, tool_specs=[{"type": "function"}], execute_tool=execute)
+    result = await StructuredCaller(cfg, chat).call(
+        "root", AgentInput(run_id=run.id, iteration=0, goal="search"), RootTurn, ctx
+    )
+    assert result.output.reply
+    content = chat.call_args.kwargs["messages"][-1]["content"]
+    assert len(content.encode()) <= 16384
+    assert "private gateway details" not in content
+    assert ("RuntimeError" if error else "truncated") in content
+
+
+def test_append_only_message_storage_does_not_scan_records(tmp_path):
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.session.store import append_message, get_thread
+
+    svc = services(tmp_path)
+    thread = Conversation(project_id=None, title="chat")
+    svc.store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+    svc.store.records = lambda _: (_ for _ in ()).throw(AssertionError("must not scan records"))
+    for index in range(3):
+        assert append_message(svc.store, thread.id, None, Message(author="user", text="hi")).seq == index + 1
+    assert len(get_thread(svc.store, thread.id, None).messages) == 3
+
+
+@pytest.mark.parametrize("runtime, sandbox", [("fake", "local"), ("raw", "docker")])
+async def test_eval_sandbox_selected_before_model_execution(tmp_path, monkeypatch, runtime, sandbox):
+    from agentlab.evaluation import baseline
+
+    manifest = tmp_path / "baseline.json"
+    manifest.write_text('{"tasks": []}')
+
+    class StopBeforeExecution(Exception):
+        pass
+
+    def build(settings):
+        assert settings.sandbox == sandbox
+        raise StopBeforeExecution
+
+    monkeypatch.setattr(baseline, "build_services", build)
+    with pytest.raises(StopBeforeExecution):
+        await baseline.evaluate(manifest, runtime)

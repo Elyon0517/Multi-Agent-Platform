@@ -164,6 +164,13 @@ class Driver:
                 )
                 log.error("run %s paused in %s: %s", run.id, run.status, type(exc).__name__)
             self.store.save_run(run)
+        if run.status == RunStatus.WAITING_HUMAN:
+            on_waiting = getattr(self.hooks, "on_waiting", None)
+            if on_waiting:
+                try:
+                    await on_waiting(run)
+                except Exception:
+                    log.exception("on_waiting hook failed for run %s", run.id)
         if run.status in TERMINAL and run.id not in self._finished:
             self._finished.add(run.id)
             self._clear_agent_cache(run.id)

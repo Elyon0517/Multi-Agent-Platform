@@ -408,8 +408,22 @@ async def test_baseline_objects_are_owned_not_only_git_alternates(tmp_path):
     ws = GitWorkspace(workspace, snapshot_dir=tmp_path / "snapshots")
     await ws.ensure_repo()
     subprocess.run(["git", "-C", str(workspace), "add", "file.py"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(workspace), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                    "commit", "-m", "baseline"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "baseline",
+        ],
+        check=True,
+        capture_output=True,
+    )
     original = subprocess.check_output(["git", "-C", str(workspace), "rev-parse", "HEAD:file.py"]).decode().strip()
     ws.begin_run()
     state = ws.export_state()
@@ -702,26 +716,49 @@ def test_root_messages_are_rows_and_legacy_threads_are_migrated(database_url):
     from agentlab.db.migrate import upgrade
 
     store = PostgresStore(database_url)
-    thread = Conversation(project_id='root_rows', title='legacy', messages=[
-        Message(author='user', text='question'), Message(author='system', text='progress')])
+    thread = Conversation(
+        project_id="root_rows",
+        title="legacy",
+        messages=[Message(author="user", text="question"), Message(author="system", text="progress")],
+    )
     # Provision current schema, then restore the exact old conversation representation.
-    store.put_record('thread', thread.id, thread.model_dump(mode='json'))
+    store.put_record("thread", thread.id, thread.model_dump(mode="json"))
     with psycopg.connect(database_url) as c:
-        base = c.execute('SELECT current_schema()').fetchone()[0]
-        target = schema_name(base, 'root_rows')
-        c.execute(sql.SQL('SET LOCAL search_path TO {}, {}').format(sql.Identifier(target), sql.Identifier(base)))
-        c.execute('DROP TABLE root_turn, message, thread')
+        base = c.execute("SELECT current_schema()").fetchone()[0]
+        target = schema_name(base, "root_rows")
+        c.execute(sql.SQL("SET LOCAL search_path TO {}, {}").format(sql.Identifier(target), sql.Identifier(base)))
+        c.execute("DROP TABLE root_turn, message, thread")
         c.execute("UPDATE alembic_version SET version_num='project_threads'")
-        c.execute("INSERT INTO state_record(kind,key,data) VALUES ('thread',%s,%s::jsonb)",
-                  (thread.id, json.dumps(thread.model_dump(mode='json'))))
+        c.execute(
+            "INSERT INTO state_record(kind,key,data) VALUES ('thread',%s,%s::jsonb)",
+            (thread.id, json.dumps(thread.model_dump(mode="json"))),
+        )
     upgrade(database_url)
-    restored = next(t for t in store.records('thread') if t['id'] == thread.id)
-    assert [m['text'] for m in restored['messages']] == ['question', 'progress']
-    restored['messages'].append(Message(author='assistant', text='answer').model_dump(mode='json'))
-    store.put_record('thread', thread.id, restored)
+    restored = next(t for t in store.records("thread") if t["id"] == thread.id)
+    assert [m["text"] for m in restored["messages"]] == ["question", "progress"]
+    restored["messages"].append(Message(author="assistant", text="answer").model_dump(mode="json"))
+    store.put_record("thread", thread.id, restored)
     with psycopg.connect(database_url) as c:
-        rows = c.execute(sql.SQL('SELECT author,seq FROM {} WHERE thread_id=%s ORDER BY seq').format(
-            sql.Identifier(target, 'message')), (thread.id,)).fetchall()
-        assert rows == [('user', 1), ('system', 2), ('assistant', 3)]
+        rows = c.execute(
+            sql.SQL("SELECT author,seq FROM {} WHERE thread_id=%s ORDER BY seq").format(
+                sql.Identifier(target, "message")
+            ),
+            (thread.id,),
+        ).fetchall()
+        assert rows == [("user", 1), ("system", 2), ("assistant", 3)]
         # Project migration did not rewrite the public/global row set.
-        assert c.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(base, 'thread'))).fetchone()[0] == 0
+        assert c.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(base, "thread"))).fetchone()[0] == 0
+
+
+def test_thread_append_contract(store):
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.session.store import append_message, get_thread
+
+    thread = Conversation(project_id="project-a", title="chat")
+    store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+    for index in range(3):
+        message = append_message(store, thread.id, "project-a", Message(author="user", text=f"message {index}"))
+        assert message.seq == index + 1
+    assert [m.seq for m in get_thread(store, thread.id, "project-a").messages] == [1, 2, 3]
+    with pytest.raises(KeyError):
+        get_thread(store, thread.id, "project-b")

@@ -8,7 +8,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from agentlab.core.budget import estimate_cents
+from agentlab.core.budget import BudgetExceeded, estimate_cents
 from agentlab.core.config import AppConfig
 from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted, call_with_retry
 from agentlab.core.ports import RunContext
@@ -108,10 +108,11 @@ class StructuredCaller:
         schema = output_type.model_json_schema()
         repairs = 0
         while repairs <= self._cfg.retry.structured_output_repair.max_repairs:
+            available_tools = ctx.tool_specs if tool_counter[0] < ctx.max_tool_calls else []
             prompt_chars = (
                 len(system.encode())
                 + len(json.dumps(schema).encode())
-                + len(json.dumps(ctx.tool_specs or []).encode())
+                + len(json.dumps(available_tools or []).encode())
                 + len(json.dumps(messages, ensure_ascii=False).encode())
                 + 256
             )
@@ -124,7 +125,9 @@ class StructuredCaller:
                     ctx.check_budget(estimate)
 
             async def attempt(
-                estimate: float = estimate, messages: tuple[dict[str, Any], ...] = tuple(messages)
+                estimate: float = estimate,
+                messages: tuple[dict[str, Any], ...] = tuple(messages),
+                available_tools: list[dict[str, Any]] | None = available_tools,
             ) -> Completion:
                 nonlocal usage
                 attempt_id = (
@@ -137,7 +140,7 @@ class StructuredCaller:
                                 "system": system,
                                 "messages": list(messages),
                                 "schema": schema,
-                                "tools": ctx.tool_specs or [],
+                                "tools": available_tools or [],
                                 "temperature": route.temperature,
                                 "max_output_tokens": alias_cfg.max_output_tokens,
                                 "output_token_parameter": alias_cfg.output_token_parameter,
@@ -156,7 +159,7 @@ class StructuredCaller:
                         schema=schema,
                         max_output_tokens=alias_cfg.max_output_tokens,
                         output_token_parameter=alias_cfg.output_token_parameter,
-                        **({"tools": ctx.tool_specs} if ctx.tool_specs else {}),
+                        **({"tools": available_tools} if available_tools else {}),
                         **({"on_delta": ctx.on_delta} if ctx.on_delta else {}),
                     )
                     charged = Usage(
@@ -204,14 +207,14 @@ class StructuredCaller:
 
             completion = await call_with_retry(attempt, self._cfg.retry.llm_call, log, check_attempt)
             if completion.tool_calls:
+                if not available_tools:
+                    raise LlmError("unexpected_tool_calls")
                 if not ctx.execute_tool:
                     raise LlmError("tools_unavailable")
                 messages.append(
                     {"role": "assistant", "content": completion.text or None, "tool_calls": completion.tool_calls}
                 )
                 for tool in completion.tool_calls:
-                    if tool_counter[0] >= ctx.max_tool_calls:
-                        raise LlmError("tool_call_limit")
                     ctx.check_budget(0)
                     tool_counter[0] += 1
                     function = tool["function"]
@@ -223,18 +226,33 @@ class StructuredCaller:
                     }
                     if ctx.record_tool:
                         ctx.record_tool({**entry, "status": "started"})
+                    value: Any
                     try:
                         args = json.loads(function["arguments"])
                         if not isinstance(args, dict):
                             raise ValueError("arguments must be an object")
-                        value = await ctx.execute_tool(function["name"], args)
-                    except (ValueError, KeyError, OSError) as exc:
+                        if tool_counter[0] > ctx.max_tool_calls:
+                            value = {
+                                "error": "tool_call_limit",
+                                "instruction": "Answer using information already collected.",
+                            }
+                        else:
+                            value = await ctx.execute_tool(function["name"], args)
+                    except BudgetExceeded:
+                        raise
+                    except Exception as exc:
                         if isinstance(exc, PermissionError) and role != "root":
                             if ctx.record_tool:
                                 ctx.record_tool({**entry, "status": "failed", "error": type(exc).__name__})
                             raise
                         value = {"error": type(exc).__name__}
                     result_text = json.dumps(value, ensure_ascii=False)
+                    if len(result_text.encode("utf-8")) > 16384:
+                        value = {
+                            "truncated": True,
+                            "preview": result_text.encode("utf-8")[:7000].decode("utf-8", errors="ignore"),
+                        }
+                        result_text = json.dumps(value, ensure_ascii=False)
                     if ctx.record_tool:
                         ctx.record_tool({**entry, "status": "completed", "result": value})
                     messages.append({"role": "tool", "tool_call_id": tool["id"], "content": result_text})

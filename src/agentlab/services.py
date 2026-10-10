@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from contextlib import nullcontext
+from contextvars import Context
 from dataclasses import dataclass
 from typing import Any
 
@@ -261,9 +262,19 @@ class MemoryHooks:
             "arbiter.decision",
             "approval.requested",
             "approval.decided",
-            "run.status",
         }:
             return
+        if event.type == "step.finished" and event.payload.get("role", event.actor) != "planner":
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._write_progress(event)
+        else:
+            # Run after the driver transaction closes, without its connection context.
+            loop.call_soon(self._write_progress, event, context=Context())
+
+    def _write_progress(self, event: Any) -> None:
         try:
             from agentlab.core.conversation import Message
             from agentlab.core.schemas import Event, EventType
@@ -279,7 +290,16 @@ class MemoryHooks:
             key = f"event:{event.run_id}:{event.seq}"
             if any(m.id == key for m in thread.messages):
                 return
-            text = f"{event.type}: {json.dumps(event.payload, ensure_ascii=False)}"[:20000]
+            p = event.payload
+            text = {
+                "step.finished": "计划已完成,准备执行实现。",
+                "gate.finished": "Gate 检查通过。"
+                if p.get("passed")
+                else f"Gate 检查未通过:{p.get('failed_at', '检查失败')}。",
+                "arbiter.decision": f"评审已完成,结论:{p.get('action', '待确认')}。",
+                "approval.requested": f"任务等待你的审批:{p.get('reason', '确认结果')}。",
+                "approval.decided": f"已收到审批决定:{p.get('decision', '已处理')}。",
+            }[event.type]
             payload = dict(event.payload)
             if event.type == "approval.requested":
                 approval = store.pending_approval(run.id)
@@ -343,15 +363,33 @@ class MemoryHooks:
                 text = "; ".join(f"{f.file}: {f.issue}" for f in hard[:5])
                 await self.knowledge.note(run.project_id, agent_ns(role), f"Flagged in run {run.id}: {text}", run.id)
 
+    async def on_waiting(self, run: Run) -> None:
+        await asyncio.sleep(0)  # Flush committed progress before the summary.
+        await self.summarize_run(run)
+
     async def on_finished(self, run: Run) -> None:
+        await asyncio.sleep(0)
         self.projects.complete_run(run)
+        await self.summarize_run(run)
+        outcome = "approved" if run.status == RunStatus.DONE else f"ended as {run.status}"
+        text = f"Run {run.id} '{run.goal}' {outcome}."
+        if not any(
+            i.source_run_id == run.id and i.text == text
+            for i in self.knowledge.memory.items_in(PROJECT, run.project_id)
+        ):
+            await self.knowledge.note(run.project_id, PROJECT, text, run.id)
+
+    async def summarize_run(self, run: Run) -> None:
         if run.thread_id and self.projects.store:
             from agentlab.core.conversation import Message
             from agentlab.core.session.store import append_message, get_thread
 
             store = self.projects.store
             thread = get_thread(store, run.thread_id, run.project_id)
-            if not any(m.kind == "summary" and m.run_id == run.id for m in thread.messages):
+            if not any(
+                m.kind == "summary" and m.run_id == run.id and m.payload.get("status") == run.status
+                for m in thread.messages
+            ):
                 gate_results = [e.payload for e in store.events(run.id) if e.type == "gate.finished"]
                 reply = (
                     f"Run {run.status}: {run.goal}. Iterations: {len(store.iterations(run.id))}; "
@@ -366,7 +404,7 @@ class MemoryHooks:
                         turn, _ = await SessionService(self.session_services).answer(
                             run.project_id,
                             run.thread_id,
-                            f"Summarize this completed run using run_status. Do not create a task: {run.id}",
+                            f"Summarize this run and approval state using run_status. Do not create a task: {run.id}",
                             summary=True,
                         )
                         reply, sources = turn.reply, turn.sources
@@ -376,7 +414,14 @@ class MemoryHooks:
                     store,
                     run.thread_id,
                     run.project_id,
-                    Message(author="assistant", kind="summary", text=reply[:20000], sources=sources, run_id=run.id),
+                    Message(
+                        author="assistant",
+                        kind="summary",
+                        text=reply[:20000],
+                        sources=sources,
+                        run_id=run.id,
+                        payload={"status": run.status},
+                    ),
                 )
                 if self.session_services:
                     from agentlab.core.schemas import Event, EventType
@@ -389,10 +434,3 @@ class MemoryHooks:
                             payload={"message": message.model_dump(mode="json")},
                         )
                     )
-        outcome = "approved" if run.status == RunStatus.DONE else f"ended as {run.status}"
-        text = f"Run {run.id} '{run.goal}' {outcome}."
-        if not any(
-            i.source_run_id == run.id and i.text == text
-            for i in self.knowledge.memory.items_in(PROJECT, run.project_id)
-        ):
-            await self.knowledge.note(run.project_id, PROJECT, text, run.id)

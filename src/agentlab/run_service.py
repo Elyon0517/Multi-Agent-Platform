@@ -40,16 +40,12 @@ async def create_run_service(svc: Services, body: CreateRun, *, record_user: boo
     conversation = None
     new_conversation = False
     if body.thread_id:
-        from agentlab.core.conversation import Conversation
+        from agentlab.core.session.store import get_thread
 
-        conversation = next(
-            (
-                Conversation.model_validate(t)
-                for t in svc.store.records("thread")
-                if t["id"] == body.thread_id and t["project_id"] == body.project_id
-            ),
-            None,
-        )
+        try:
+            conversation = get_thread(svc.store, body.thread_id, body.project_id)
+        except KeyError:
+            conversation = None
         if conversation is None:
             raise HTTPException(404, "conversation not found in this project")
         if len(conversation.messages) >= 998:
@@ -75,21 +71,24 @@ async def create_run_service(svc: Services, body: CreateRun, *, record_user: boo
     def record_conversation(run: Run) -> None:
         if not conversation:
             return
-        from agentlab.core.conversation import Conversation, Message
+        from agentlab.core.conversation import Message
+        from agentlab.core.schemas import Event, EventType
+        from agentlab.core.session.store import append_message
 
-        with svc.store.lock_run("thread:" + conversation.id):
-            latest = (
-                conversation
-                if new_conversation
-                else next(
-                    Conversation.model_validate(t) for t in svc.store.records("thread") if t["id"] == conversation.id
+        if new_conversation:
+            svc.store.put_record("thread", conversation.id, conversation.model_dump(mode="json"))
+        if record_user:
+            message = append_message(
+                svc.store, conversation.id, body.project_id, Message(author="user", text=body.goal, run_id=run.id)
+            )
+            svc.bus.publish(
+                Event(
+                    run_id="thread:" + conversation.id,
+                    type=EventType.MESSAGE_CREATED,
+                    actor="user",
+                    payload={"message": message.model_dump(mode="json")},
                 )
             )
-            if len(latest.messages) >= 998:
-                raise HTTPException(409, "conversation is full; start a new conversation")
-            if record_user:
-                latest.messages.append(Message(author="user", text=body.goal, run_id=run.id))
-            svc.store.put_record("thread", latest.id, latest.model_dump(mode="json"))
 
     try:
         await driver.workspace.ensure_repo()  # type: ignore[attr-defined]

@@ -524,7 +524,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
-| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；ADK、工具白名单、危险操作卡点未做 |
+| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
 | P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；缺 Gate 诊断表、openapi 类型 |
 | P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；pgvector 索引、summarizer、完整记忆导入导出未做 |
@@ -606,8 +606,8 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | CLI 审批 / resume | status / show / resume / decide 已实现 | 已完成 |
 | supervisor（root）角色 | 项目 auto 模式调用并持久化 Dispatch；角色模型与任务经过确定性校验，非法分配需人类填写反馈后 reject 重生成，phase 顺序仍由 Driver 执行 | 已接线 |
 | summarizer 角色 | 配置有，Driver 尚未调用；现在的 project/agent 记忆由确定性规则写入 | P6 |
-| 工具白名单 `tool_grants` | 已配置，未强制执行（当前 agent 无工具调用） | P3 |
-| 危险操作卡点 `dangerous_ops_require_approval` | 已配置，未强制执行 | P3 |
+| 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
+| 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；网络 / Git 危险操作仍待接入 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
 | Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言尚未建镜像 | P5 |
 | Gate 诊断表、成本看板 | UI 未做 | P4 |
