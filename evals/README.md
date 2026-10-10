@@ -34,3 +34,16 @@ under `data_dir/eval-results/<id>`. Records include `stopped_reason`, `changed_f
 and the initial Gate result, and survive disposable workspace cleanup.
 
 Results are generated locally; do not commit machine-specific transcripts or credentials.
+
+Each repair task and conversation case has a **600-second total deadline**, covering
+fixture preflight, model calls/retries, tools, Gate and review. Override it with
+`agentlab eval --task-timeout 120`. A deadline produces a failed `timeout` card,
+then evaluation continues to the next case. Per-case JSON preserves `run_state`
+and `last_event` (including an in-progress `step.tool_call`), or null when no run
+has been created. Final diff capture has a separate 5-second bound. Cancellation
+kills local subprocess groups and removes the named Docker container; Docker
+cleanup allows up to 30 seconds plus bounded process cleanup.
+
+Fake runs use the host venv's mypy/ruff/pytest; raw runs use the Gate image's pinned
+versions. If only raw fails, compare those versions before attributing it to a
+model regression.

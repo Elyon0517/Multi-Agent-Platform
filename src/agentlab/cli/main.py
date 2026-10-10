@@ -302,11 +302,14 @@ def evaluate_baseline(
     manifest: Annotated[Path, typer.Option()] = Path("evals/baseline.json"),
     runtime: Annotated[str, typer.Option(help="fake | raw")] = "fake",
     output: Annotated[Path | None, typer.Option()] = None,
+    task_timeout: Annotated[
+        float, typer.Option(min=0.001, help="Total seconds allowed per task, including Gate")
+    ] = 600,
 ) -> None:
     """Run fixed regression tasks and root conversations; emit CI-compatible scorecards."""
     from agentlab.evaluation.baseline import evaluate
 
-    result = asyncio.run(evaluate(manifest, runtime))
+    result = asyncio.run(evaluate(manifest, runtime, task_timeout_s=task_timeout))
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)

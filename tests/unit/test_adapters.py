@@ -61,3 +61,57 @@ async def test_docker_timeout_removes_the_container(monkeypatch, tmp_path) -> No
     name = commands[0][commands[0].index("--name") + 1]
     assert result.timed_out
     assert commands[1] == ["docker", "rm", "--force", name]
+
+
+async def test_docker_cancellation_removes_container(monkeypatch, tmp_path):  # type: ignore[no-untyped-def]
+    import asyncio
+
+    import pytest
+
+    from agentlab.core.ports import ExecResult
+
+    commands = []
+
+    async def execute(argv, cwd, timeout_s, env):  # type: ignore[no-untyped-def]
+        commands.append(argv)
+        if len(commands) == 1:
+            raise asyncio.CancelledError
+        return ExecResult(0, "", "", 0)
+
+    monkeypatch.setattr("agentlab.adapters.sandbox.docker.run_argv", execute)
+    with pytest.raises(asyncio.CancelledError):
+        await DockerSandbox("image").exec(["pytest"], tmp_path, 60)
+    name = commands[0][commands[0].index("--name") + 1]
+    assert commands[1] == ["docker", "rm", "--force", name]
+
+
+async def test_local_cancellation_kills_descendants(tmp_path):  # type: ignore[no-untyped-def]
+    import asyncio
+    import os
+    import sys
+
+    import pytest
+
+    from agentlab.adapters.sandbox.local import run_argv
+
+    script = """import subprocess,sys,pathlib,time
+p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])
+pathlib.Path('child.pid').write_text(str(p.pid))
+time.sleep(60)
+"""
+    task = asyncio.create_task(run_argv([sys.executable, "-c", script], tmp_path, 60, scrubbed_env()))
+    async with asyncio.timeout(5):
+        while not (tmp_path / "child.pid").exists():
+            await asyncio.sleep(0.01)
+    child_pid = int((tmp_path / "child.pid").read_text())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 6)
+    # Allow the OS to reap the killed child.
+    async with asyncio.timeout(5):
+        while True:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.01)

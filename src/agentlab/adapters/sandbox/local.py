@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from agentlab.core.ports import ExecResult
@@ -20,17 +22,34 @@ async def run_argv(argv: list[str], cwd: Path | None, timeout_s: float, env: dic
     started = time.monotonic()
     try:
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *argv,
+            cwd=cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
     except FileNotFoundError as e:
         return ExecResult(127, "", str(e), int((time.monotonic() - started) * 1000))
+
+    async def terminate() -> tuple[bytes, bytes]:
+        # Kill descendants too: a child holding a pipe open must not stall cleanup.
+        with suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        try:
+            return await asyncio.wait_for(proc.communicate(), 5)
+        except TimeoutError:
+            return b"", b"Process cleanup exceeded 5s"
+
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout_s)
         timed_out = False
     except TimeoutError:
-        proc.kill()
-        out, err = await proc.communicate()
+        out, err = await terminate()
         timed_out = True
+    except asyncio.CancelledError:
+        await terminate()
+        raise
     return ExecResult(
         exit_code=124 if timed_out else (proc.returncode or 0),
         stdout=out.decode(errors="replace"),
