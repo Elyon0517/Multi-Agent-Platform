@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import difflib
+import hashlib
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from agentlab.adapters.sandbox.local import run_argv, scrubbed_env
@@ -18,8 +20,9 @@ class GitWorkspace:
     def __init__(self, root: Path, secrets: tuple[str, ...] = ()) -> None:
         self.root = root.resolve()
         self._secrets = secrets
-        self._baseline: dict[str, str] = {}
-        self._excluded: set[str] = set()
+        self._baseline_tree: str | None = None
+        self._baseline_meta: dict[str, tuple[str, str]] = {}
+        self._edited_paths: set[str] = set()
 
     def _resolve(self, rel: str) -> Path:
         path = (self.root / rel).resolve()
@@ -37,31 +40,52 @@ class GitWorkspace:
             "id_rsa", "id_ed25519", "node_modules", "__pycache__"
         } for part in parts) or Path(rel.casefold()).suffix in {".pem", ".key"}
 
-    def _snapshot(self) -> dict[str, str]:
-        result = subprocess.run(["git", "-C", str(self.root), "ls-files", "-z", "--cached", "--others",
-                                 "--exclude-standard"], capture_output=True, check=True, env=scrubbed_env(), timeout=30)
-        snapshot = {}
-        excluded: set[str] = set()
-        for rel in sorted(set(result.stdout.decode().split("\0"))):
-            if not rel or self._sensitive(rel) or (self.root / rel).is_symlink():
-                excluded.add(rel)
+    def _git_bytes(self, *args: str, data: bytes | None = None,
+                   env: dict[str, str] | None = None) -> bytes:
+        result = subprocess.run(["git", "-C", str(self.root), *args], input=data,
+                                capture_output=True, check=True, env=env or scrubbed_env(), timeout=30)
+        return result.stdout
+
+    def _snapshot(self) -> tuple[str, dict[str, tuple[str, str]]]:
+        """Capture working files in an isolated index; never alter the user's index."""
+        paths = self._git_bytes("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        names = set(os.fsdecode(paths).split("\0")) | self._edited_paths
+        entries: list[bytes] = []
+        metadata: dict[str, tuple[str, str]] = {}
+        for rel in sorted(names):
+            if not rel or self._sensitive(rel):
                 continue
-            try:
+            candidate = self.root / rel
+            if candidate.is_symlink():
+                data = os.fsencode(os.readlink(candidate))
+                mode, kind = "120000", "symlink"
+            else:
                 path = self._resolve(rel)
+                if not path.exists():
+                    continue  # A real deletion, unlike a filtered or unreadable file.
                 if not path.is_file():
-                    continue
-                if path.stat().st_size > 100_000:
-                    excluded.add(rel)
-                    continue
-                text = path.read_text()
-                if "\0" not in text and not self._secret_text(text):
-                    snapshot[rel] = text
-                else:
-                    excluded.add(rel)
-            except (OSError, UnicodeError, WorkspaceEscape):
-                excluded.add(rel)
-        self._excluded = excluded
-        return snapshot
+                    raise ValueError("unsupported workspace entry")
+                data = path.read_bytes()  # Fail closed on unreadable files.
+                mode = "100755" if path.stat().st_mode & 0o111 else "100644"
+                try:
+                    data.decode("utf-8")
+                    binary = b"\0" in data
+                except UnicodeError:
+                    binary = True
+                kind = "binary" if binary else "oversize" if len(data) > 100_000 else "text"
+            if self._secret_text(data.decode("utf-8", errors="replace")):
+                kind = "redacted-secret"
+                # Never write detected secret contents into Git objects, even temporarily.
+                data = ("[redacted secret content sha256=" + hashlib.sha256(data).hexdigest() + "]\n").encode()
+            oid = self._git_bytes("hash-object", "-w", "--stdin", data=data).decode().strip()
+            entries.append(f"{mode} {oid}\t".encode() + os.fsencode(rel) + b"\0")
+            metadata[rel] = (oid, kind)
+        with tempfile.TemporaryDirectory(prefix="agentlab-index-") as directory:
+            env = {**scrubbed_env(), "GIT_INDEX_FILE": str(Path(directory) / "index")}
+            self._git_bytes("read-tree", "--empty", env=env)
+            self._git_bytes("update-index", "-z", "--index-info", data=b"".join(entries), env=env)
+            tree = self._git_bytes("write-tree", env=env).decode().strip()
+        return tree, metadata
 
     def _secret_text(self, text: str) -> bool:
         known_secret = any(secret in text for secret in self._secrets if secret)
@@ -69,8 +93,7 @@ class GitWorkspace:
         return known_secret or bool(re.search(pattern, text))
 
     def begin_run(self) -> None:
-        self._baseline = self._snapshot()
-        self._baseline_excluded = self._excluded.copy()
+        self._baseline_tree, self._baseline_meta = self._snapshot()
 
     def read(self, path: str) -> str:
         return self._resolve(path).read_text()
@@ -84,6 +107,7 @@ class GitWorkspace:
         for path, edit in targets:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit.content)
+        self._edited_paths.update(e.path for _, e in targets)
         return [e.path for _, e in targets]
 
     async def _git(self, *args: str) -> str:
@@ -126,19 +150,33 @@ class GitWorkspace:
     async def ensure_repo(self) -> None:
         if not (self.root / ".git").exists():
             await self._git("init", "-q")
-            paths = list(await asyncio.to_thread(self._snapshot))
-            if paths:
-                await self._git("add", "--", *paths)
             await self._git("-c", "user.name=agentlab", "-c", "user.email=agentlab@local",
                             "commit", "-q", "--allow-empty", "-m", "agentlab baseline")
 
+    def _diff(self) -> str:
+        current, metadata = self._snapshot()
+        baseline = self._baseline_tree or self._git_bytes("mktree", data=b"").decode().strip()
+        changed = os.fsdecode(self._git_bytes("diff", "--name-only", "-z", "--no-renames",
+                                             baseline, current)).split("\0")
+        parts: list[str] = []
+        for path in changed:
+            if not path:
+                continue
+            old_oid, old_kind = self._baseline_meta.get(path, ("absent", "text"))
+            new_oid, new_kind = metadata.get(path, ("absent", "text"))
+            if old_kind == new_kind == "text":
+                parts.append(self._git_bytes("diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+                                             baseline, current, "--", ":(literal)" + path).decode())
+            else:
+                parts.append(f"diff --git a/{path} b/{path}\nchanged ({old_kind} -> {new_kind})\n"
+                             f"old blob {old_oid}\nnew blob {new_oid}\n")
+                parts.append(self._git_bytes("diff", "--raw", "--no-ext-diff", "--no-textconv", "--no-renames",
+                                             baseline, current, "--", ":(literal)" + path).decode())
+                # A formerly large/binary file rewritten as source must show its actual new contents.
+                if new_kind == "text" and new_oid != "absent":
+                    text = self._git_bytes("cat-file", "blob", new_oid).decode()
+                    parts.append("Current file contents (baseline body omitted):\n" + text + "\n")
+        return "".join(parts)
+
     async def diff(self) -> str:
-        current = await asyncio.to_thread(self._snapshot)
-        excluded = self._excluded | getattr(self, "_baseline_excluded", set())
-        return "".join(
-            "".join(difflib.unified_diff(self._baseline.get(path, "").splitlines(keepends=True),
-                                       current.get(path, "").splitlines(keepends=True),
-                                       fromfile=f"a/{path}", tofile=f"b/{path}"))
-            for path in sorted(self._baseline.keys() | current.keys())
-            if path not in excluded and self._baseline.get(path) != current.get(path)
-        )
+        return await asyncio.to_thread(self._diff)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -69,6 +70,7 @@ class Driver:
         self.runtime_factory: Callable[[], AgentRuntime] | None = None
         self.hooks: RunHooks = hooks or NoHooks()
         self._finished: set[str] = set()
+        self._agent_inputs: dict[tuple[str, str, int, str], dict[str, AgentInput]] = {}
         self._completed_agents: dict[tuple[str, str, int, str], AgentResult[Any]] = {}
         self._handlers: dict[S, Callable[[Run], Awaitable[None]]] = {
             S.PLANNING: self._planning, S.CODING: self._coding, S.GATING: self._gating,
@@ -77,6 +79,13 @@ class Driver:
 
     def create(self, goal: str, **overrides: Any) -> Run:
         self.workspace.begin_run()
+        return self._create(goal, **overrides)
+
+    async def create_async(self, goal: str, **overrides: Any) -> Run:
+        await asyncio.to_thread(self.workspace.begin_run)
+        return self._create(goal, **overrides)
+
+    def _create(self, goal: str, **overrides: Any) -> Run:
         defaults = {"max_iter": self.cfg.budget.loop.max_iter,
                     "budget_cents": self.cfg.budget.default_run_budget_cents}
         run = Run(goal=goal, workspace=str(self.workspace.root), **{**defaults, **overrides})
@@ -102,6 +111,7 @@ class Driver:
             self.store.save_run(run)
         if run.status in TERMINAL and run.id not in self._finished:
             self._finished.add(run.id)
+            self._clear_agent_cache(run.id)
             try:
                 await self.hooks.on_finished(run)
             except Exception:  # post-run bookkeeping must not change the outcome
@@ -151,6 +161,8 @@ class Driver:
             if decision == "reject" or feedback:
                 self._save_artifact(run, "feedback", feedback or "rejected without feedback", "human")
             run.iteration_base = len(self.store.iterations(run_id))
+        if decision in {"reject", "abort"}:
+            self._clear_agent_cache(run.id)
         run.paused_reason = None
         self._emit(run, EventType.APPROVAL_DECIDED, actor=by, decision=decision, feedback=feedback)
         self._advance(run, status_by_decision[decision])
@@ -251,12 +263,18 @@ class Driver:
                          reserve_budget=guard.reserve, release_budget=guard.release)
         for role in roles:
             self._emit(run, EventType.STEP_STARTED, actor=role, role=role, iteration=inp.iteration)
-        files = await self.workspace.context_files()
-        inputs = {r: inp.model_copy(update={"context": {**inp.context, "files": files,
-                                                       **await self._context(run, r, inp)}}) for r in roles}
+        batch_hash = hashlib.sha256(inp.model_dump_json(exclude={"context"}).encode()).hexdigest()
+        batch_key = (run.id, run.status.value, inp.iteration, batch_hash)
+        if batch_key not in self._agent_inputs:
+            files = await self.workspace.context_files()
+            self._agent_inputs[batch_key] = {
+                r: inp.model_copy(update={"context": {**inp.context, "files": files,
+                                                      **await self._context(run, r, inp)}}) for r in roles
+            }
+        inputs = self._agent_inputs[batch_key]
+
         def cache_key(role: str) -> tuple[str, str, int, str]:
-            return (run.id, run.status.value, inp.iteration,
-                    role + hashlib.sha256(inputs[role].model_dump_json().encode()).hexdigest())
+            return (run.id, run.status.value, inp.iteration, role + batch_hash)
 
         pending = {r: inputs[r] for r in roles if cache_key(r) not in self._completed_agents}
         estimates = {
@@ -301,7 +319,12 @@ class Driver:
             raise failure
         # Deliver paid outputs even if actual usage exceeded the estimate.
         # The next stage checks its entire batch before making any paid calls.
+        self._agent_inputs.pop(batch_key, None)
         return [self._completed_agents.pop(cache_key(r)) for r in roles]
+
+    def _clear_agent_cache(self, run_id: str) -> None:
+        self._completed_agents = {k: v for k, v in self._completed_agents.items() if k[0] != run_id}
+        self._agent_inputs = {k: v for k, v in self._agent_inputs.items() if k[0] != run_id}
 
     def _input(self, run: Run, **extra: Any) -> AgentInput:
         plan = self._latest_text(run, "plan")

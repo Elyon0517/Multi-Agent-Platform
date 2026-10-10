@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Generic, Literal, TypeVar
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def new_id() -> str:
@@ -57,6 +58,18 @@ class Finding(Strict):
                      "change-interface", "preserve-interface", "add-test", "remove-test",
                      "change-algorithm", "preserve-algorithm"] = ""
     stance: Literal["require", "forbid"] | None = None
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def normalize_subject(cls, value: object) -> str:
+        allowed = {"", "add-validation", "remove-validation", "add-lock", "remove-lock",
+                   "change-interface", "preserve-interface", "add-test", "remove-test",
+                   "change-algorithm", "preserve-algorithm"}
+        normalized = value.strip().casefold() if isinstance(value, str) else ""
+        if normalized not in allowed or not isinstance(value, str):
+            logging.getLogger(__name__).warning("unknown finding subject normalized to empty")
+            return ""
+        return normalized
 
     def fingerprint(self) -> str:
         key = f"{self.file}|{self.category}|{self.severity}|{normalize_text(self.issue)}"

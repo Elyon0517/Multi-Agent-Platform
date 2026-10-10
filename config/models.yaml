@@ -9,6 +9,9 @@ gateway:
 aliases:
   root:
     model: gpt-6-astra
+    # Budget reservation estimates; actual returned usage remains authoritative.
+    estimate_input_tokens_per_byte: 0.5
+    estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
     output_token_parameter: max_tokens
     supports_tools: true
@@ -18,6 +21,9 @@ aliases:
     cost_out_per_1m_cents: 2000
   strong:
     model: gpt-6-astra
+    # Budget reservation estimates; actual returned usage remains authoritative.
+    estimate_input_tokens_per_byte: 0.5
+    estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
     output_token_parameter: max_tokens
     supports_tools: true
@@ -27,6 +33,9 @@ aliases:
     cost_out_per_1m_cents: 2000
   strong-alt:
     model: gpt-6-astra
+    # Budget reservation estimates; actual returned usage remains authoritative.
+    estimate_input_tokens_per_byte: 0.5
+    estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
     output_token_parameter: max_tokens
     supports_tools: true
@@ -36,6 +45,9 @@ aliases:
     cost_out_per_1m_cents: 2000
   cheap:
     model: gpt-6-astra
+    # Budget reservation estimates; actual returned usage remains authoritative.
+    estimate_input_tokens_per_byte: 0.5
+    estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
     output_token_parameter: max_tokens
     supports_tools: true

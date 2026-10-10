@@ -171,7 +171,7 @@ async def test_invalid_json_usage_is_charged_even_after_repair_exhaustion(cfg): 
 
 
 async def test_parallel_budget_reservations_and_completed_usage_survive_failure(cfg):  # type: ignore[no-untyped-def]
-    run = Run(goal="g", workspace=".", budget_cents=40)
+    run = Run(goal="g", workspace=".", budget_cents=22)
     guard = BudgetGuard(run, .8, lambda _: None)
     ctx = RunContext(run, guard.check, guard.record, guard.reserve, guard.release)
     async def concurrent_chat(**kwargs):  # type: ignore[no-untyped-def]

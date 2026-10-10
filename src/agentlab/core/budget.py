@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from math import ceil
 
 from agentlab.core.config import AliasCfg
 from agentlab.core.schemas import Run, Usage
-
-BYTES_PER_TOKEN = 1
 
 
 class BudgetExceeded(RuntimeError):
@@ -15,8 +14,9 @@ class BudgetExceeded(RuntimeError):
 
 
 def estimate_cents(alias: AliasCfg, prompt_bytes: int, max_out_tokens: int | None = None) -> float:
-    return alias.cost_cents(prompt_bytes // BYTES_PER_TOKEN,
-                            max_out_tokens if max_out_tokens is not None else alias.max_output_tokens)
+    output_cap = max_out_tokens if max_out_tokens is not None else alias.max_output_tokens
+    return alias.cost_cents(ceil(prompt_bytes * alias.estimate_input_tokens_per_byte),
+                            ceil(output_cap * alias.estimate_output_token_ratio))
 
 
 class BudgetGuard:

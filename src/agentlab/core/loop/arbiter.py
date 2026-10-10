@@ -28,7 +28,7 @@ def dedupe_and_rank(findings: list[Finding]) -> list[Finding]:
 
 def detect_contradictions(findings: list[Finding]) -> list[Conflict]:
     # Only opposing, explicitly identified requirements constitute a contradiction.
-    groups: dict[tuple[str, int | None, str], list[Finding]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[Finding]] = defaultdict(list)
     inverses = {"remove-validation": "add-validation", "remove-lock": "add-lock",
                 "preserve-interface": "change-interface", "remove-test": "add-test",
                 "preserve-algorithm": "change-algorithm"}
@@ -40,11 +40,11 @@ def detect_contradictions(findings: list[Finding]) -> list[Conflict]:
                     "subject": inverses[subject],
                     "stance": "forbid" if finding.stance == "require" else "require",
                 })
-            groups[(finding.file, finding.line, finding.subject)].append(finding)
+            groups[(finding.file, finding.subject)].append(finding)
     conflicts = []
-    for (file, line, _), group in groups.items():
+    for (file, _), group in groups.items():
         if any(a.reviewer_id != b.reviewer_id and a.stance != b.stance for a in group for b in group):
-            conflicts.append(Conflict(file=file, line=line, findings=group))
+            conflicts.append(Conflict(file=file, line=None, findings=group))
     return conflicts
 
 

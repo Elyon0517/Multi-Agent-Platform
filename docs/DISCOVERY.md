@@ -1,6 +1,6 @@
 # Agent Converge Discovery
 
-> 状态：v1.3 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
+> 状态：v1.4 · P0 完成 + 用户便利功能 / 记忆 / munder 补全，P1 真实 Python 闭环验证完成，下一步 P2 · 可持续更新
 > 最近更新：2026-10-09
 > 仓库名称：`agent-converge`（Agent Converge）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -83,7 +83,7 @@ Task → Planner → Coder → [客观 Gate] → [LLM 评审团] → Arbiter →
 ```
 
 1. **客观 Gate 前置**：build / typecheck / lint / test / diff 合法性先跑，失败退回 Coder，不消耗 reviewer token。
-2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。
+2. **Reviewer 看 diff，不看 Coder 自述**：输入 = 原始需求 + Planner 验收标准 + 实际 `git diff` + Gate 输出 + 相关文件上下文。baseline/current 使用临时 index 的 `git write-tree` 捕获工作区，保留用户 index。大文件、二进制和脱敏内容显示 Git 改动元数据；大文件变为短源码时同时展示当前完整内容，不能因上下文过滤而变成空 diff。
 3. **结构化评审 + severity 阈值**：`blocking + major == 0` 即 signoff；minor / nit 只记录。
 4. **四个终止条件**：
 
@@ -147,7 +147,7 @@ Gate 分两档：`fast`（每轮）/ `full`（进入 WAITING_HUMAN 前一次）�
 三条硬规则：
 1. Reviewer 之间互相不可见（并行、独立调用）。
 2. 不投票：任一 reviewer 报 `blocking` 且 `confidence > 0.7` → 直接退回 Coder。
-3. Arbiter 不自行裁决真冲突：两 reviewer 的 hard finding 对同一固定动作 subject 提出 require / forbid 相反要求 → 打包双方论点升级给人；同一行的不同问题或不同严重程度不算矛盾。
+3. Arbiter 不自行裁决真冲突：两 reviewer 的 hard finding 对同一 `(file, subject)` 固定动作提出 require / forbid 相反要求（不要求行号一致） → 打包双方论点升级给人；同一行的不同问题或不同严重程度不算矛盾。
 
 Arbiter 做：去重合并、按 severity×confidence 排序、生成结构化修复指令、检测矛盾。不做：判断谁对、忽略低 confidence 的 blocking、自行降级 severity、为收敛强行拍板。**Arbiter 是确定性代码**（`core/loop/arbiter.py`），LLM 仅可选用于生成修复指令的自然语言措辞。
 
@@ -221,6 +221,8 @@ embedding 走同一网关（若支持），默认 `text-embedding-3-large`；`me
 1. LiteLLM virtual key（每 project 一把）—— `max_budget` / `rpm_limit` / 模型白名单（S2 起）。
 2. 应用层熔断中间件（ADK `before_model_callback` / raw runtime 调用前）—— 估算成本，超 run 预算直接短路，run 置 `WAITING_HUMAN`。
 3. per-run 软预算 —— `run.budget_cents`，80% 告警，实际 usage 达到预算后，在下一批付费调用前暂停；已返回的成功结果先保存。
+
+估算系数由 `models.yaml` 每个别名控制：`estimate_input_tokens_per_byte`（输入 UTF-8 字节到 token 的系数）与 `estimate_output_token_ratio`（输出 token 上限的预留比例）。当前均为 0.5；实际 usage 按完整账单计费，不乘估算系数。缺省均为 1.0，便于选择保守模式。可用预算约为总预算减去下一批调用的预估；80,000 字节 prompt、16384 输出上限及当前价格下，每 reviewer 预估 36.384c，三人共 109.152c。系数为估算策略，不保证网关结算硬上限。
 
 明确不做：用"检查 agent"判断要不要熔断。
 
@@ -509,7 +511,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - reviewer 迭代号与实际 iteration 对齐；finding 身份由 runtime 强制覆盖；矛盾检测依赖明确 subject / stance，BLOCK 无 hard finding 升级为不一致。
 - usage 逐 attempt 记账，JSON 修复耗尽仍保留费用；并行等待所有结果并保留完成 step；预算采用共享预留。
 - project-planner 使用同一预算守卫，规划账目见 `/project-planning`；失败不发布空 project。账目目前仍为内存，P2 才持久化。
-- diff 相对 run 起始文本快照计算，不修改 Git index，过滤秘密文件/已识别密钥文本，排除开始前的用户改动。同一 workspace 的并发用户修改仍需 worktree 隔离（§16.4）。
+- diff 使用 run 起始/current 临时 Git index/tree 对比，不修改用户 index，排除秘密路径并将已识别密钥内容替换为可见脱敏标记；大文件/二进制改动显示 metadata，排除开始前的用户改动。同一 workspace 的并发用户修改仍需 worktree 隔离（§16.4）。
 - memory 使用退役与 superseded_by 保留旧版本；chunk 严守长度上限；模型 schema 使用合法 JSON。
 - SQL 增补 project.goal/phases、global nullable project_id、memory document/note/source；兼容迁移 0002 已在本地数据库应用。
 - 上一批验收：后端 99 项、前端 17 项；类型、lint 与构建通过。修复后真实模型 smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
@@ -703,11 +705,18 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 ### 可靠性复核补充（2026-10-09）
 
 - workspace 路径对原始路径和 resolve 后路径 casefold，禁止大小写别名写入 `.env*` / `.git` 等保留路径；密钥后缀精确匹配 `.pem` / `.key`，普通 private/secret 文件名允许编辑。
-- 快照区分不存在与被过滤：基线或当前被过滤的文件不生成删除 diff。Git 快照有 30 秒超时；异步 diff、初始化和 API 创建快照移到工作线程。
-- 成功输出即使实际费用超估算也交给 handler；下一批调用按完整预估预检，输入按 UTF-8 字节保守估算。部分 reviewer 成功结果缓存并只重跑缺失项，不重复记账；缓存仍随内存运行态，重启恢复由 P2 实现。
+- 临时 index/tree 由 Git 捕获实际文件，不以文本上下文筛选结果决定 diff。大文件/二进制/脱敏内容保留改动标记与 Git metadata；文件读取失败直接暂停，不伪装成删除或未变。Git 操作有 30 秒超时；异步 diff 和 API baseline 捕获在工作线程，事件发布留在事件循环。
+- 成功输出即使实际费用超估算也交给 handler；下一批调用按完整预估预检，输入与输出按每个模型别名的可配置系数估算。reviewer batch 的输入（含记忆）冻结；部分成功结果缓存并只重跑缺失项，不重复记账；缓存仍随内存运行态，重启恢复由 P2 实现。
 - 项目规划成功但实际超预算时保留 plan，`/project-planning` 账目记录 `budget_overrun`；调用前仍检查预算。价格和 token 预估不等于网关结算保证。
-- minor/nit 不参与冲突判断。subject 为 schema 中固定动作词表，仅对明确相同动作的相反 stance 升级；未识别的矛盾不声称自动语义识别。reviewer_conflict / inconsistent_verdict 批准须提供反馈。
+- minor/nit 不参与冲突判断。subject 采用固定动作词表，词表外值确定性归一为 "" 并记脱敏日志，不导致整个 Verdict 校验失败；仅对同一 file/subject 的相反 stance 升级；未识别的矛盾不声称自动语义识别。reviewer_conflict / inconsistent_verdict 批准须提供反馈。
 - 模型别名可配置 `max_output_tokens`（当前 16384）和 `output_token_parameter`（`max_tokens` 或 `max_completion_tokens`）。大文件完整替换需按网关能力提高输出上限与预算；100KB 是文件写入上限，并不保证所有模型一次能够输出。finish_reason=length 明确暂停并记账，不回灌截断 JSON 重试。
 - reviewer 子调用取消会作为 agent_cancelled 暂停并保留其他结果，不可将部分 verdict 当成完整评审；外层任务取消仍传播取消信号。
 
-本次复核验收：后端 120 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
+上一轮复核验收：后端 120 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。
+
+
+### Git 评审完整性复核（2026-10-09）
+
+已替换文本快照拼接；新增大文件缩小、二进制/大文件变更与删除、mode 变化、ignored Coder 文件、用户 staged index 保留、密钥不落入新 Git blob、跨行冲突、未知 subject、可配置估算、事件线程与缓存冻结/清理的回归用例。reject/abort/终止会清理 run 的缓存；已成功交付的 batch 立即释放输入快照。Git baseline tree ID 与 batch 仍需 P2 持久化才能跨重启恢复。
+
+当前验收：后端 132 项、前端 17 项，ruff / mypy / UI build 通过；真实模型 Docker smoke 1/1，一轮 signoff，原测试未改且 FULL Gate 通过。

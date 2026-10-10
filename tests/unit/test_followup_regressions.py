@@ -37,14 +37,19 @@ async def test_normal_source_names_remain_editable_and_reviewable(tmp_path):  # 
     assert all(p in files for p in paths)
 
 
-@pytest.mark.parametrize("content", ["x" * 100_001, "sk-" + "a" * 25, "\0binary"])
+@pytest.mark.parametrize("content", ["x" * 100_001, "sk-" + "a" * 25, "\0binary"],
+                         ids=["oversize", "secret", "binary"])
 async def test_filtered_current_file_is_not_reported_as_deleted(tmp_path, content):  # type: ignore[no-untyped-def]
     (tmp_path / "file.py").write_text("value = 1\n")
     ws = GitWorkspace(tmp_path)
     await ws.ensure_repo()
     ws.begin_run()
     (tmp_path / "file.py").write_text(content)
-    assert await ws.diff() == ""
+    diff = await ws.diff()
+    assert "file.py" in diff and "changed (" in diff
+    assert "deleted file mode" not in diff
+    if content.startswith("sk-"):
+        assert content not in diff
 
 
 def test_opposing_soft_comments_do_not_block_signoff():
