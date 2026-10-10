@@ -54,11 +54,35 @@ class Services:
     def gateway(self) -> tuple[str | None, str | None]:
         return gateway_creds(self.env, self.settings)
 
+    def anthropic_gateway(self, cfg: AppConfig | None = None) -> tuple[str | None, str | None]:
+        gateway = (cfg or self.cfg).models.providers.get("anthropic")
+        values = self.env.read()
+        return (
+            values.get(gateway.base_url_env if gateway else "AGENTLAB_ANTHROPIC_BASE_URL")
+            or self.settings.anthropic_base_url,
+            values.get(gateway.api_key_env if gateway else "AGENTLAB_ANTHROPIC_API_KEY")
+            or self.settings.anthropic_api_key,
+        )
+
+    def workspace_secrets(self) -> tuple[str, ...]:
+        return tuple(
+            v
+            for v in (self.gateway()[1], self.anthropic_gateway()[1], self.env.read().get("AGENTLAB_EMBEDDING_API_KEY"))
+            if v
+        )
+
     def setting_views(self) -> list[SettingView]:
         url, key = self.gateway()
-        return views({"AGENTLAB_LLM_BASE_URL": url, "AGENTLAB_LLM_API_KEY": key,
-                      "AGENTLAB_EMBEDDING_BASE_URL": self.env.read().get("AGENTLAB_EMBEDDING_BASE_URL"),
-                      "AGENTLAB_EMBEDDING_API_KEY": self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")})
+        return views(
+            {
+                "AGENTLAB_LLM_BASE_URL": url,
+                "AGENTLAB_LLM_API_KEY": key,
+                "AGENTLAB_EMBEDDING_BASE_URL": self.env.read().get("AGENTLAB_EMBEDDING_BASE_URL"),
+                "AGENTLAB_EMBEDDING_API_KEY": self.env.read().get("AGENTLAB_EMBEDDING_API_KEY"),
+                "AGENTLAB_ANTHROPIC_BASE_URL": self.anthropic_gateway()[0],
+                "AGENTLAB_ANTHROPIC_API_KEY": self.anthropic_gateway()[1],
+            }
+        )
 
     def runtime(self, name: str | None = None, cfg: AppConfig | None = None) -> AgentRuntime:
         cfg = cfg or self.cfg
@@ -76,7 +100,7 @@ class Services:
             return AdkRuntime(cfg, url, key)
         from agentlab.adapters.runtime.raw import RawRuntime
 
-        return RawRuntime(cfg, url, key)
+        return RawRuntime(cfg, url, key, self.anthropic_gateway(cfg))
 
     def sandbox(self) -> Sandbox:
         if self.settings.sandbox == "docker":
@@ -96,10 +120,9 @@ class Services:
             from agentlab.core.project_config import project_config
 
             cfg = project_config(cfg, project.settings)
-        key = self.gateway()[1]
         ws = GitWorkspace(
             workspace,
-            secrets=tuple(v for v in (key, self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")) if v),
+            secrets=self.workspace_secrets(),
             snapshot_dir=self.settings.data_dir.resolve() / "snapshots" / uuid4().hex,
         )
         if (runtime or self.settings.runtime) == "fake":
@@ -125,11 +148,8 @@ class Services:
             raise ValueError("run has no recovery checkpoint")
         cfg = AppConfig.model_validate(data["config"])
         options = data["options"]
-        key = self.gateway()[1]
         workspace = GitWorkspace(
-            Path(run.workspace),
-            secrets=tuple(v for v in (key, self.env.read().get("AGENTLAB_EMBEDDING_API_KEY")) if v),
-            snapshot_dir=Path(data["workspace"]["snapshot_dir"])
+            Path(run.workspace), secrets=self.workspace_secrets(), snapshot_dir=Path(data["workspace"]["snapshot_dir"])
         )
         if run.status not in {"DONE", "CANCELLED"}:
             workspace.restore_state(data["workspace"])
@@ -148,7 +168,7 @@ class Services:
                 return AdkRuntime(config, url, secret)
             from agentlab.adapters.runtime.raw import RawRuntime
 
-            return RawRuntime(config, url, secret)
+            return RawRuntime(config, url, secret, self.anthropic_gateway(config))
 
         sandbox = DockerSandbox(default_image="python:3.12-slim") if options["sandbox"] == "docker" else LocalSandbox()
         if options["runtime"] == "fake":
@@ -167,7 +187,9 @@ def build_services(settings: Settings | None = None) -> Services:
     env = EnvFile(s.env_file)
     embedder = OpenAICompatEmbedder(
         lambda: (env.read().get("AGENTLAB_EMBEDDING_BASE_URL"), env.read().get("AGENTLAB_EMBEDDING_API_KEY")),
-        cfg.models.embedding.model, cfg.models.embedding.dimensions, cfg.models.embedding.version,
+        cfg.models.embedding.model,
+        cfg.models.embedding.dimensions,
+        cfg.models.embedding.version,
     )
     store: Store = InMemoryStore()
     if s.store_backend not in {"auto", "memory", "postgres"}:

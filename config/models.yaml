@@ -1,15 +1,10 @@
-# Gateway catalog: separate model IDs for the three reviewers.
-# Alias tiers remain routing labels; prices/context/tools below are provisional
-# estimates inherited from the prototype, not verified gateway metadata.
-# Embedding availability has not been verified.
+# Model allocation. GPT gateway prices are provisional budget estimates.
 gateway:
   base_url_env: AGENTLAB_LLM_BASE_URL
   api_key_env: AGENTLAB_LLM_API_KEY
-
 aliases:
   root:
-    model: gpt-6-astra
-    # Budget reservation estimates; actual returned usage remains authoritative.
+    model: gpt-6.1-sol
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
@@ -20,20 +15,19 @@ aliases:
     cost_in_per_1m_cents: 500
     cost_out_per_1m_cents: 2000
   strong:
-    model: gpt-6-astra
-    # Budget reservation estimates; actual returned usage remains authoritative.
+    model: claude-opus-5-5
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
     output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
-    ctx_window: 400000
-    cost_in_per_1m_cents: 500
+    ctx_window: 1000000
+    cost_in_per_1m_cents: 400
     cost_out_per_1m_cents: 2000
+    provider: anthropic
   strong-alt:
     model: gpt-6.1-sol
-    # Budget reservation estimates; actual returned usage remains authoritative.
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5
     max_output_tokens: 16384
@@ -44,25 +38,26 @@ aliases:
     cost_in_per_1m_cents: 500
     cost_out_per_1m_cents: 2000
   cheap:
-    model: gpt-6-sol
-    # Budget reservation estimates; actual returned usage remains authoritative.
+    model: gpt-5.6-sol
     estimate_input_tokens_per_byte: 0.5
     estimate_output_token_ratio: 0.5
-    max_output_tokens: 16384
+    max_output_tokens: 8192
     output_token_parameter: max_tokens
     supports_tools: true
     structured_output: native
     ctx_window: 400000
-    cost_in_per_1m_cents: 500
-    cost_out_per_1m_cents: 2000
-
+    cost_in_per_1m_cents: 50
+    cost_out_per_1m_cents: 300
 tiers:
   root: 1
   strong: 2
   strong-alt: 2
   cheap: 3
-
 embedding:
   model: text-embedding-3-large
   dimensions: 3072
   version: 1
+providers:
+  anthropic:
+    base_url_env: AGENTLAB_ANTHROPIC_BASE_URL
+    api_key_env: AGENTLAB_ANTHROPIC_API_KEY

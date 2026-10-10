@@ -21,6 +21,7 @@ class GatewayCfg(Strict):
 
 class AliasCfg(Strict):
     model: str
+    provider: Literal["openai", "anthropic"] = "openai"
     max_output_tokens: int = Field(default=16384, ge=1)
     estimate_input_tokens_per_byte: float = Field(default=1.0, gt=0)
     estimate_output_token_ratio: float = Field(default=1.0, gt=0, le=1)
@@ -43,6 +44,7 @@ class EmbeddingCfg(Strict):
 
 class ModelsCfg(Strict):
     gateway: GatewayCfg
+    providers: dict[str, GatewayCfg] = {}
     aliases: dict[str, AliasCfg]
     tiers: dict[str, int]
     embedding: EmbeddingCfg

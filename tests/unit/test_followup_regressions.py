@@ -175,6 +175,11 @@ async def test_snapshot_git_has_timeout_and_diff_runs_off_event_loop(tmp_path, m
 
 
 async def test_review_batch_preflight_requires_all_three_requests(cfg, tmp_path):  # type: ignore[no-untyped-def]
+    cfg = cfg.model_copy(deep=True)
+    for alias in cfg.models.aliases.values():
+        alias.cost_in_per_1m_cents = 500
+        alias.cost_out_per_1m_cents = 2000
+        alias.max_output_tokens = 16384
     driver = await make_driver(cfg, tmp_path)
     run = driver.create("fix add", budget_cents=40)
     run.status = RunStatus.REVIEWING

@@ -86,7 +86,7 @@ The interface supports English / 简体中文 through the top selector or Settin
 ## Plugging in your LLM gateway
 
 1. `cp .env.example .env` and set `AGENTLAB_LLM_BASE_URL` + `AGENTLAB_LLM_API_KEY` (any OpenAI-compatible endpoint).
-2. Edit `config/models.yaml`: each alias (`root`, `strong`, `strong-alt`, `cheap`) maps to a model id on that gateway.
+2. Edit `config/models.yaml`: aliases map to a model id and provider. Defaults are `root`/`strong-alt` → `gpt-6.1-sol`, `strong` → `claude-opus-5-5` through the Anthropic Messages API, and `cheap` → `gpt-5.6-sol`. Planner/Coder and correctness review use Opus; architecture review uses GPT 6.1 Sol; test/style review and summaries use the cheap alias. Set `AGENTLAB_ANTHROPIC_BASE_URL` and `AGENTLAB_ANTHROPIC_API_KEY` separately in `.env` or Settings. A `/v1/` suffix is accepted. Keys are masked in Settings and excluded from workspace context. GPT gateway pricing values are provisional budget estimates; check your provider's billing before relying on them.
 3. Edit `config/model_policy.yaml` to choose which alias each role uses.
 
 Code only ever references aliases, so swapping `gpt-6.1` for something else is a YAML change.
@@ -107,7 +107,7 @@ See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md). The Office Floor v
 
 ## Projects, conversations and memory
 
-Create a project with an existing, independent repository root. Choose **Root assigns models and tasks** or **Manually assign every agent** in the project form. The console edits future-run settings and exports/imports a YAML profile for Git version control. Automatic dispatch is validated and persisted; manual bindings have no fallback. All current aliases resolve to the same model ID, so model diversity awaits additional provider configuration.
+Create a project with an existing, independent repository root. Choose **Root assigns models and tasks** or **Manually assign every agent** in the project form. The console edits future-run settings and exports/imports a YAML profile for Git version control. Automatic dispatch is validated and persisted; manual bindings have no fallback. The default reviewers use three distinct model IDs across the GPT gateway and Anthropic. Automatic dispatch prefers these defaults; existing manual project bindings and saved run checkpoints retain their own allocation.
 
 The left sidebar selects a project and its conversations. Submitting a goal starts a run in the selected conversation. Finish or abort an unfinished run before starting another in the same workspace; use separate worktrees for parallel projects. Switching projects resets approval, tasks, telemetry, agent activity and private retrieval context. Inspect the actual diff in the run artifacts before human signoff.
 

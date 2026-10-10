@@ -19,6 +19,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
     "pgvector>=0.3",
+    "anthropic>=0.79",
 ]
 
 [project.optional-dependencies]

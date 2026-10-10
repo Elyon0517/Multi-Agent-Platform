@@ -192,8 +192,24 @@ class OpenAICompatEmbedder:
 
 
 class RawRuntime:
-    def __init__(self, cfg: AppConfig, base_url: str, api_key: str) -> None:
-        self._caller = StructuredCaller(cfg, OpenAICompatChat(base_url, api_key, cfg.retry.llm_call.timeout_s))
+    def __init__(
+        self, cfg: AppConfig, base_url: str, api_key: str, anthropic_creds: tuple[str | None, str | None] = (None, None)
+    ) -> None:
+        chats: dict[str, Any] = {"openai": OpenAICompatChat(base_url, api_key, cfg.retry.llm_call.timeout_s)}
+        if all(anthropic_creds):
+            from agentlab.adapters.runtime.anthropic import AnthropicChat
+
+            url, key = anthropic_creds
+            assert url and key
+            chats["anthropic"] = AnthropicChat(url, key, cfg.retry.llm_call.timeout_s)
+
+        async def chat(*, provider: str = "openai", **kwargs: Any) -> Completion:
+            if provider not in chats:
+                raise NonRetryable("provider_credentials_missing")
+            return await chats[provider](**kwargs)  # type: ignore[no-any-return]
+
+        self.chat = chat
+        self._caller = StructuredCaller(cfg, chat)
 
     async def run_agent(self, role: str, inp: AgentInput, output_type: type[T], ctx: RunContext) -> AgentResult[T]:
         return await self._caller.call(role, inp, output_type, ctx)

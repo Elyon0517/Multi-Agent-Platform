@@ -24,6 +24,7 @@ class Completion:
     tokens_in: int
     tokens_out: int
     tool_calls: list[dict[str, Any]] | None = None
+    provider_content: list[dict[str, Any]] | None = None
 
 
 ChatFn = Callable[..., Awaitable[Completion]]
@@ -159,6 +160,7 @@ class StructuredCaller:
                         schema=schema,
                         max_output_tokens=alias_cfg.max_output_tokens,
                         output_token_parameter=alias_cfg.output_token_parameter,
+                        **({"provider": alias_cfg.provider} if alias_cfg.provider != "openai" else {}),
                         **({"tools": available_tools} if available_tools else {}),
                         **({"on_delta": ctx.on_delta} if ctx.on_delta else {}),
                     )
@@ -212,7 +214,12 @@ class StructuredCaller:
                 if not ctx.execute_tool:
                     raise LlmError("tools_unavailable")
                 messages.append(
-                    {"role": "assistant", "content": completion.text or None, "tool_calls": completion.tool_calls}
+                    {
+                        "role": "assistant",
+                        "content": completion.text or None,
+                        "tool_calls": completion.tool_calls,
+                        **({"_anthropic_content": completion.provider_content} if completion.provider_content else {}),
+                    }
                 )
                 for tool in completion.tool_calls:
                     ctx.check_budget(0)
@@ -263,7 +270,11 @@ class StructuredCaller:
                 repairs += 1
                 log.reasons.append("structured_output_invalid")
                 messages += [
-                    {"role": "assistant", "content": completion.text},
+                    {
+                        "role": "assistant",
+                        "content": completion.text,
+                        **({"_anthropic_content": completion.provider_content} if completion.provider_content else {}),
+                    },
                     {"role": "user", "content": f"Your output failed validation. Fix and resend JSON only:\n{e}"},
                 ]
         raise LlmError(f"{role}: structured output invalid after repairs")

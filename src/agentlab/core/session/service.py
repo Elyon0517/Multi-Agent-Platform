@@ -44,7 +44,7 @@ class SessionService:
             )
         project = svc.projects.get(project_id) if project_id else None
         cfg = project_config(svc.cfg, project.settings) if project and project.settings else svc.cfg
-        ws = GitWorkspace(Path(project.workspace), secrets=tuple(x for x in svc.gateway() if x)) if project else None
+        ws = GitWorkspace(Path(project.workspace), secrets=svc.workspace_secrets()) if project else None
         tools = SessionTools(ws, svc.knowledge, svc.store, project_id, thread_id)
         run = Run(
             id=turn_id,

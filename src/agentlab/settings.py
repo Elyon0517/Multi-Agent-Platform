@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     env_file: Path = Path(".env")
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    anthropic_base_url: str | None = None
+    anthropic_api_key: str | None = None
     database_url: str | None = None
     store_backend: str = "auto"
     runtime: str = "raw"

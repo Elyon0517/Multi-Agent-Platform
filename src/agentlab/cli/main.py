@@ -94,8 +94,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 @app.command()
 def ping(search: Annotated[bool, typer.Option(help="Probe native search and save capabilities")] = False) -> None:
-    """Check each configured alias using the gateway's Chat Completions API."""
-    import openai
+    """Check each alias through its configured provider, without exposing credentials."""
+    from agentlab.adapters.runtime.raw import RawRuntime
 
     svc = build_services()
     url, key = svc.gateway()
@@ -105,45 +105,47 @@ def ping(search: Annotated[bool, typer.Option(help="Probe native search and save
 
     async def probe() -> bool:
         passed = True
-        async with openai.AsyncOpenAI(base_url=url, api_key=key, timeout=45, max_retries=0) as client:
-            for alias, model in svc.cfg.models.aliases.items():
-                try:
-                    result = await client.chat.completions.create(
-                        model=model.model,
-                        temperature=0.0,
-                        max_tokens=64,
-                        messages=[{"role": "user", "content": 'Return JSON only: {"ok": true}'}],
-                        response_format={"type": "json_object"},
+        runtime = svc.runtime("raw")
+        assert isinstance(runtime, RawRuntime)
+        for alias, model in svc.cfg.models.aliases.items():
+            try:
+                result = await runtime.chat(
+                    provider=model.provider,
+                    model=model.model,
+                    temperature=0.0,
+                    max_output_tokens=1024,
+                    output_token_parameter=model.output_token_parameter,
+                    system="Return JSON only.",
+                    messages=[{"role": "user", "content": '{"ok": true}'}],
+                    schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                )
+                good = json.loads(result.text).get("ok") is True and result.tokens_in > 0
+                passed &= good
+                typer.echo(
+                    json.dumps(
+                        {
+                            "alias": alias,
+                            "model": model.model,
+                            "provider": model.provider,
+                            "ok": good,
+                            "tokens": result.tokens_in + result.tokens_out,
+                        }
                     )
-                    valid = json.loads(result.choices[0].message.content or "{}").get("ok") is True
-                    usage = result.usage
-                    good = valid and usage is not None
-                    passed &= good
-                    typer.echo(
-                        json.dumps(
-                            {
-                                "alias": alias,
-                                "model": model.model,
-                                "response_model": result.model,
-                                "ok": good,
-                                "tokens": usage.total_tokens if usage else None,
-                            }
-                        )
+                )
+            except Exception as exc:
+                passed = False
+                typer.echo(
+                    json.dumps(
+                        {
+                            "alias": alias,
+                            "model": model.model,
+                            "provider": model.provider,
+                            "ok": False,
+                            "error": type(exc).__name__,
+                            "error_kind": getattr(exc, "kind", None),
+                        }
                     )
-                except Exception as exc:
-                    passed = False
-                    # Do not echo gateway exceptions: their payload may contain request secrets.
-                    typer.echo(
-                        json.dumps(
-                            {
-                                "alias": alias,
-                                "model": model.model,
-                                "ok": False,
-                                "error": type(exc).__name__,
-                                "status": getattr(exc, "status_code", None),
-                            }
-                        )
-                    )
+                )
         if search:
             from agentlab.adapters.runtime.search import probe_search
 

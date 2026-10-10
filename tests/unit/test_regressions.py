@@ -171,6 +171,12 @@ async def test_invalid_json_usage_is_charged_even_after_repair_exhaustion(cfg): 
 
 
 async def test_parallel_budget_reservations_and_completed_usage_survive_failure(cfg):  # type: ignore[no-untyped-def]
+    # Reservation boundaries depend on a fixed price fixture, not the live model catalog.
+    cfg = cfg.model_copy(deep=True)
+    for alias in cfg.models.aliases.values():
+        alias.cost_in_per_1m_cents = 500
+        alias.cost_out_per_1m_cents = 2000
+        alias.max_output_tokens = 16384
     run = Run(goal="g", workspace=".", budget_cents=22)
     guard = BudgetGuard(run, .8, lambda _: None)
     ctx = RunContext(run, guard.check, guard.record, guard.reserve, guard.release)
