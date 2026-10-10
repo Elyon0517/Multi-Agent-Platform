@@ -4,6 +4,7 @@ import { Application, Container, Graphics, Ticker, Texture } from 'pixi.js';
 // PixiJS uses new Function() internally, blocked by Electron CSP — this patches it.
 import 'pixi.js/unsafe-eval';
 import { useStore, type Agent } from '@/store/store';
+import { activeFloorAgents } from '../adapter/activity';
 import { TiledMapRenderer } from './TiledMapRenderer';
 import { Camera } from './Camera';
 import { Character, paintCup } from './Character';
@@ -1377,7 +1378,10 @@ export function OfficeFloor() {
       const taskBoardPoll = setInterval(() => { void pollTaskBoard(); }, 5000);
       (app as any).__taskBoardPoll = taskBoardPoll;
 
+      const loadingCharacters = new Set<string>();
       const addCharacter = async (agent: Agent) => {
+        if (loadingCharacters.has(agent.id)) return;
+        loadingCharacters.add(agent.id);
         const charName = theme.cast.byName[agent.character] ? agent.character : theme.cast.defaultCharacter;
         const member = theme.cast.byName[charName];
         const seatIndex = claimSeat(agent);
@@ -1386,9 +1390,10 @@ export function OfficeFloor() {
           ?? { x: 2, y: 2 };
         const waitTile = waitTiles[(seatIndex ?? 0) % waitTiles.length];
         const frames = await theme.cast.getFrames(charName);
+        loadingCharacters.delete(agent.id);
         // Bail if the agent was removed (or scene torn down) while loading.
         if (mountIdRef.current !== mountId) return;
-        if (!useStore.getState().agents.some((a) => a.id === agent.id)) {
+        if (!floorAgents().some((a) => a.id === agent.id)) {
           if (seatIndex != null) seatClaims.delete(seatIndex);
           return;
         }
@@ -1572,8 +1577,12 @@ export function OfficeFloor() {
         }
       };
 
+      const floorAgents = () => {
+        const { agents, rootBusy } = useStore.getState();
+        return activeFloorAgents(agents, rootBusy);
+      };
       const syncAgents = () => {
-        const { agents } = useStore.getState();
+        const agents = floorAgents();
         const present = new Set(agents.map((a) => a.id));
         for (const id of Array.from(runtimes.keys())) {
           if (!present.has(id)) removeCharacter(id);
@@ -1592,7 +1601,7 @@ export function OfficeFloor() {
 
       let lastSelected: string | null = useStore.getState().selectedId;
       const unsubscribe = useStore.subscribe((s, prev) => {
-        if (s.agents !== prev.agents) syncAgents();
+        if (s.agents !== prev.agents || s.rootBusy !== prev.rootBusy) syncAgents();
         if (s.selectedId !== lastSelected) {
           lastSelected = s.selectedId;
           const rt = s.selectedId ? runtimes.get(s.selectedId) : undefined;

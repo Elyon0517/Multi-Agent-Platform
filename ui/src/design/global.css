@@ -370,16 +370,22 @@ canvas, img, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
 .cth-md-card table { margin: 0.5em 0; }
 .cth-md-card th, .cth-md-card td { padding: 3px 7px; font-size: 0.9em; }
 
-/* Project navigation stays visible while the console moves below on smaller windows. */
-.app-layout { grid-template-columns: 200px minmax(0, 1fr) 460px !important; }
-@media (max-width: 1150px) {
-  .app-layout { grid-template-columns: 160px minmax(0, 1fr) !important; height: auto !important; min-height: 100vh; }
-  .workspace-main { min-height: 650px !important; }
-  .workspace-console { grid-column: 1 / -1; min-height: 350px !important; }
+/* Keep the conversation beside the floor at desktop and laptop widths. */
+.app-layout { grid-template-columns: 160px minmax(0, 1fr) minmax(280px, 360px) !important; }
+.workspace-main { overflow: hidden; }
+.workspace-console { overflow: hidden; }
+@media (max-width: 800px) {
+  .app-layout { grid-template-columns: 110px minmax(0, 1fr) !important; height: auto !important; min-height: 100vh; }
+  .workspace-main { height: 70vh; min-height: 450px !important; }
+  .workspace-console { grid-column: 1 / -1; height: 65vh; min-height: 350px !important; }
 }
-@media (max-width: 550px) {
-  .app-layout { grid-template-columns: minmax(0, 1fr) !important; }
-  .app-layout > nav { max-height: 200px; }
-}
-
 #root { overflow: auto; }
+
+.project-navigation { overflow: auto; padding: 12px 8px; background: var(--cth-cream-100); }
+.sidebar-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+.project-navigation h2 { font-size: 12px; color: var(--cth-ink-500); margin: 20px 6px 8px; }
+.sidebar-item { display: block; width: 100%; border: 0; background: transparent; text-align: start; padding: 8px; cursor: pointer; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-item:hover { background: var(--cth-cream-200); }
+.sidebar-item[aria-current="page"] { background: var(--cth-cream-200); font-weight: 700; box-shadow: inset 2px 0 var(--cth-ink-700); }
+.sidebar-project-threads { margin-left: 10px; border-left: 1px solid var(--cth-ink-100); }
+.sidebar-empty { font-size: 11px; color: var(--cth-ink-500); padding: 0 6px; }

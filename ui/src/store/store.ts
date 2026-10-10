@@ -16,7 +16,7 @@ export type ToolKind =
 
 export type StationKind = 'shelf' | 'terminal' | 'web' | 'board' | 'mailbox' | 'mcp' | 'desk';
 
-export type ConsoleTab = 'runs' | 'project' | 'tasks' | 'human' | 'memory' | 'graph' | 'activity' | 'settings';
+export type ConsoleTab = 'chat' | 'runs' | 'project' | 'tasks' | 'human' | 'memory' | 'graph' | 'activity' | 'settings';
 
 export interface BlockReason {
   summary: string;
@@ -70,6 +70,8 @@ type HandoffListener = (h: Handoff) => void;
 type TelemetryListener = (u: { usage?: AgentUsageSample; span?: ToolSpan }) => void;
 
 interface LabState {
+  rootBusy: boolean;
+  setRootBusy: (busy: boolean) => void;
   agents: Agent[];
   restorableAgents: Agent[];
   selectedId: string | null;
@@ -118,7 +120,7 @@ function agentFromRole(role: string, entry: RosterEntry | undefined, prefs: Pref
   return {
     id: role, name: prefs.names[role] ?? seat.name, character: seat.character, accent: seat.accent,
     description: seat.description, status: 'idle', action: '', progress: 0, isGod: seat.isGod,
-    model: entry?.model, project: entry?.alias ? `${entry.alias} · ${entry.model}` : 'deterministic',
+    model: entry?.model, project: entry?.alias ? `${role === 'supervisor' ? 'orchestration' : entry.alias} · ${entry.model}` : 'deterministic',
     note: prefs.notes[`${useStore.getState().activeProjectId ?? 'default'}:${role}`], contextLimit: entry?.ctx_window,
   };
 }
@@ -135,7 +137,7 @@ function taskFor(run: Run, dismissed: Record<string, string>): BoardTask {
          dismissedAt: dismissed[run.id] }]
     : [];
   return {
-    id: run.id, title: run.goal, description: `run ${run.id} · ${run.status}`, status: BOARD_BY_RUN_STATUS[run.status],
+    id: run.id, title: run.goal, description: `${seatFor(OWNER_BY_RUN_STATUS[run.status]).name} · ${run.status}`, status: BOARD_BY_RUN_STATUS[run.status],
     assignee: OWNER_BY_RUN_STATUS[run.status], createdAt: run.created_at, dependsOn: [], priority: 3, humanQA,
   };
 }
@@ -164,13 +166,15 @@ export const useStore = create<LabState>((set, get) => {
   const initial = loadPrefs();
 
   return {
+    rootBusy: false,
+    setRootBusy: (rootBusy) => set({ rootBusy }),
     agents: [],
     restorableAgents: [],
     selectedId: null,
     officeTheme: initial.theme,
     fullscreenAgentId: null,
     ideOpen: false,
-    commandCenterTab: 'runs',
+    commandCenterTab: 'chat',
     taskDetailId: null,
     runs: [],
     activeRunId: null,
@@ -195,12 +199,12 @@ export const useStore = create<LabState>((set, get) => {
     setRoster: (roster) => {
       const byRole = new Map(roster.map((r) => [r.role, r]));
       const { prefs } = get();
-      set({ agents: orderAgents(rosterIds(roster).map((id) => agentFromRole(id, byRole.get(id), prefs)), prefs.order) });
+      set({ agents: orderAgents(rosterIds(roster).map((id) => { const fresh = agentFromRole(id, byRole.get(id), prefs); const old = get().agents.find(a => a.id === id); return old ? { ...old, ...fresh, status: old.status, action: old.action, carrying: old.carrying } : fresh; }), prefs.order) });
     },
 
     setRuns: (runs) => set((s) => ({ runs, tasks: tasksFor(runs, s.dismissedAsks) })),
     setActiveRun: (id) => set((s) => ({ agents: s.agents.map(a => ({ ...a, status: 'idle', action: '', progress: 0, carrying: undefined, recentText: undefined, recentSeq: undefined, blockReason: undefined, contextTokens: undefined })), selectedId: null, taskDetailId: null, activeRunId: id, activeThreadId: id ? s.runs.find(r => r.id === id)?.thread_id ?? null : s.activeThreadId, events: [], lastEventSeq: 0, telemetry: EMPTY_TELEMETRY, log: [] })),
-    setActiveThread: (id) => { get().setActiveRun(null); set({ activeThreadId: id }); },
+    setActiveThread: (id) => { get().setActiveRun(null); set({ activeThreadId: id, commandCenterTab: 'chat', rootBusy: false }); },
     setActiveProject: (id) => {
       if (get().activeProjectId === id) return;
       get().setActiveRun(null);

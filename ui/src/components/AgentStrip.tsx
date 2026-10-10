@@ -16,6 +16,7 @@ export function AgentStrip({ config }: AgentStripProps) {
   const { t } = useTranslation();
   const rtl = useRtl();
   const agents = useStore(s => s.agents);
+  const rootBusy = useStore(s => s.rootBusy);
   const restorableAgents = useStore(s => s.restorableAgents);
   const selectedId = useStore(s => s.selectedId);
   const select = useStore(s => s.select);
@@ -136,7 +137,7 @@ export function AgentStrip({ config }: AgentStripProps) {
             name={a.name}
             character={a.character}
             accent={a.accent}
-            status={a.status}
+            status={a.id === 'root' && rootBusy ? 'thinking' : a.status}
             project={a.project}
             action={a.action}
             progress={a.progress}

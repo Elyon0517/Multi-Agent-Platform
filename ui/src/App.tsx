@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api, type RunDetail } from '@/api/client';
 import { useStore, type ConsoleTab } from '@/store/store';
+import { OWNER_BY_RUN_STATUS, seatFor } from '@/scene/adapter/mapping';
 import { OfficeFloor } from '@/scene/office/OfficeFloor';
 import { PixelPanel } from '@/components/PixelPanel';
 import { PixelButton } from '@/components/PixelButton';
@@ -25,6 +26,7 @@ import { ArtifactViewer } from '@/views/ArtifactViewer';
 import { ProjectSidebar, ConversationView } from '@/views/ProjectSidebar';
 
 const TABS: { key: ConsoleTab; label: string }[] = [
+  { key: 'chat', label: 'conversation' },
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
   { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
   { key: 'activity', label: 'activity' }, { key: 'settings', label: 'settings' },
@@ -101,7 +103,7 @@ export function App() {
   return (
     <div className="app-layout" style={{ display: 'grid', gridTemplateColumns: '200px minmax(300px, 1fr) 460px', height: '100vh', gap: 8, padding: 8, boxSizing: 'border-box' }}>
       <ProjectSidebar />
-      <main className="workspace-main" style={{ minWidth: 0, display: 'grid', gridTemplateRows: 'auto auto 1fr auto auto', gap: 8, minHeight: 0 }}>
+      <main className="workspace-main" style={{ minWidth: 0, display: 'grid', gridTemplateRows: detail?.pending_approval ? 'auto minmax(0, 1fr) auto auto' : 'auto minmax(0, 1fr) auto', gap: 8, minHeight: 0 }}>
         <PixelPanel title="Multi-Agent Platform">
           <form onSubmit={(e) => { e.preventDefault(); void start(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <label htmlFor="goal" style={{ position: 'absolute', left: -9999 }}>{t('lab.goal')}</label>
@@ -117,7 +119,6 @@ export function App() {
           </form>
           <Status error={error} />
         </PixelPanel>
-        <ConversationView />
         <section aria-label={t('lab.officeFloor')} style={{ position: 'relative', minHeight: 0 }}>
           <OfficeFloor />
         </section>
@@ -133,6 +134,7 @@ export function App() {
           ))}
         </nav>
         <div style={{ overflow: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: tab === 'chat' ? 'flex' : 'none', flex: 1, minHeight: 0 }}><ConversationView /></div>
           {selectedId && <AgentDetail />}
           {tab === 'runs' && (
             <>
@@ -142,7 +144,7 @@ export function App() {
                     <li key={r.id}>
                       <button type="button" onClick={() => setActiveRun(r.id)} aria-current={r.id === activeRunId}
                         style={{ all: 'unset', cursor: 'pointer', fontWeight: r.id === activeRunId ? 700 : 400 }}>
-                        {r.id} · {r.status} · {r.cost_cents.toFixed(2)}c
+                        {seatFor(OWNER_BY_RUN_STATUS[r.status]).name} · {r.goal} · {r.status} · {r.cost_cents.toFixed(2)}c
                       </button>
                     </li>
                   ))}

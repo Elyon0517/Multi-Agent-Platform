@@ -14,7 +14,8 @@ export interface Seat {
 }
 
 export const SEATS: Record<string, Seat> = {
-  supervisor: { character: 'michael', accent: 'lemon', name: 'Supervisor', description: 'Root dispatcher', isGod: true },
+  root: { character: 'michael', accent: 'lemon', name: 'Root', description: 'Conversation', isGod: true },
+  supervisor: { character: 'stanley', accent: 'mint', name: 'Supervisor', description: 'Task orchestration' },
   'project-planner': { character: 'stanley', accent: 'lemon', name: 'Project Planner', description: 'Phases and steps' },
   planner: { character: 'pam', accent: 'mint', name: 'Planner', description: 'Plans and acceptance criteria' },
   coder: { character: 'jim', accent: 'sky', name: 'Coder', description: 'Implements the plan' },
