@@ -11,7 +11,6 @@ import { TasksKanban } from '@/components/TasksKanban';
 import { TaskDetailOverlay } from '@/components/TaskDetailOverlay';
 import { AskMeTab } from '@/components/AskMeTab';
 import { AgentStrip } from '@/components/AgentStrip';
-import { MemoryGraphPanel } from '@/components/MemoryGraphPanel';
 import { RunTimeline } from '@/views/RunTimeline';
 import { VerdictBoard } from '@/views/VerdictBoard';
 import { ApprovalBar } from '@/views/ApprovalBar';
@@ -29,7 +28,7 @@ import { ProjectSidebar, ConversationView } from '@/views/ProjectSidebar';
 const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'chat', label: 'conversation' },
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
-  { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' }, { key: 'graph', label: 'graph' },
+  { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' },
   { key: 'activity', label: 'activity' }, { key: 'monitor', label: 'monitor' }, { key: 'settings', label: 'settings' },
 ];
 
@@ -177,10 +176,6 @@ export function App() {
           {tab === 'tasks' && <TasksKanban />}
           {tab === 'human' && <AskMeTab />}
           {tab === 'memory' && <KnowledgeView key={activeProjectId ?? 'global'} />}
-          {tab === 'graph' && (
-            <MemoryGraphPanel godId="supervisor"
-              onJumpToMemory={(id) => { useStore.getState().select(id); setTab('memory'); }} />
-          )}
           {tab === 'activity' && <ActivityView />}
           {tab === 'monitor' && <MonitorView />}
           {tab === 'settings' && <SettingsView />}

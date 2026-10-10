@@ -16,7 +16,7 @@ export type ToolKind =
 
 export type StationKind = 'shelf' | 'terminal' | 'web' | 'board' | 'mailbox' | 'mcp' | 'desk';
 
-export type ConsoleTab = 'chat' | 'runs' | 'project' | 'tasks' | 'human' | 'memory' | 'graph' | 'activity' | 'monitor' | 'settings';
+export type ConsoleTab = 'chat' | 'runs' | 'project' | 'tasks' | 'human' | 'memory' | 'activity' | 'monitor' | 'settings';
 
 export interface BlockReason {
   summary: string;

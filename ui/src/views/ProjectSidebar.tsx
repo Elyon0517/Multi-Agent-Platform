@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api, type Project, type Conversation } from '@/api/client';
 import { useStore } from '@/store/store';
 import { PixelButton } from '@/components/PixelButton';
+import { Icon } from '@/components/Icon';
 import ReactMarkdown from 'react-markdown';
 import { Status } from './ui';
 import { conversationTitle, hasConversationContent } from './conversationNavigation';
@@ -36,6 +37,10 @@ export function ProjectSidebar() {
   }, [scope, activeThreadId, runs]);
   const deleteProject = async (project: Project) => {
     if (!window.confirm(t('lab.deleteProjectConfirm', { name: project.name }))) return;
+    // Second confirmation: typing the name guards against an accidental double click.
+    const typed = window.prompt(t('lab.deleteProjectTypeName', { name: project.name }));
+    if (typed === null) return;
+    if (typed.trim() !== project.name) { setError(t('lab.deleteProjectMismatch')); return; }
     try {
       await api.deleteProject(project.id);
       setProjects(old => old.filter(p => p.id !== project.id));
@@ -72,12 +77,17 @@ export function ProjectSidebar() {
       {projects.length === 0 && <p className="sidebar-empty">{t('lab.noProjects', { defaultValue: 'No projects yet' })}</p>}
       {projects.map(project => (
         <div key={project.id}>
-          <button className="sidebar-item sidebar-project" type="button" aria-current={project.id === activeProjectId ? 'page' : undefined}
-            onClick={() => { setActiveProject(project.id); requestCommandCenterTab('project'); }}>▣ {project.name}</button>
+          <div className="sidebar-project-row">
+            <button className="sidebar-item sidebar-project" type="button" aria-current={project.id === activeProjectId ? 'page' : undefined}
+              onClick={() => { setActiveProject(project.id); requestCommandCenterTab('project'); }}>▣ {project.name}</button>
+            <button className="sidebar-icon-button" type="button" title={t('lab.deleteProject')}
+              aria-label={`${t('lab.deleteProject')}: ${project.name}`} onClick={() => void deleteProject(project)}>
+              <Icon name="trash" />
+            </button>
+          </div>
           {project.id === activeProjectId && <div className="sidebar-project-threads">
             <button className="sidebar-item" type="button" disabled={creating} onClick={() => void newChat(project.id)}>＋ {t('lab.newConversation')}</button>
             {threadList(threads, project.id)}
-            <button className="sidebar-item" type="button" onClick={() => void deleteProject(project)}>{t('lab.deleteProject')}</button>
           </div>}
         </div>
       ))}

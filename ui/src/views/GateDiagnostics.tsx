@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import type { GateResult } from '@/api/client';
 
-export function GateDiagnostics({ reports }: { reports: GateResult[] }) {
+// Defaults to [] so a backend older than the gate_reports field hides the table instead of crashing the page.
+export function GateDiagnostics({ reports = [] }: { reports?: GateResult[] }) {
   const { t } = useTranslation();
   if (!reports.length) return null;
   return <section aria-label={t('lab.gateDiagnostics')} style={{ marginTop: 12 }}>

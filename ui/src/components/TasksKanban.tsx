@@ -54,8 +54,8 @@ export function waitsOnHuman(t: HiveTask): boolean {
 
 type Status = HiveTask['status'];
 
+// Every run is already in flight, awaiting approval or finished, so there is no TODO column.
 const COLUMNS: { key: Status; labelKey: string; accent: string }[] = [
-  { key: 'todo',    labelKey: 'kanban.colTodo',    accent: 'var(--cth-sky)' },
   { key: 'doing',   labelKey: 'kanban.colDoing',   accent: 'var(--cth-lemon)' },
   { key: 'blocked', labelKey: 'kanban.colBlocked', accent: 'var(--cth-coral)' },
   { key: 'done',    labelKey: 'kanban.colDone',    accent: 'var(--cth-mint)' }
@@ -91,7 +91,7 @@ export function parseTasks(raw: unknown): HiveTask[] {
       description: typeof t.description === 'string' ? t.description : undefined,
       assignee: typeof t.assignee === 'string' ? t.assignee : undefined,
       status: (['todo', 'doing', 'blocked', 'done'] as const).includes(t.status as Status)
-        ? (t.status as Status) : 'todo',
+        ? (t.status as Status) : 'doing',
       dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.filter((d): d is string => typeof d === 'string') : [],
       priority: typeof t.priority === 'number' ? t.priority : 3,
       createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date().toISOString(),
@@ -186,7 +186,7 @@ export function TasksKanban() {
           const cards = tasks.filter((t) => t.status === col.key);
           return (
             <div key={col.key} style={{
-              flex: '1 1 0', minWidth: 170, display: 'flex', flexDirection: 'column',
+              flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column',
               background: 'var(--cth-cream-100)', boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)'
             }}>
               <div style={{

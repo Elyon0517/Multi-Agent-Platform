@@ -388,4 +388,8 @@ canvas, img, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
 .sidebar-item:hover { background: var(--cth-cream-200); }
 .sidebar-item[aria-current="page"] { background: var(--cth-cream-200); font-weight: 700; box-shadow: inset 2px 0 var(--cth-ink-700); }
 .sidebar-project-threads { margin-left: 10px; border-left: 1px solid var(--cth-ink-100); }
+.sidebar-project-row { display: flex; align-items: center; }
+.sidebar-project-row .sidebar-item { flex: 1; min-width: 0; }
+.sidebar-icon-button { flex: none; border: 0; background: transparent; padding: 6px; cursor: pointer; color: var(--cth-ink-300); line-height: 0; }
+.sidebar-icon-button:hover, .sidebar-icon-button:focus-visible { color: var(--cth-coral); background: var(--cth-cream-200); }
 .sidebar-empty { font-size: 11px; color: var(--cth-ink-500); padding: 0 6px; }

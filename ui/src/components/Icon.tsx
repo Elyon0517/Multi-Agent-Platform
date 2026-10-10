@@ -7,7 +7,7 @@ export type IconName =
   | 'gear' | 'plus' | 'x' | 'check' | 'arrow-right' | 'pause' | 'play'
   | 'bell' | 'folder' | 'terminal' | 'code' | 'web' | 'mcp' | 'sparkle'
   | 'expand' | 'minimize' | 'clock' | 'mic' | 'ledger' | 'info' | 'sidebar'
-  | 'image' | 'edit' | 'git';
+  | 'image' | 'edit' | 'git' | 'trash';
 
 interface IconDef {
   ink: string;     // primary color path d
@@ -145,6 +145,11 @@ const paths: Record<IconName, IconDef> = {
   sidebar: {
     accentColor: 'var(--cth-ink-300)',
     ink:   'M1 3h14v10H1z M2 4h12v8H2z M2 4h4v8H2z'
+  },
+  // Handle, lid, then a hollow can whose two inner slats fill back in under evenodd.
+  trash: {
+    accentColor: 'var(--cth-coral)',
+    ink:   'M6 1h4v2H6z M2 3h12v2H2z M3 5h10v10H3z M4 5h8v9H4z M6 7h1v5H6z M9 7h1v5H9z'
   }
 };
 

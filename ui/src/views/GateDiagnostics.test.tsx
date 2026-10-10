@@ -25,6 +25,9 @@ describe('objective check evidence', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>');
   });
+  it('renders nothing instead of crashing when an older backend omits gate reports', () => {
+    expect(render(<GateDiagnostics reports={undefined} />)).toBe('');
+  });
   it('explicitly labels signoff without automatic checks', () => {
     const approval: Approval = { id: 'a', run_id: 'r', reason: 'signoff', status: 'pending',
       on_approve: 'DONE', report: null, decided_by: null, feedback: null, decided_at: null,
