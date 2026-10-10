@@ -274,12 +274,20 @@ class ApprovalStatus(StrEnum):
     ABORTED = "aborted"
 
 
+class SignoffReport(Strict):
+    goal: str
+    acceptance_criteria: list[str]
+    automated_checks: Literal["passed", "not_run"]
+    findings: list[Finding]
+
+
 class Approval(Strict):
     id: str = Field(default_factory=new_id)
     run_id: str
     reason: str
     on_approve: RunStatus = RunStatus.CODING
     payload: dict[str, Any] = {}
+    report: SignoffReport | None = None
     status: ApprovalStatus = ApprovalStatus.PENDING
     decided_by: str | None = None
     feedback: str | None = None

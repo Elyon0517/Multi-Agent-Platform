@@ -1549,7 +1549,13 @@
     "vectorCompatibility": "{{count}} vectors match this model; rebuild after switching models.",
     "rerankStatus": "Reranker: {{model}} · {{status}}",
     "rerankReady": "Ready",
-    "rerankUnverified": "Unavailable or not yet tested"
+    "rerankUnverified": "Unavailable or not yet tested",
+    "signoffGoalCriteria": "Task goal and acceptance criteria",
+    "signoffCriteria": "Acceptance criteria",
+    "signoffChecks": "Automatic checks",
+    "signoffFullPassed": "FULL Gate passed",
+    "signoffFindings": "Unresolved findings",
+    "signoffNone": "None"
   },
   "monitor": {
     "loading": "Loading usage…",

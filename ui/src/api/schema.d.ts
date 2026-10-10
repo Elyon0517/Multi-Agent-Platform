@@ -661,6 +661,7 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            report: components["schemas"]["SignoffReport"] | null;
             /** @default pending */
             status: components["schemas"]["ApprovalStatus"];
             /** Decided By */
@@ -1436,6 +1437,20 @@ export interface components {
          * @enum {string}
          */
         Severity: "blocking" | "major" | "minor" | "nit";
+        /** SignoffReport */
+        SignoffReport: {
+            /** Goal */
+            goal: string;
+            /** Acceptance Criteria */
+            acceptance_criteria: string[];
+            /**
+             * Automated Checks
+             * @enum {string}
+             */
+            automated_checks: "passed" | "not_run";
+            /** Findings */
+            findings: components["schemas"]["Finding"][];
+        };
         /** Source */
         Source: {
             /**

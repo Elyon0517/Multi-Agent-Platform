@@ -509,7 +509,12 @@ class MemoryHooks:
                     f"{gate_results[-1].get('passed') if gate_results else 'not run'}."
                 )
                 sources = []
-                if self.session_services:
+                report = approval.report if approval and approval.reason == "signoff" else None
+                if report:
+                    from agentlab.core.signoff import report_text
+
+                    reply = report_text(report)
+                elif self.session_services:
                     try:
                         from agentlab.core.session.service import SessionService
 
@@ -535,7 +540,8 @@ class MemoryHooks:
                         text=reply[:20000],
                         sources=sources,
                         run_id=run.id,
-                        payload={"status": run.status, "approval_id": approval_id},
+                        payload={"status": run.status, "approval_id": approval_id,
+                                 **({"report": report.model_dump(mode="json")} if report else {})},
                     ),
                 )
                 if self.session_services:

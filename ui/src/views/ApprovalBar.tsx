@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
+import { SignoffReportView } from './SignoffReportView';
 import { BlockedBanner } from '@/components/BlockedBanner';
 import { Field, Status, errorText, inputStyle } from '@/views/ui';
 import { api, type Approval } from '@/api/client';
@@ -29,12 +30,13 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
   };
   return (
     <div aria-busy={busy}>
-      {approval.reason === 'signoff' && approval.payload.automated_checks === 'not_run' &&
+      {approval.reason === 'signoff' && approval.report && <SignoffReportView report={approval.report} />}
+      {approval.reason === 'signoff' && !approval.report && approval.payload.automated_checks === 'not_run' &&
         <p role="status"><strong>{t('lab.untestedSignoff')}</strong></p>}
       <BlockedBanner
         reason={{
           summary: approval.reason,
-          detail: JSON.stringify(approval.payload).slice(0, 400),
+          detail: approval.report ? '' : JSON.stringify(approval.payload).slice(0, 400),
           actions: [
             ...(approval.reason === 'dispatch_invalid' ? [] : [{ label: t('lab.approve'), kind: 'approve' as const }]),
             { label: t('lab.reject'), kind: 'deny' },

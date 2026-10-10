@@ -175,6 +175,11 @@ class PostgresStore:
         data = model.model_dump(mode="json")
         if table == "step":
             data.update(data.pop("usage"))
+        if table == "approval":
+            report = data.pop("report", None)
+            if report is not None:
+                # Store the typed report in the existing durable approval JSON payload.
+                data["payload"] = {**data["payload"], "_signoff_report": report}
         self._upsert(table, data)
 
     def create_run(self, run: Run) -> Run:
@@ -239,7 +244,12 @@ class PostgresStore:
         rows = self._run_query(
             "SELECT * FROM approval WHERE run_id=%s AND status='pending' ORDER BY ordinal DESC LIMIT 1", (run_id,)
         )
-        return Approval.model_validate({k: v for k, v in rows[0].items() if k != "ordinal"}) if rows else None
+        if not rows:
+            return None
+        data = {k: v for k, v in rows[0].items() if k != "ordinal"}
+        data["payload"] = dict(data["payload"])
+        data["report"] = data["payload"].pop("_signoff_report", None)
+        return Approval.model_validate(data)
 
     def save_approval(self, approval: Approval) -> None:
         self._save("approval", approval)

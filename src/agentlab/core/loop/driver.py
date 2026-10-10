@@ -50,6 +50,7 @@ from agentlab.core.schemas import (
     Plan,
     Run,
     RunStatus,
+    SignoffReport,
     Step,
     Usage,
     Verdict,
@@ -435,10 +436,19 @@ class Driver:
                 if not gr.passed:
                     self._advance(run, S.CODING)
                     return
+        plan_text = self._latest_text(run, "plan")
+        plan = Plan.model_validate_json(plan_text) if plan_text else None
+        report = SignoffReport(
+            goal=run.goal,
+            acceptance_criteria=list(plan.acceptance_criteria) if plan else [],
+            automated_checks="passed" if self.gate is not None else "not_run",
+            findings=[finding.model_copy(deep=True) for verdict in self._last_iteration(run).verdicts
+                      for finding in verdict.findings],
+        )
         self._escalate(run, "signoff", {
             "diff_ref": self._latest(run, "diff").content_ref,
             "automated_checks": "passed" if self.gate is not None else "not_run",
-        }, on_approve=S.DONE)
+        }, on_approve=S.DONE, report=report)
 
     async def _agent(self, run: Run, role: str, inp: AgentInput, out: type[T]) -> AgentResult[T]:
         return (await self._agents(run, [role], inp, out))[0]
@@ -705,14 +715,20 @@ class Driver:
             feedback=self.blobs.get(fb.content_ref) if fb else None,
         )
 
-    def _escalate(self, run: Run, reason: str, payload: dict[str, Any], on_approve: S | None = None) -> None:
+    def _escalate(
+        self, run: Run, reason: str, payload: dict[str, Any], on_approve: S | None = None,
+        report: SignoffReport | None = None,
+    ) -> None:
         with self._atomic():
             resume = on_approve or (S.CODING if self._latest_text(run, "plan") else S.PLANNING)
             if reason == "oscillation_detected":
                 resume = S.CODING
-            self.store.create_approval(Approval(run_id=run.id, reason=reason, payload=payload, on_approve=resume))
+            self.store.create_approval(Approval(
+                run_id=run.id, reason=reason, payload=payload, on_approve=resume, report=report,
+            ))
             run.paused_reason = reason
-            self._emit(run, EventType.APPROVAL_REQUESTED, actor="supervisor", reason=reason, payload=payload)
+            self._emit(run, EventType.APPROVAL_REQUESTED, actor="supervisor", reason=reason, payload=payload,
+                       report=report.model_dump(mode="json") if report else None)
             self._advance(run, S.WAITING_HUMAN)
 
     def _advance(self, run: Run, dst: S) -> None:

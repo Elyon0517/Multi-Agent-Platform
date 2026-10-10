@@ -6,6 +6,7 @@ export type LabEvent = components['schemas']['Event'];
 export type Run = components['schemas']['Run'];
 export type Step = components['schemas']['Step'];
 export type Approval = components['schemas']['Approval'];
+export type SignoffReport = components['schemas']['SignoffReport'];
 export type Artifact = components['schemas']['Artifact'];
 export type RunDetail = components['schemas']['RunDetail'];
 export type RosterEntry = components['schemas']['RosterEntry'];

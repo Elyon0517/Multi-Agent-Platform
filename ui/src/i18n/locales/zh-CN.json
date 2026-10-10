@@ -1549,7 +1549,13 @@
     "vectorCompatibility": "{{count}} 条向量匹配当前模型；切换模型后请重建向量。",
     "rerankStatus": "重排模型：{{model}} · {{status}}",
     "rerankReady": "已验证",
-    "rerankUnverified": "不可用或尚未验证"
+    "rerankUnverified": "不可用或尚未验证",
+    "signoffGoalCriteria": "任务目标与验收标准",
+    "signoffCriteria": "验收标准",
+    "signoffChecks": "自动检查",
+    "signoffFullPassed": "FULL Gate 通过",
+    "signoffFindings": "未解决的 findings",
+    "signoffNone": "无"
   },
   "monitor": {
     "loading": "正在加载用量…",

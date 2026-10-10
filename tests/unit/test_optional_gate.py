@@ -49,7 +49,11 @@ async def test_gate_reports_include_failures_and_full_signoff(tmp_path):
     driver = svc.driver(workspace, "fake", "python")
     await driver.workspace.ensure_repo()
     run = await driver.run((await driver.create_async("Fix add")).id)
-    assert svc.store.pending_approval(run.id).payload["automated_checks"] == "passed"
+    approval = svc.store.pending_approval(run.id)
+    assert approval.payload["automated_checks"] == "passed"
+    assert approval.report is not None and approval.report.findings == []
+    from agentlab.core.signoff import report_text
+    assert report_text(approval.report).endswith("未解决的 findings\n无")
     with TestClient(create_app(svc)) as client:
         reports = client.get(f"/runs/{run.id}").json()["gate_reports"]
         assert any(not report["passed"] for report in reports)

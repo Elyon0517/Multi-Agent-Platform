@@ -1870,6 +1870,16 @@
             "title": "Payload",
             "default": {}
           },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignoffReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/ApprovalStatus",
             "default": "pending"
@@ -1917,6 +1927,7 @@
           "reason",
           "on_approve",
           "payload",
+          "report",
           "status",
           "decided_by",
           "feedback",
@@ -3953,6 +3964,45 @@
           "nit"
         ],
         "title": "Severity"
+      },
+      "SignoffReport": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "acceptance_criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Acceptance Criteria"
+          },
+          "automated_checks": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "not_run"
+            ],
+            "title": "Automated Checks"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array",
+            "title": "Findings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "goal",
+          "acceptance_criteria",
+          "automated_checks",
+          "findings"
+        ],
+        "title": "SignoffReport"
       },
       "Source": {
         "properties": {

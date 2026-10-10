@@ -27,10 +27,35 @@ describe('objective check evidence', () => {
   });
   it('explicitly labels signoff without automatic checks', () => {
     const approval: Approval = { id: 'a', run_id: 'r', reason: 'signoff', status: 'pending',
-      on_approve: 'DONE', decided_by: null, feedback: null, decided_at: null,
+      on_approve: 'DONE', report: null, decided_by: null, feedback: null, decided_at: null,
       payload: { automated_checks: 'not_run' } };
     expect(render(<ApprovalBar runId="r" approval={approval} />)).toContain('No automated tests were run');
     expect(render(<ApprovalBar runId="r" approval={{ ...approval, payload: { automated_checks: 'passed' } }} />))
       .not.toContain('No automated tests were run');
   });
+});
+
+it('renders the saved signoff evidence and escapes goals and findings', () => {
+  const approval: Approval = { id: 'a', run_id: 'r', reason: 'signoff', status: 'pending',
+    on_approve: 'DONE', decided_by: null, feedback: null, decided_at: null,
+    payload: { automated_checks: 'passed' }, report: {
+      goal: '<script>goal</script>', acceptance_criteria: ['Preserve public API'], automated_checks: 'passed',
+      findings: [{ severity: 'minor', category: 'arch', file: 'calc.py', line: 1,
+        issue: '<script>document types</script>', confidence: 0.9, reviewer_id: 'arch-reviewer', subject: '', suggestion: '', stance: null }],
+    } };
+  const html = render(<ApprovalBar runId="r" approval={approval} />);
+  expect(html).toContain('Task goal and acceptance criteria');
+  expect(html).toContain('Preserve public API');
+  expect(html).toContain('FULL Gate passed');
+  expect(html).toContain('Unresolved findings');
+  expect(html).toContain('calc.py:1');
+  expect(html).toContain('arch-reviewer');
+  expect(html).toContain('&lt;script&gt;document types');
+  expect(html).not.toContain('<script>');
+  const untested = render(<ApprovalBar runId="r" approval={{ ...approval, report: {
+    ...approval.report!, automated_checks: 'not_run', findings: [],
+  } }} />);
+  expect(untested).toContain('No automated tests were run');
+  expect(untested).toContain('None');
+  expect(untested).not.toContain('FULL Gate passed');
 });

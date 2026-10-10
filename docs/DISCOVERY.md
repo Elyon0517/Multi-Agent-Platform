@@ -812,7 +812,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 2. **自动检查**：FULL Gate 通过；或「未经过自动测试」（`automated_checks: not_run`）
 3. **未解决的 findings**：最后一轮评审中各 reviewer 仍保留的 findings（signoff 时不含 blocking / major，通常为 minor / nit）；没有则显示「无」
 
-- [ ] 生成报告并随 signoff 审批保存；审批卡片与对话总结显示
+- [x] 生成报告并随 signoff 审批保存；审批卡片与对话总结显示
 - 验收：有 Gate / 无 Gate 各跑一个 fake 任务到 signoff，报告三项内容与 plan、Gate 结果、最后一轮 verdict 一致
 - 不做：费用、模型、迭代明细（Monitor 与 run 时间线已有）；联网 / Git 危险操作审批（目前没有任何 agent 工具能执行命令、联网或操作 Git，待以后新增 shell / MCP 工具时再做）
 

@@ -1060,3 +1060,19 @@ async def test_local_dimension_vectors_survive_store_reload(store):
     assert item.id == saved[0].id and item.embedding_dimensions == 384
     assert item.embedding_model == 'local-384' and len(item.embedding) == 384
     assert (await restored.search(None, [GLOBAL], '语义问题'))[0].item.id == item.id
+
+
+def test_signoff_report_round_trips_with_approval_and_preserves_legacy_payload(store):
+    from agentlab.core.schemas import SignoffReport
+
+    run = store.create_run(Run(goal='goal', workspace='/tmp/test'))
+    report = SignoffReport(goal=run.goal, acceptance_criteria=['public API preserved'],
+                           automated_checks='not_run', findings=[])
+    approval = Approval(run_id=run.id, reason='signoff', on_approve=RunStatus.DONE,
+                        payload={'automated_checks': 'not_run', 'diff_ref': 'blob://diff'}, report=report)
+    store.create_approval(approval)
+    restored = store.pending_approval(run.id)
+    assert restored == approval and restored.payload == approval.payload
+    restored.feedback = 'please review again'
+    store.save_approval(restored)
+    assert store.pending_approval(run.id).report == report
