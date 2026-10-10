@@ -351,6 +351,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/local/pick-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pick Folder
+         * @description Open the native folder picker on this machine; the browser cannot see local paths.
+         */
+        post: operations["pick_folder_local_pick_folder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1103,6 +1123,19 @@ export interface components {
         /** PatchStep */
         PatchStep: {
             status: components["schemas"]["StepStatus"];
+        };
+        /** PickFolderBody */
+        PickFolderBody: {
+            /**
+             * Prompt
+             * @default Select the project folder
+             */
+            prompt?: string;
+        };
+        /** PickedFolder */
+        PickedFolder: {
+            /** Path */
+            path: string | null;
         };
         /** ProfileBody */
         ProfileBody: {
@@ -2409,6 +2442,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MonitorUsage"];
+                };
+            };
+        };
+    };
+    pick_folder_local_pick_folder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PickFolderBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickedFolder"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

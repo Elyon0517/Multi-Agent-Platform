@@ -26,6 +26,15 @@ function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; r
   const [workspace, setWorkspace] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const pickFolder = async () => {
+    setPicking(true); setError(null);
+    try {
+      const { path } = await api.pickFolder();
+      if (path) setWorkspace(path);
+    } catch (e) { setError(String(e)); }
+    finally { setPicking(false); }
+  };
 
   const create = async () => {
     if (!name.trim() || !goal.trim() || !workspace.trim()) { setError(t('lab.nameGoalAndWorkspaceAreRequired')); return; }
@@ -49,7 +58,10 @@ function NewProject({ onCreated, runtime }: { onCreated: (p: Project) => void; r
           <textarea id="p-goal" rows={3} style={inputStyle} value={goal} onChange={(e) => setGoal(e.target.value)} />
         </Field>
         <Field id="p-ws" label={t('lab.workspacePathGitRepo')}>
-          <input id="p-ws" style={inputStyle} value={workspace} placeholder="/Users/…/my-repo" onChange={(e) => setWorkspace(e.target.value)} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input id="p-ws" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={workspace} placeholder="/Users/…/my-repo" onChange={(e) => setWorkspace(e.target.value)} />
+            <PixelButton size="sm" variant="secondary" disabled={picking} onClick={() => void pickFolder()}>{t('lab.chooseFolder')}</PixelButton>
+          </div>
         </Field>
         <ProjectConfigEditor value={settings} onChange={setSettings} />
         <PixelButton disabled={busy || !settings} onClick={() => void create()}>{busy ? t('lab.planning') : t('lab.createPlan')}</PixelButton>

@@ -100,6 +100,7 @@ export const api = {
   },
   threads: (id: string) => json<Conversation[]>(`${id === 'global' ? '' : `/projects/${id}`}/threads`),
   createThread: (id: string, title: string) => post<Conversation>(`${id === 'global' ? '' : `/projects/${id}`}/threads`, { title }),
+  pickFolder: () => post<{ path: string | null }>('/local/pick-folder', {}),
   deleteProject: (id: string) => json<{ deleted: boolean }>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   projects: () => json<Project[]>('/projects'),
   project: (id: string) => json<Project>(`/projects/${id}`),

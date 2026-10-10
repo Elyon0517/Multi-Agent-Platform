@@ -1435,6 +1435,7 @@
     "newProject": "新建项目",
     "name": "名称",
     "workspacePathGitRepo": "工作区路径（Git 仓库）",
+    "chooseFolder": "选择文件夹…",
     "theProjectPlannerRootModelBreaksThisIntoPhasesAndSteps": "项目规划智能体（Root 模型）将目标拆分为阶段和步骤。",
     "planning": "规划中…",
     "createPlan": "创建并规划",

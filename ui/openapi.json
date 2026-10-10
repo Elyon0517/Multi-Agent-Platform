@@ -1054,6 +1054,45 @@
         }
       }
     },
+    "/local/pick-folder": {
+      "post": {
+        "summary": "Pick Folder",
+        "description": "Open the native folder picker on this machine; the browser cannot see local paths.",
+        "operationId": "pick_folder_local_pick_folder_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickFolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickedFolder"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",
@@ -3225,6 +3264,38 @@
           "status"
         ],
         "title": "PatchStep"
+      },
+      "PickFolderBody": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Prompt",
+            "default": "Select the project folder"
+          }
+        },
+        "type": "object",
+        "title": "PickFolderBody"
+      },
+      "PickedFolder": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "PickedFolder"
       },
       "ProfileBody": {
         "properties": {
