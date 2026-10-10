@@ -43,6 +43,9 @@ uv run pytest
 
 ## Scripted Office acceptance (offline)
 
+The [acceptance checklist](docs/ACCEPTANCE.md) also covers offline cross-provider
+handoffs and opt-in real-provider validation.
+
 Use [`scripts/showcase.py`](scripts/showcase.py) to watch seven scripted acceptance
 scenarios. It runs the real API, Driver, local demo Gate (pytest), model routing
 and SSE stream. Provider replies are replaced with fixed scripts, so no real
