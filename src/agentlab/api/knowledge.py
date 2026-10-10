@@ -321,9 +321,9 @@ def build_router(svc: Services) -> APIRouter:
                 raise HTTPException(409, "workspace overlaps another project; use an independent worktree")
         if not body.name.strip() or not body.goal.strip():
             raise HTTPException(422, "name and goal are required")
-        settings = body.settings
+        settings = body.settings or ProjectSettings()
         try:
-            cfg = project_config(svc.cfg, settings) if settings else svc.cfg
+            cfg = project_config(svc.cfg, settings)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         project = svc.projects.create(body.name.strip(), body.goal.strip(), str(workspace), publish=False)

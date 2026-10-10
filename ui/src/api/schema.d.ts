@@ -1182,7 +1182,7 @@ export interface components {
             max_iter?: number;
             /**
              * Retrieval
-             * @default keyword
+             * @default hybrid
              * @enum {string}
              */
             retrieval?: "off" | "keyword" | "hybrid";
@@ -1229,7 +1229,7 @@ export interface components {
             max_iter: number;
             /**
              * Retrieval
-             * @default keyword
+             * @default hybrid
              * @enum {string}
              */
             retrieval: "off" | "keyword" | "hybrid";

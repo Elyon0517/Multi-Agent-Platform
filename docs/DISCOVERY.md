@@ -310,7 +310,7 @@ auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束�
 - **模型（已实测）**：FastEmbed 0.7.4；默认 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`（384 维、多语言、Apache-2.0、约 220 MB）与 `BAAI/bge-reranker-base`（中英文、MIT、约 1 GB）。固定 CPUExecutionProvider，首次使用下载至 `.agentlab/models`；启动不下载。远程 URL 只覆盖 embedding，rerank 当前始终本地，可用 `rerank_enabled: false` 关闭；远程 rerank 接口尚未实现。
 - **维度固定**：pgvector 索引维度由所选模型决定；更换模型须用现有「重建向量」功能重建全部向量。`memory.embedding_model + embedding_version + embedding_dimensions` 必须落库。
 - **性能**：下载、模型初始化、embedding 与 rerank 都由后台线程执行，锁定单模型推理并限制 CPU 线程数；长中文块再按 400 字分窗，embedding 平均池化、rerank 取各窗最大分，避免尾部静默截断。
-- **检索（当前）**：Python BM25 / cosine → RRF 候选 → 本地 rerank top-k，pinned 候选优先保留。Postgres JSON 持久化向量与维度元数据；`pgvector HNSW / tsvector` SQL 查询仍是后续工作。项目仍可选择 off / keyword / hybrid，默认 keyword；开启 hybrid 无需配 key。
+- **检索（当前）**：Python BM25 / cosine → RRF 候选 → 本地 rerank top-k，pinned 候选优先保留。Postgres JSON 持久化向量与维度元数据；`pgvector HNSW / tsvector` SQL 查询仍是后续工作。项目仍可选择 off / keyword / hybrid，新项目默认 hybrid，无需配 key；已有显式 keyword / off 设置保持不变。
 - **开源**：用户 `docker compose up` + 启动后端即可使用向量检索，无需申请 embedding key。
 
 ---
@@ -887,7 +887,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
 | 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
 | memory 文档 | global 明确共享；project 上传/替换/移除仅影响本项目，保留历史版本；agent 私有记忆需 project | 相同文档名跨项目隔离测试，移除文档不误删同 source 的 note |
-| RAG | 项目选择 off / keyword / hybrid，默认 keyword；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
+| RAG | 项目选择 off / keyword / hybrid，新项目默认 hybrid；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
 | embedding 配置 | 独立 embedding URL/Key 保存至本机 .env；模型/维度/version 在 models.yaml；可测试接口、重建共享知识与项目/agent 记忆向量 | 有凭据不等于可用：只有实际调用成功才 ready；v1.9 起默认改用本地 embedding（§7.4），真实向量验收不再依赖外部服务 |
 | 配置即代码 | 控制台支持项目设置 YAML 导出/校验导入，适合提交 Git；run 固化完整配置 | 全局模型能力/价格仍在 config/*.yaml，项目选项是持久化运行数据。导入不改变已存在 run |
 

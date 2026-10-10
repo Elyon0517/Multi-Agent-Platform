@@ -1,7 +1,7 @@
 {
   "evaluated_date": "2026-10-10",
   "platform": "arm64",
-  "elapsed_s": 2.12,
+  "elapsed_s": 2.3,
   "stats": {
     "items": 3,
     "embedded": 3,
@@ -72,6 +72,6 @@
       ]
     }
   ],
-  "scope": "Real CPU upload/search API smoke with an empty env file, not a retrieval benchmark.",
+  "scope": "Real CPU upload/search API smoke: empty env file and default project settings, not a retrieval benchmark.",
   "quality_limit": "An earlier vague query (数据库如何持久化？) ranked an irrelevant code-testing note first; broader paraphrase evaluation remains necessary."
 }

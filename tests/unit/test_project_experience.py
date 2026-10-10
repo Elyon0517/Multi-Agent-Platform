@@ -83,7 +83,7 @@ async def test_auto_dispatch_is_checkpointed_and_manual_settings_frozen(tmp_path
     project.settings = ProjectSettings(retrieval="off", budget_cents=999)
     svc.projects.save(project)
     restored = svc.restore_driver(run.id)
-    assert restored.recovery_options["project_settings"]["retrieval"] == "keyword"
+    assert restored.recovery_options["project_settings"]["retrieval"] == "hybrid"
     assert restored.cfg.budget.default_run_budget_cents == 500
     assert restored.recovery_options["assignments"] == driver.recovery_options["assignments"]
     driver.workspace.close()
@@ -113,7 +113,7 @@ def test_project_yaml_profile_is_validated_and_round_trips(tmp_path: Path) -> No
     with TestClient(create_app(svc)) as client:
         profile = client.get(f"/projects/{project.id}/profile").text
         assert "root_alias: root" in profile
-        response = client.put(f"/projects/{project.id}/profile", json={"yaml_text": profile.replace("keyword", "off")})
+        response = client.put(f"/projects/{project.id}/profile", json={"yaml_text": profile.replace("retrieval: hybrid", "retrieval: off")})
         assert response.status_code == 200 and response.json()["settings"]["retrieval"] == "off"
         assert client.put(f"/projects/{project.id}/profile", json={"yaml_text": "unknown: value"}).status_code == 422
         assert "retrieval: 'off'" in client.get(f"/projects/{project.id}/profile").text
@@ -274,3 +274,28 @@ async def test_roster_uses_frozen_dispatch_not_current_project_defaults(tmp_path
         assert client.get(f"/roster?project_id={project.id}").json() != list(entries.values())
         assert {item["role"]: item for item in client.get(f"/roster?run_id={run.id}").json()} == entries
         assert client.get("/roster?run_id=missing").status_code == 404
+
+
+def test_new_project_defaults_enable_semantic_retrieval_without_settings(tmp_path: Path) -> None:
+    from tests.unit.test_memory_project import FakeEmbedder
+
+    svc = services(tmp_path)
+    svc.knowledge.memory.embedder = FakeEmbedder()
+    with TestClient(create_app(svc)) as client:
+        response = client.post('/projects', json={
+            'name': 'default', 'goal': 'semantic retrieval',
+            'workspace': str(seed_demo_workspace(tmp_path / 'default')), 'runtime': 'fake',
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['settings']['retrieval'] == 'hybrid'
+        uploaded = client.post(f'/knowledge?project_id={project["id"]}',
+                               files={'file': ('resume.md', 'My resume summary')})
+        assert uploaded.status_code == 200
+        # No keyword overlap: this succeeds only when the new default uses vectors.
+        hits = client.post('/memory/search', json={'project_id': project['id'], 'query': 'career'}).json()
+        assert hits and hits[0]['item']['text'] == 'My resume summary'
+        saved = client.put(f'/projects/{project["id"]}/settings', json={'retrieval': 'keyword'})
+        assert saved.status_code == 200 and saved.json()['settings']['retrieval'] == 'keyword'
+        assert client.get(f'/projects/{project["id"]}').json()['settings']['retrieval'] == 'keyword'
+        assert client.post('/memory/search', json={'project_id': project['id'], 'query': 'career'}).json() == []

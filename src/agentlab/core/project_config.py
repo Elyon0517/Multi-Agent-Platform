@@ -20,7 +20,7 @@ class ProjectSettings(Strict):
     bindings: dict[str, Binding] = {}
     budget_cents: float = Field(default=500, gt=0)
     max_iter: int = Field(default=5, ge=1, le=50)
-    retrieval: Literal["off", "keyword", "hybrid"] = "keyword"
+    retrieval: Literal["off", "keyword", "hybrid"] = "hybrid"
     retrieval_k: int = Field(default=6, ge=1, le=20)
 
 

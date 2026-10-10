@@ -3390,7 +3390,7 @@
               "hybrid"
             ],
             "title": "Retrieval",
-            "default": "keyword"
+            "default": "hybrid"
           },
           "retrieval_k": {
             "type": "integer",
@@ -3457,7 +3457,7 @@
               "hybrid"
             ],
             "title": "Retrieval",
-            "default": "keyword"
+            "default": "hybrid"
           },
           "retrieval_k": {
             "type": "integer",

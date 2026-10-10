@@ -36,7 +36,7 @@ export function ProjectConfigEditor({
         bindings: catalog.roles,
         budget_cents: 500,
         max_iter: 5,
-        retrieval: 'keyword',
+        retrieval: 'hybrid',
         retrieval_k: 6,
       });
   }, [catalog, value, onChange]);

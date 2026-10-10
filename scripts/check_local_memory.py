@@ -23,9 +23,10 @@ def main() -> None:
         with TestClient(create_app(svc)) as client:
             project = client.post("/projects", json={
                 "name": "local-smoke", "goal": "validate local memory", "workspace": str(scratch),
-                "runtime": "fake", "settings": {"retrieval": "hybrid"},
+                "runtime": "fake",
             })
             project.raise_for_status()
+            assert project.json()["settings"]["retrieval"] == "hybrid"
             for index, text in enumerate([
                 "项目使用 PostgreSQL 数据库保存数据。", "苹果是一种水果，常用于制作果汁。", "测试通过后才能提交代码。",
             ]):
@@ -44,7 +45,10 @@ def main() -> None:
             stats = client.get("/memory/status").json()
             report = {"evaluated_date": "2026-10-10", "platform": platform.machine(),
                       "elapsed_s": round(time.monotonic() - started, 2), "stats": stats, "cases": cases,
-                      "scope": "Real CPU upload/search API smoke with an empty env file, not a retrieval benchmark.",
+                      "scope": (
+                          "Real CPU upload/search API smoke: empty env file and default project settings, "
+                          "not a retrieval benchmark."
+                      ),
                       "quality_limit": (
                           "An earlier vague query (数据库如何持久化？) ranked an irrelevant code-testing note first; "
                           "broader paraphrase evaluation remains necessary."
