@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
@@ -44,6 +45,15 @@ class DecideBody(BaseModel):
     max_iter: int | None = None
 
 
+class PickFolderBody(BaseModel):
+    # A required JSON body forces a CORS preflight, so other websites cannot open the dialog.
+    prompt: str = Field(default="Select the project folder", max_length=200)
+
+
+class PickedFolder(BaseModel):
+    path: str | None
+
+
 class RosterEntry(BaseModel):
     role: str
     kind: Literal["worker", "reviewer", "deterministic"]
@@ -79,6 +89,23 @@ def create_app(svc: Services | None = None) -> FastAPI:
     @app.get("/monitor/usage", response_model=MonitorUsage)
     def monitor_usage() -> MonitorUsage:
         return summarize(svc.store, svc.cfg.agents)
+
+    @app.post("/local/pick-folder", response_model=PickedFolder)
+    async def pick_folder(body: PickFolderBody) -> PickedFolder:
+        """Open the native folder picker on this machine; the browser cannot see local paths."""
+        if sys.platform != "darwin":
+            raise HTTPException(501, "folder picker is only available on macOS; type the path instead")
+        prompt = body.prompt.replace("\\", "\\\\").replace('"', '\\"')
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", f'POSIX path of (choose folder with prompt "{prompt}")',
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        if proc.returncode != 0:
+            if b"-128" in err:  # the user cancelled the dialog
+                return PickedFolder(path=None)
+            raise HTTPException(500, "folder picker failed")
+        return PickedFolder(path=out.decode().strip().rstrip("/") or None)
 
     @app.delete("/projects/{project_id}")
     def delete_project(project_id: str) -> dict[str, bool]:

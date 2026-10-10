@@ -1435,6 +1435,7 @@
     "newProject": "New project",
     "name": "Name",
     "workspacePathGitRepo": "Workspace path (git repo)",
+    "chooseFolder": "Choose folder…",
     "theProjectPlannerRootModelBreaksThisIntoPhasesAndSteps": "The project-planner (root model) breaks this into phases and steps.",
     "planning": "planning…",
     "createPlan": "Create & plan",
