@@ -30,6 +30,7 @@ Execution failures pause for human intervention. Only reviewed signoff plus the 
 | `src/agentlab/api/` | FastAPI daemon + SSE event stream consumed by the UI. |
 | `src/agentlab/cli/` | `agentlab` CLI. |
 | `ui/` | React + Pixi Office Floor (ported from munder-difflin), run views. Optional. |
+| `scripts/showcase.py` | Scripted, offline visual acceptance for the Office lifecycle, routing, failures and approvals. |
 
 ## Quickstart
 
@@ -38,6 +39,77 @@ uv sync
 uv run agentlab config-check
 uv run agentlab demo
 uv run pytest
+```
+
+## Scripted Office acceptance (offline)
+
+Use [`scripts/showcase.py`](scripts/showcase.py) to watch seven scripted acceptance
+scenarios. It runs the real API, Driver, local demo Gate (pytest), model routing
+and SSE stream. Provider replies are replaced with fixed scripts, so no real
+model is called and no model fees are incurred. Model labels come from
+`config/models.yaml`; they identify the configured route, not a live provider response.
+This complements automated tests; it does not replace real-model or Docker Gate validation.
+
+Stop `agentlab serve` before starting: the showcase owns port **8765**. From the
+repository root, run this in one terminal:
+
+```bash
+uv sync
+uv run python scripts/showcase.py
+```
+
+In a second terminal:
+
+```bash
+cd ui
+npm ci
+npm run dev
+```
+
+Open **[http://localhost:5173/?follow=1](http://localhost:5173/?follow=1)**. The UI
+automatically selects each new run, and the script prints its name and what to
+watch. Root stays seated; overhead labels identify agents. Active workers enter
+and completed or interrupted workers leave. By default the script makes approval
+decisions automatically after briefly showing each approval banner.
+
+| Scenario | Expected behavior | Final status |
+|---|---|---|
+| S1 Happy path | Planner → Coder/tool → Gate → three independent reviewers, leaving one by one → approval; duplicate workspace run returns 409 | DONE |
+| S2 Gate/review rework | Gate failure brings Coder back; architecture feedback requests a docstring before signoff | DONE |
+| S3 Claude outage | Planner retries and falls back to GPT; Coder uses Claude | DONE |
+| S4 Budget pause | Reviewers leave on pause, then return after the budget increase | DONE |
+| S5 Conflicting reviews | Arbitration escalates; human feedback resolves the conflict | DONE |
+| S6 Workspace escape | Coder's outside-path edit is rejected; the run is aborted and workers leave | CANCELLED |
+| S7 Oscillation | Repeated incorrect diff triggers escalation; the run is aborted | CANCELLED |
+
+Useful options:
+
+```bash
+uv run python scripts/showcase.py --only S2,S5   # selected scenarios
+uv run python scripts/showcase.py --speed 2     # faster playback
+uv run python scripts/showcase.py --manual      # decide approvals in the UI
+```
+
+If another service needs port 8765, use an alternate port and restart the UI dev
+server with the matching proxy target:
+
+```bash
+# Terminal 1, repository root
+uv run python scripts/showcase.py --port 8766
+# Terminal 2, ui directory
+AGENTLAB_API_TARGET=http://127.0.0.1:8766 npm run dev
+```
+
+After the seven scenarios, the API stays running so you can inspect runs and
+artifacts. Press **Ctrl+C** in the showcase terminal to stop it, and Ctrl+C in the
+UI terminal to stop Vite. Showcase runs use disposable in-memory records; sample
+workspaces are created under `~/.agentlab-workspaces/showcase-*`.
+
+Run the automated lifecycle regressions separately:
+
+```bash
+cd ui
+npm test -- src/scene/adapter/floorLifecycle.test.ts
 ```
 
 ## Persistence and recovery

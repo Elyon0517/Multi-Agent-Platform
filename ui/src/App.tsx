@@ -77,6 +77,23 @@ export function App() {
     });
   }, [activeRunId, applyEvent, setRuns]);
 
+  // `?follow=1` (used by scripts/showcase.py): keep the newest run without a project on screen.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('follow')) return;
+    const timer = setInterval(() => {
+      if (useStore.getState().activeProjectId) return;
+      void api.runs().then((all) => {
+        const runs = all.filter(r => r.project_id === 'default');
+        const newest = runs.reduce<typeof runs[number] | null>((a, r) => (!a || r.created_at > a.created_at ? r : a), null);
+        if (!newest || newest.id === useStore.getState().activeRunId) return;
+        setRuns(runs);
+        setActiveRun(newest.id);
+        setTab('runs');
+      }).catch(() => undefined);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [setRuns, setActiveRun, setTab]);
+
   const openRun = async (id: string) => {
     const projectId = useStore.getState().activeProjectId;
     const next = await api.runs(projectId ?? undefined);
