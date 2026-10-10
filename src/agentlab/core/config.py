@@ -40,6 +40,11 @@ class EmbeddingCfg(Strict):
     model: str
     dimensions: int
     version: int
+    local_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    local_dimensions: int = Field(default=384, ge=1)
+    local_version: int = Field(default=1, ge=1)
+    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_enabled: bool = True
 
 
 class ModelsCfg(Strict):

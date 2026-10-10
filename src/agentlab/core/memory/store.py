@@ -58,11 +58,18 @@ class Hit(Strict):
 
 
 class Embedder(Protocol):
-    model: str
+    @property
+    def model(self) -> str: ...
 
     def available(self) -> bool: ...
 
     async def __call__(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class Reranker(Protocol):
+    model: str
+
+    async def __call__(self, query: str, documents: list[str]) -> list[float]: ...
 
 
 def tokenize(text: str) -> list[str]:
@@ -114,6 +121,14 @@ class InMemoryMemoryStore:
     last_error: str | None = None
     verified: bool = False
     _items: dict[str, MemoryItem] = field(default_factory=dict)
+    reranker: Reranker | None = None
+    rerank_ready: bool = False
+    rerank_error: str | None = None
+    _verified_spec: tuple[object, ...] | None = None
+
+    def _embedding_spec(self) -> tuple[object, ...]:
+        return (getattr(self.embedder, "model", None), getattr(self.embedder, "version", None),
+                getattr(self.embedder, "dimensions", None), getattr(self.embedder, "backend", None))
 
     def flush(self) -> None:
         pass
@@ -124,22 +139,31 @@ class InMemoryMemoryStore:
     async def _embed(self, texts: list[str]) -> list[list[float]] | None:
         if self.embedder is None or not self._can_embed():
             return None
-        try:
-            vectors = await self.embedder(texts)
-            dimensions = getattr(self.embedder, "dimensions", None)
-            if len(vectors) != len(texts) or any(
-                not v or (dimensions is not None and len(v) != dimensions) or not all(math.isfinite(n) for n in v)
-                for v in vectors
-            ):
-                raise ValueError("invalid embedding batch or dimensions")
-            self.verified = True
-            self.last_error = None
-            return vectors
-        except Exception as e:  # memory must never break a run; degrade to keyword search
-            log.warning("embedding failed, falling back to keyword search: %s", type(e).__name__)
-            self.last_error = type(e).__name__
-            self.verified = False
-            return None
+        for attempt in range(2):
+            spec = self._embedding_spec()
+            try:
+                vectors = await self.embedder(texts)
+                if spec != self._embedding_spec():
+                    raise ValueError("embedding configuration changed during inference; retry")
+                dimensions = getattr(self.embedder, "dimensions", None)
+                if len(vectors) != len(texts) or any(
+                    not v or (dimensions is not None and len(v) != dimensions) or not all(math.isfinite(n) for n in v)
+                    for v in vectors
+                ):
+                    raise ValueError("invalid embedding batch or dimensions")
+                self._verified_spec = spec
+                self.verified = True
+                self.last_error = None
+                return vectors
+            except Exception as e:  # memory must never break a run; degrade to keyword search
+                if attempt == 0 and spec != self._embedding_spec():
+                    # A failed remote call switched to local, or Settings changed mid-call.
+                    continue
+                log.warning("embedding failed, falling back to keyword search: %s", type(e).__name__)
+                self.last_error = type(e).__name__
+                self.verified = False
+                return None
+        return None
 
     async def add(self, items: list[MemoryItem], embed: bool = True) -> list[MemoryItem]:
         vectors = await self._embed([i.text for i in items]) if items and embed else None
@@ -168,7 +192,17 @@ class InMemoryMemoryStore:
             "items": len(items),
             "embedded": sum(1 for i in items if i.embedding),
             "embedding_model": self.embedder.model if self.embedder else None,
-            "embedding_ready": self._can_embed() and self.verified,
+            "embedding_ready": self._can_embed() and self.verified and self._verified_spec == self._embedding_spec(),
+            "embedding_backend": getattr(self.embedder, "backend", "remote" if self.embedder else None),
+            "embedding_dimensions": getattr(self.embedder, "dimensions", None),
+            "compatible_embedded": sum(1 for i in items if i.embedding and self.embedder
+                and i.embedding_model == self.embedder.model
+                and i.embedding_version == getattr(self.embedder, "version", None)
+                and (getattr(self.embedder, "dimensions", None) is None
+                     or len(i.embedding) == getattr(self.embedder, "dimensions", None))),
+            "rerank_model": self.reranker.model if self.reranker else None,
+            "rerank_ready": self.rerank_ready,
+            "rerank_error": self.rerank_error,
             "embedding_configured": self._can_embed(),
             "last_error": self.last_error,
         }
@@ -203,12 +237,29 @@ class InMemoryMemoryStore:
         rankings = [bm25_rank(query, pool)[:50]]
         vec = [i for i in pool if i.embedding and self.embedder and i.embedding_model == self.embedder.model
                and i.embedding_version == getattr(self.embedder, "version", None)]
+        vector_spec = self._embedding_spec()
         qvs = await self._embed([query]) if vec and use_vectors else None
+        if vector_spec != self._embedding_spec():
+            qvs = None
         if qvs:
             vec = [i for i in vec if len(i.embedding or []) == len(qvs[0])]
             rankings.append(sorted(vec, key=lambda i: -cosine(qvs[0], i.embedding or []))[:50])
         pinned = [i for i in pool if i.pinned]
-        return rrf([*rankings, pinned], k)
+        hits = rrf([*rankings, pinned], max(k, 24) if self.reranker and use_vectors else k)
+        if self.reranker and use_vectors and len(hits) > 1:
+            try:
+                scores = await self.reranker(query, [h.item.text for h in hits])
+                if len(scores) != len(hits) or not all(math.isfinite(s) for s in scores):
+                    raise ValueError("invalid reranker scores")
+                # Pinned candidates stay ahead; a reranker cannot discard user-pinned context.
+                hits = [Hit(item=h.item, score=s) for h, s in sorted(
+                    zip(hits, scores, strict=True), key=lambda pair: (not pair[0].item.pinned, -pair[1]),
+                )]
+                self.rerank_ready, self.rerank_error = True, None
+            except Exception as e:
+                self.rerank_ready, self.rerank_error = False, type(e).__name__
+                log.warning("rerank failed, retaining fused ranking: %s", type(e).__name__)
+        return hits[:k]
 
 
 class PersistentMemoryStore(InMemoryMemoryStore):

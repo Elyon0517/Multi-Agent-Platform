@@ -1036,3 +1036,27 @@ async def test_optional_gate_checkpoint_restore_store_parity(store, tmp_path):
     assert store.pending_approval(run.id).payload["automated_checks"] == "not_run"
     restored.decide(run.id, "approve")
     assert (await restored.run(run.id)).status == RunStatus.DONE
+
+
+async def test_local_dimension_vectors_survive_store_reload(store):
+    from agentlab.core.memory.store import GLOBAL, MemoryItem, MemoryKind, PersistentMemoryStore
+
+    class Encoder:
+        model = 'local-384'
+        dimensions = 384
+        version = 1
+
+        def available(self):
+            return True
+
+        async def __call__(self, texts):
+            return [[1.0] + [0.0] * 383 for _ in texts]
+
+    memory = PersistentMemoryStore(store, Encoder())
+    saved = await memory.add([MemoryItem(project_id=None, namespace=GLOBAL, kind=MemoryKind.DOCUMENT,
+                                        text='中文数据库文档')])
+    restored = PersistentMemoryStore(store, Encoder())
+    item = restored.items_in(GLOBAL)[0]
+    assert item.id == saved[0].id and item.embedding_dimensions == 384
+    assert item.embedding_model == 'local-384' and len(item.embedding) == 384
+    assert (await restored.search(None, [GLOBAL], '语义问题'))[0].item.id == item.id

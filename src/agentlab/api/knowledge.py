@@ -37,6 +37,12 @@ class MemoryStatus(BaseModel):
     embedding_ready: bool
     embedding_configured: bool
     last_error: str | None
+    embedding_backend: str | None
+    embedding_dimensions: int | None
+    compatible_embedded: int
+    rerank_model: str | None
+    rerank_ready: bool
+    rerank_error: str | None
 
 
 class ProfileLoader(yaml.SafeLoader):
@@ -257,7 +263,7 @@ def build_router(svc: Services) -> APIRouter:
     @r.post("/knowledge/reindex", response_model=MemoryStatus)
     async def reindex_global() -> dict[str, object]:
         if not svc.knowledge.memory._can_embed():
-            raise HTTPException(422, "configure the separate embedding URL and API key first")
+            raise HTTPException(422, "embedding provider unavailable")
         await svc.knowledge.memory.add(svc.knowledge.memory.items_in(GLOBAL))
         return svc.knowledge.memory.stats()
 
@@ -268,7 +274,7 @@ def build_router(svc: Services) -> APIRouter:
         if not settings or settings.retrieval != "hybrid":
             raise HTTPException(422, "enable hybrid retrieval for this project first")
         if not svc.knowledge.memory._can_embed():
-            raise HTTPException(422, "configure the separate embedding URL and API key first")
+            raise HTTPException(422, "embedding provider unavailable")
         items = [
             i
             for namespace in [PROJECT, *(agent_ns(role) for role in svc.cfg.agents)]

@@ -45,7 +45,7 @@
 | Memory | Blackboard + Episodic + Semantic（MVP）；Procedural 延后 |
 | 隔离 | per-role namespace 私有 + 共享黑板；per-project Postgres schema |
 | 记忆写入 | 每个 run 结束时 summarizer 从你的反馈与 review findings 总结经验，按重要性写入 global / project / agent，并去重、退役旧条目（§9.1）+ `pin_memory` 手动工具 |
-| LLM | **纯云端调用，本地不跑模型**；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口） |
+| LLM | **纯云端调用，本地不跑 LLM**；embedding / rerank 小模型允许本地 CPU 运行（ADR-030）；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口） |
 | 路由 | 静态 policy 表（角色→模型别名）+ root agent 受限 override（可复现优先） |
 | 多模型评审 | 2–3 个不同 LLM 并行独立 review（核心卖点） |
 | 预算 | 确定性中间件熔断 + LiteLLM virtual key 周限额，**不用 agent 做熔断** |
@@ -283,9 +283,19 @@ auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束�
 
 `num_retries = 3` 指同一次逻辑 LLM 调用的额外重试次数（最多 4 次请求）。仅瞬时错误（429 / 5xx / 连接 / 读超时 / 空响应）重试；401/403、上下文超长、内容拒绝、预算超限不重试。结构化输出修复独立预算 `max_repairs: 2`（Pydantic 错误原文回灌）。重试耗尽后最多换 1 个 fallback 模型。每次 attempt 前预留预算（并行请求共享预留量）；网关返回的 usage 逐次即时记账，包括空响应、拒绝与 JSON 修复失败。没有 usage 的传输失败无法准确计费，不伪造 token；每次逻辑调用一个 `step_id`，所有 attempt 挂同一 step。
 
-### 7.4 Embedding 与 Rerank（API）
+### 7.4 Embedding 与 Rerank（v1.9：本地默认，远程可选，ADR-030）
 
-embedding 可以独立配置 URL/Key（支持时也可使用聊天网关），默认 `text-embedding-3-large`；`memory.embedding_model + embedding_version` 必须落库。全文用 Postgres `tsvector` BM25，与向量做 RRF 融合；rerank API 可选。
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 | 远程 OpenAI 兼容接口 | 在 Settings 填写 `AGENTLAB_EMBEDDING_BASE_URL`（及 Key）时使用，例如 OpenAI `text-embedding-3-small`，或本机 Ollama（`http://localhost:11434/v1`，Key 可留空） |
+| 2（默认） | 本地进程内模型 | 未配置远程时使用；远程失败也回退本地，60 秒后再试远程。进程内 CPU 推理、首次下载模型；不需要任何 key 或额外服务 |
+| 3 | 关键词检索 | 两者都不可用时降级（ADR-024），不影响 run |
+
+- **模型（已实测）**：FastEmbed 0.7.4；默认 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`（384 维、多语言、Apache-2.0、约 220 MB）与 `BAAI/bge-reranker-base`（中英文、MIT、约 1 GB）。固定 CPUExecutionProvider，首次使用下载至 `.agentlab/models`；启动不下载。远程 URL 只覆盖 embedding，rerank 当前始终本地，可用 `rerank_enabled: false` 关闭；远程 rerank 接口尚未实现。
+- **维度固定**：pgvector 索引维度由所选模型决定；更换模型须用现有「重建向量」功能重建全部向量。`memory.embedding_model + embedding_version + embedding_dimensions` 必须落库。
+- **性能**：下载、模型初始化、embedding 与 rerank 都由后台线程执行，锁定单模型推理并限制 CPU 线程数；长中文块再按 400 字分窗，embedding 平均池化、rerank 取各窗最大分，避免尾部静默截断。
+- **检索（当前）**：Python BM25 / cosine → RRF 候选 → 本地 rerank top-k，pinned 候选优先保留。Postgres JSON 持久化向量与维度元数据；`pgvector HNSW / tsvector` SQL 查询仍是后续工作。项目仍可选择 off / keyword / hybrid，默认 keyword；开启 hybrid 无需配 key。
+- **开源**：用户 `docker compose up` + 启动后端即可使用向量检索，无需申请 embedding key。
 
 ---
 
@@ -878,7 +888,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 |---|---|---|---|
 | ADR-001 | 编排用「自研 Loop Driver + Google ADK 执行层」 | 2026-10-09 | ADK 的 ParallelAgent、Callbacks、MCP 契合度高；checkpoint 短板由自研状态机补齐 |
 | ADR-002 | Python 后端 + TypeScript 前端 | 2026-10-09 | ADK 生态为 Python；前端仅作观察窗 |
-| ADR-003 | 不跑本地模型，全部云端 API | 2026-10-09 | 降低硬件与运维负担 |
+| ADR-003 | LLM 不跑本地模型，全部云端 API；embedding / rerank 例外见 ADR-030 | 2026-10-09 | 降低硬件与运维负担 |
 | ADR-004 | 客观 Gate 前置于 LLM 评审 | 2026-10-09 | 砍掉 60–70% 无效评审轮次 |
 | ADR-005 | `blocking + major == 0` 即 signoff | 2026-10-09 | 防止多 reviewer 在 nit 上死循环 |
 | ADR-006 | 熔断用确定性中间件，不用 agent | 2026-10-09 | 非确定性的熔断等于没有熔断 |
@@ -904,6 +914,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-026 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 2026-10-10 | 用户要求保持简单；系统重点是 multi-agent 分工，而不是增加限制 |
 | ADR-027 | 新增 Monitor 模块：按 agent 汇总累计 token 与费用，跨项目合并；数据来自 `public.usage_ledger` 单一流水表 | 2026-10-10 | 用户要求只按 agent 区分、不分 project；单表追加写入，比每次扫描所有项目 schema 简单、快 |
 | ADR-028 | summarizer 在每个 run 结束时运行一次，读人工反馈与 review findings，输出 add / update / retire 并自行标注 global / project / agent 层；去重在写入时完成，不设定时任务；新增删除项目，项目 / agent 记忆随项目 schema 删除，global 与 usage 流水保留；对话偏好总结暂不做 | 2026-10-10 | 用户决定：以总结经验为主，偏好与高优先级经验进 global、其余进 project / agent；需要去重退役，且项目记忆随项目删除。按 run 而非按迭代或按天，信息完整、调用最少、无需调度器 |
+| ADR-030 | embedding / rerank 默认使用本地进程内中文小模型；Settings 的远程 OpenAI 兼容 URL 覆盖 embedding（Key 可选），远程失败回退本地；都不可用时降级为关键词，rerank 失败保留 RRF（ADR-003 的例外；远程 rerank 暂未实现） | 2026-10-10 | 用户要求其他用户能快速上手、不必申请 key；本地小模型 CPU 即可运行，比额外容器（如 TEI）少一个服务、无 Apple Silicon 镜像兼容问题 |
 
 
 ### 可靠性复核补充（2026-10-09）
@@ -1023,3 +1034,12 @@ env.py 实际读取 migration_scope；项目范围执行前后比较基础 schem
 - P4 收尾完成：run API 返回完整 FAST / FULL 检查报告；UI 按 file:line / code / message 显示诊断与失败日志尾部，pytest 解析包含断言位置。核心前端 API 模型与请求类型来自 FastAPI OpenAPI，`gen:api` 本地生成、`check:api` 检测类型漂移。
 - 新增三项 summarizer 质量用例：重复问题版本化合并、个人偏好进入 global、项目约定留在 project；另检验 pinned/document 不变。沿用生产 on_finished hook；fake 标明 blind spots，raw 调用真实配置网关。固定回归是合成反馈/findings，不涉及完整编码任务。
 - 真实网关评测 3/3，通过结果保存在 `evals/memory-scorecard-real.json`；fake 全基线为 18/18（blind spots=18）。验证覆盖 231 项 Python unit、34 项持久化测试（含 PostgreSQL）、29 项 Vitest；UI production build、Ruff、mypy 与 OpenAPI 类型漂移检查通过。
+
+
+### 本地 Memory 模型实现与验证（2026-10-10，ADR-030）
+
+- 默认 FastEmbed CPU：多语言 MiniLM 384 维 + 中英文 BGE base rerank，模型按需下载、缓存于 `.agentlab/models`。下载、初始化与推理都在线程中；长中文块再分窗，避免尾部截断。
+- Settings URL 覆盖 embedding，Ollama Key 可空；远程失败回退本地并冷却 60 秒，本地失败回退关键词；rerank 失败保留 RRF。远程 rerank 尚未实现。
+- 模型 / 版本 / 维度不兼容的向量不参与融合，重建保留 id、历史与 pinned 文本；Memory 面板展示后端、有效向量数和 rerank 状态。pgvector SQL 索引仍待开发，目前查询在 Python 中完成。
+- 验证：后端完整单测 237 项通过，后续新增覆盖包含在 20 项针对性测试中；持久化完整 34 项与新增 384 维重载 2 项通过；前端 29 项、构建、OpenAPI 生成一致性、ruff / mypy 通过。
+- Apple Silicon 真实模型 API smoke：空 env、中文上传、中英文检索 3/3；脚本 `scripts/check_local_memory.py`，报告 `evals/local-memory-scorecard-real.json`。这不是质量 benchmark；报告保留先前模糊问句排序不佳的观察。

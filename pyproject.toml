@@ -20,6 +20,7 @@ dependencies = [
     "alembic>=1.13",
     "pgvector>=0.3",
     "anthropic>=0.79",
+    "fastembed>=0.7,<1",
 ]
 
 [project.optional-dependencies]

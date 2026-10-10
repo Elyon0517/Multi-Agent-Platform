@@ -1,0 +1,77 @@
+{
+  "evaluated_date": "2026-10-10",
+  "platform": "arm64",
+  "elapsed_s": 2.12,
+  "stats": {
+    "items": 3,
+    "embedded": 3,
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "embedding_ready": true,
+    "embedding_configured": true,
+    "last_error": null,
+    "embedding_backend": "local",
+    "embedding_dimensions": 384,
+    "compatible_embedded": 3,
+    "rerank_model": "BAAI/bge-reranker-base",
+    "rerank_ready": true,
+    "rerank_error": null
+  },
+  "cases": [
+    {
+      "query": "项目使用什么数据库？",
+      "passed": true,
+      "hits": [
+        {
+          "text": "项目使用 PostgreSQL 数据库保存数据。",
+          "score": 7.178308963775635
+        },
+        {
+          "text": "测试通过后才能提交代码。",
+          "score": -5.49350643157959
+        },
+        {
+          "text": "苹果是一种水果，常用于制作果汁。",
+          "score": -10.19274616241455
+        }
+      ]
+    },
+    {
+      "query": "哪种水果可以榨汁？",
+      "passed": true,
+      "hits": [
+        {
+          "text": "苹果是一种水果，常用于制作果汁。",
+          "score": 4.179924488067627
+        },
+        {
+          "text": "测试通过后才能提交代码。",
+          "score": -10.192889213562012
+        },
+        {
+          "text": "项目使用 PostgreSQL 数据库保存数据。",
+          "score": -10.193557739257812
+        }
+      ]
+    },
+    {
+      "query": "What database stores project data?",
+      "passed": true,
+      "hits": [
+        {
+          "text": "项目使用 PostgreSQL 数据库保存数据。",
+          "score": 8.348902702331543
+        },
+        {
+          "text": "测试通过后才能提交代码。",
+          "score": -9.618326187133789
+        },
+        {
+          "text": "苹果是一种水果，常用于制作果汁。",
+          "score": -10.193333625793457
+        }
+      ]
+    }
+  ],
+  "scope": "Real CPU upload/search API smoke with an empty env file, not a retrieval benchmark.",
+  "quality_limit": "An earlier vague query (数据库如何持久化？) ranked an irrelevant code-testing note first; broader paraphrase evaluation remains necessary."
+}

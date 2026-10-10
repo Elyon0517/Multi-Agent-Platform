@@ -8,6 +8,7 @@ from uuid import uuid4
 from agentlab.adapters.events import InProcessEventBus
 from agentlab.adapters.gates.config_gate import ConfigGate, resolve_gate
 from agentlab.adapters.runtime.fake import FakeRuntime
+from agentlab.adapters.runtime.local_memory import LocalEmbedder, LocalReranker, RoutedEmbedder
 from agentlab.adapters.runtime.raw import OpenAICompatEmbedder
 from agentlab.adapters.sandbox.docker import DockerSandbox
 from agentlab.adapters.sandbox.local import LocalSandbox
@@ -260,12 +261,18 @@ def build_services(settings: Settings | None = None) -> Services:
     s = settings or Settings()
     cfg = load_config(s.config_dir)
     env = EnvFile(s.env_file)
-    embedder = OpenAICompatEmbedder(
+    remote_embedder = OpenAICompatEmbedder(
         lambda: (env.read().get("AGENTLAB_EMBEDDING_BASE_URL"), env.read().get("AGENTLAB_EMBEDDING_API_KEY")),
         cfg.models.embedding.model,
         cfg.models.embedding.dimensions,
         cfg.models.embedding.version,
     )
+    embedding_cfg = cfg.models.embedding
+    cache_dir = s.data_dir / "models"
+    embedder = RoutedEmbedder(remote_embedder, LocalEmbedder(
+        embedding_cfg.local_model, embedding_cfg.local_dimensions, embedding_cfg.local_version, cache_dir,
+    ))
+    reranker = LocalReranker(embedding_cfg.rerank_model, cache_dir) if embedding_cfg.rerank_enabled else None
     store: Store = InMemoryStore()
     if s.store_backend not in {"auto", "memory", "postgres"}:
         raise ValueError("store_backend must be auto, memory or postgres")
@@ -285,6 +292,7 @@ def build_services(settings: Settings | None = None) -> Services:
         if not isinstance(store, InMemoryStore)
         else InMemoryMemoryStore(embedder)
     )
+    memory.reranker = reranker
     return Services(
         settings=s,
         cfg=cfg,

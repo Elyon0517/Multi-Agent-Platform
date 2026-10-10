@@ -2924,6 +2924,58 @@
               }
             ],
             "title": "Last Error"
+          },
+          "embedding_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Backend"
+          },
+          "embedding_dimensions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Dimensions"
+          },
+          "compatible_embedded": {
+            "type": "integer",
+            "title": "Compatible Embedded"
+          },
+          "rerank_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Model"
+          },
+          "rerank_ready": {
+            "type": "boolean",
+            "title": "Rerank Ready"
+          },
+          "rerank_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Error"
           }
         },
         "type": "object",
@@ -2933,7 +2985,13 @@
           "embedding_model",
           "embedding_ready",
           "embedding_configured",
-          "last_error"
+          "last_error",
+          "embedding_backend",
+          "embedding_dimensions",
+          "compatible_embedded",
+          "rerank_model",
+          "rerank_ready",
+          "rerank_error"
         ],
         "title": "MemoryStatus"
       },

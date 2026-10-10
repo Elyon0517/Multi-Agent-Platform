@@ -57,6 +57,11 @@ embedding:
   model: text-embedding-3-large
   dimensions: 3072
   version: 1
+  local_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  local_dimensions: 384
+  local_version: 1
+  rerank_model: BAAI/bge-reranker-base
+  rerank_enabled: true
 providers:
   anthropic:
     base_url_env: AGENTLAB_ANTHROPIC_BASE_URL

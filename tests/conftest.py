@@ -28,3 +28,13 @@ def verdict(reviewer: str, *findings: Finding) -> Verdict:
 
 def iteration(n: int, diff_hash: str, findings: list[str] | None = None) -> Iteration:
     return Iteration(run_id="r", n=n, phase=RunStatus.GATING, diff_hash=diff_hash, finding_set=findings or [])
+
+
+@pytest.fixture(autouse=True)
+def no_model_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit/integration tests exercise outages without downloading GBs of model weights."""
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise ConnectionError("model download disabled in tests")
+
+    monkeypatch.setattr("fastembed.TextEmbedding", unavailable)
+    monkeypatch.setattr("fastembed.rerank.cross_encoder.TextCrossEncoder", unavailable)

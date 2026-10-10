@@ -173,6 +173,8 @@ export function KnowledgeView() {
           {stats ? t('lab.stats', { count: stats.items, embedded: stats.embedded, model: stats.embedding_model ?? t('lab.noEmbedder') }) + ' · '
             + (stats.embedding_ready ? t('lab.vectorSearchOn') : t('lab.embeddingUnverified')) : '…'}
         </Muted>
+        {stats && <Muted>{t(stats.embedding_backend === 'local' ? 'lab.localBackend' : 'lab.remoteBackend')} · {stats.embedding_dimensions ?? '—'}d · {t('lab.vectorCompatibility', { count: stats.compatible_embedded })}</Muted>}
+        {stats?.rerank_model && <Muted>{t('lab.rerankStatus', { model: stats.rerank_model, status: t(stats.rerank_ready ? 'lab.rerankReady' : 'lab.rerankUnverified') })}{stats.rerank_error ? ` · ${stats.rerank_error}` : ''}</Muted>}
         {stats?.last_error && <Muted>{stats.last_error}</Muted>}
         <PixelButton size="sm" onClick={() => { void api.probeEmbedding().then(setStats).catch(e => setError(errorText(e))); }}>{t('lab.testEmbedding')}</PixelButton>
         <PixelButton size="sm" onClick={() => { void api.reindexGlobalKnowledge().then(setStats).catch(e => setError(errorText(e))); }}>{t('lab.reindexSharedVectors')}</PixelButton>

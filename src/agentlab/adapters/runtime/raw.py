@@ -179,12 +179,12 @@ class OpenAICompatEmbedder:
         self.version = version
 
     def available(self) -> bool:
-        url, key = self._creds()
-        return bool(url and key)
+        url, _key = self._creds()
+        return bool(url)
 
     async def __call__(self, texts: list[str]) -> list[list[float]]:
         url, key = self._creds()
-        client = openai.AsyncOpenAI(base_url=url, api_key=key, max_retries=0, timeout=30)
+        client = openai.AsyncOpenAI(base_url=url, api_key=key or "ollama", max_retries=0, timeout=30)
         out: list[list[float]] = []
         try:
             for i in range(0, len(texts), self.BATCH):

@@ -1002,6 +1002,18 @@ export interface components {
             embedding_configured: boolean;
             /** Last Error */
             last_error: string | null;
+            /** Embedding Backend */
+            embedding_backend: string | null;
+            /** Embedding Dimensions */
+            embedding_dimensions: number | null;
+            /** Compatible Embedded */
+            compatible_embedded: number;
+            /** Rerank Model */
+            rerank_model: string | null;
+            /** Rerank Ready */
+            rerank_ready: boolean;
+            /** Rerank Error */
+            rerank_error: string | null;
         };
         /** Message */
         Message: {
