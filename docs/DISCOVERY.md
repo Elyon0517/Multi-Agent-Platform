@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.8 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）· 可持续更新
+> 状态：v1.9 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -27,6 +27,9 @@
 | 3 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 实时信息（如天气、最新文档）需要搜索；保持简单 | ADR-026 |
 | 4 | （v1.7）新增 **Monitor 模块**：按 agent 统计累计消耗的 token（跨所有 project 汇总，不按 project 区分） | 了解哪个 agent 用得最多，便于调整模型与分工 | ADR-027 |
 | 5 | （v1.8）**summarizer 接入**：每个 run 结束时从人工反馈与 review findings 总结经验，按重要性写入 global / project / agent，写入时去重并退役旧条目；新增**删除项目**，项目记忆随项目一起删除 | 记忆目前只有固定规则写入的流水，没有整理与归纳；项目无法删除 | ADR-028 |
+| 6 | （v1.9）**Gate 改为可选**：有匹配的 Gate（目前只有 Python）就照常运行；没有就跳过 GATING，由 reviewer 评审 + 人工终审收敛，终审时标明「未经过自动测试」。取消 P5 多语言 Gate（TS / Java / C++ 镜像） | 任务可能是任何语言的项目（如 Go），不应因没有 Gate 配置而无法创建 run；参照 Claude Code，不为每种语言预先准备工具链 | ADR-029 |
+| 7 | （v1.9）**embedding / rerank 默认在本地运行**（进程内 CPU 小模型），在 Settings 填写远程 OpenAI 兼容接口时改用远程；都不可用时仍降级为关键词检索 | 其他用户无需申请任何 key 即可使用向量检索；pgvector / rerank 不再等待外部 embedding 服务 | ADR-030 |
+| 8 | （v1.9）**开源前替换所有可能侵权的内容**：LimeZu 办公室 tileset 与基于它的地图、《The Office》/《Brooklyn Nine-Nine》主题名、角色名与形象、剧中台词与梗；改为授权干净（CC0 等）或原创的素材、主题与角色 | LimeZu 许可禁止再分发；影视剧名、角色与台词属于 NBC 等权利人，开源分发有商标 / 版权风险 | ADR-031 |
 
 ---
 
@@ -40,12 +43,12 @@
 | 拓扑 | Supervisor（root）自动分派，调度逻辑抽成独立 policy 层（auto / manual 两种 policy） |
 | 消息 | 结构化对象，传 `artifact_id` 引用，**不传全文** |
 | Agent 生命周期 | 任务级临时实例；记忆宿主为 `project × role`，不是实例 |
-| 完成判定 | 所有 reviewer signoff（severity 阈值）→ 人工终审 |
+| 完成判定 | 所有 reviewer signoff（severity 阈值）→ 人工终审；有 Gate 时还需 FULL Gate 通过，无 Gate 时终审标明未经过自动测试（v1.9，§4） |
 | 冲突 | 升级给人 + 震荡检测自动触发升级 |
 | Memory | Blackboard + Episodic + Semantic（MVP）；Procedural 延后 |
 | 隔离 | per-role namespace 私有 + 共享黑板；per-project Postgres schema |
 | 记忆写入 | 每个 run 结束时 summarizer 从你的反馈与 review findings 总结经验，按重要性写入 global / project / agent，并去重、退役旧条目（§9.1）+ `pin_memory` 手动工具 |
-| LLM | **纯云端调用，本地不跑 LLM**；embedding / rerank 小模型允许本地 CPU 运行（ADR-030）；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口） |
+| LLM | **纯云端调用，本地不跑 LLM**；单一 OpenAI 兼容网关（LiteLLM Proxy 统一出口）。例外（v1.9，ADR-030）：embedding / rerank 小模型默认在本地 CPU 运行，可改用远程接口 |
 | 路由 | 静态 policy 表（角色→模型别名）+ root agent 受限 override（可复现优先） |
 | 多模型评审 | 2–3 个不同 LLM 并行独立 review（核心卖点） |
 | 预算 | 确定性中间件熔断 + LiteLLM virtual key 周限额，**不用 agent 做熔断** |
@@ -57,7 +60,7 @@
 
 1. **确定性的事情不交给 LLM**：预算熔断、收敛判定、震荡检测、重试、路由，全部是普通 Python 代码。root 判断「回答还是做任务」属于语义判断，交给 LLM（§2.5）。
 2. **配置即代码**：YAML + git 管理 agent 定义、模型策略、工具授权；DB 只存运行时状态。配置在加载时严格校验，未知字段直接报错。
-3. **便宜的检查先跑**：编译、类型、lint、测试在 LLM 评审之前，失败直接退回，不花一个 reviewer token。
+3. **便宜的检查先跑**：项目有 Gate 时，编译、类型、lint、测试在 LLM 评审之前，失败直接退回，不花一个 reviewer token。没有 Gate 的项目跳过这一步（v1.9，ADR-029），不因此拒绝任务。
 4. **一切可回放**：step 树 + artifact 内容寻址 + 事件日志，任何一次 run 都能重放和 diff。
 
 ---
@@ -74,7 +77,7 @@ Layer 4  Root Session（交互层 · v1.6，§2.5）
   职责：理解意图、回答问题、把任务进度与审批带回对话
 
 Layer 3  Loop Driver（自研 · 纯 Python · 无框架依赖）
-  状态机：PLAN→CODE→GATE→REVIEW→ARBITRATE→HUMAN→DONE
+  状态机：PLAN→CODE→[GATE（有则运行）]→REVIEW→ARBITRATE→HUMAN→DONE
   职责：收敛判定、震荡检测、迭代上限、预算熔断、HIL 卡点、断点续跑（Postgres run / iteration）
 
 Layer 2  Agent Runtime（Google ADK，可替换）
@@ -170,7 +173,7 @@ Task 的来源：root 会话判定为任务（§2.5），或在控制台、CLI �
 | 状态 | 下一步 |
 |---|---|
 | PLANNING | → CODING |
-| CODING | → GATING |
+| CODING | 有 Gate → GATING；无 Gate → REVIEWING |
 | GATING | pass → REVIEWING；fail → CODING（带 gate 报告） |
 | REVIEWING | → ARBITRATING |
 | ARBITRATING | SIGNOFF → WAITING_HUMAN；BACK_TO_CODER → CODING；ESCALATE → WAITING_HUMAN |
@@ -180,7 +183,20 @@ Task 的来源：root 会话判定为任务（§2.5），或在控制台、CLI �
 
 ---
 
-## 四、客观 Gate：多语言适配器
+## 四、客观 Gate（v1.9 起为可选）
+
+**v1.9 决定（ADR-029）**：Gate 是「有就用」的客观检查，不再是创建 run 的前提。
+
+| 情况 | 行为 |
+|---|---|
+| 项目匹配到 Gate（目前内置只有 Python） | 照常：CODING → GATING（fast）→ REVIEWING …，进入人工终审前跑一次 FULL Gate，失败退回 Coder |
+| 没有匹配的 Gate（Go、Rust、TS 等任意项目） | 跳过 GATING：CODING → REVIEWING；不跑 FULL Gate；signoff 审批记录 `automated_checks: not_run`，终审界面明确标出「未经过自动测试」 |
+
+- 不再为每种语言建镜像。原计划的 TypeScript / Java / C++ Gate（下表）取消，相关 YAML 移除；需要时再按下面的方式扩展。
+- 以后可选扩展：在项目设置中填写自定义检查命令（如 `go test ./...`），使用本机环境执行。是否做、何时做按需决定，不在当前计划内。
+- 收敛逻辑不变：仍需 `blocking + major == 0` 与人工终审；只是缺少「代码能跑」的客观信号，由 reviewer 与人工承担。
+
+以下为原多语言设计（v1.8 及以前），仅 Python 部分仍有效：
 
 ```python
 class GateAdapter(Protocol):
@@ -330,7 +346,7 @@ auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束�
 | Project | `project` | 单个 project | 该 project 的所有 agent | 用户手写 note；（v1.8）summarizer 写入项目经验 | Yes（内存 / Postgres） |
 | Agent 本地 | `agent:<role>` | `project × role` | 仅该 role | 用户手写 note；（v1.8）summarizer 写入角色经验 | Yes（内存 / Postgres） |
 
-每次调用 agent 前，Driver 通过 `RunHooks.context_for` 检索 `global ∪ project ∪ agent:<self>`，top-6 注入 `AgentInput.context.memory`。检索：BM25 + 向量（网关 embedding）→ RRF；embedding 失败自动降级为纯关键词，且 memory 任何异常都不会中断 run。扫描版 PDF（无文字层）会被拒绝并提示。
+每次调用 agent 前，Driver 通过 `RunHooks.context_for` 检索 `global ∪ project ∪ agent:<self>`，top-6 注入 `AgentInput.context.memory`。检索：BM25 + 向量（v1.9：默认本地 embedding，可改用远程接口，§7.4）→ RRF；embedding 失败自动降级为纯关键词，且 memory 任何异常都不会中断 run。扫描版 PDF（无文字层）会被拒绝并提示。
 
 **Project 进度**：project-planner（root 模型）把 project 目标拆成 phase → step；每个 step 可一键发起 run，run DONE 自动把 step 标为 done，失败/取消标 blocked；用户也可手动改状态（ADR-021）。
 
@@ -373,7 +389,7 @@ step       (id, run_id, iteration_id, agent_role, model_alias, model, prompt_ref
             retry_reasons jsonb, routing_reason text)
 artifact   (id, run_id, kind, content_ref, sha256, created_by_step)   -- plan|diff|review|test_log|doc
 blackboard (id, project_id, run_id, key, value jsonb, version, updated_by, updated_at)
-memory     (id, project_id NULL for global, namespace, kind [document|note|episodic|semantic|procedural], text, source, embedding vector(3072), embedding_model,
+memory     (id, project_id NULL for global, namespace, kind [document|note|episodic|semantic|procedural], text, source, embedding vector(<所选模型维度>), embedding_model,
             embedding_version, source_run_id, valid_from, valid_to, superseded_by, pinned, tsv)
 approval   (id, run_id, reason, payload jsonb, status, decided_by, decided_at)
 event      (id, run_id, seq, ts, type, actor, payload jsonb)   -- v1.1 新增：可视化与回放的唯一事件流
@@ -409,7 +425,7 @@ usage_ledger (id, ts, role, model_alias, model, tokens_in, tokens_out, cost_cent
 | 危险操作 | 写 workspace 外、开网络、force push、删分支 → `approval` 卡点 |
 | root 会话（v1.6） | 回答时只读项目文件，不改代码；上网搜索由模型 / 网关自带能力完成（§2.5.3） |
 
-写 workspace 外或秘密文件的尝试会暂停并生成审批；批准仅恢复到 Coder，用新反馈生成合法修改，不授权突破 workspace 边界。只有 signoff + FULL Gate 之后的批准才能完成项目 step。
+写 workspace 外或秘密文件的尝试会暂停并生成审批；批准仅恢复到 Coder，用新反馈生成合法修改，不授权突破 workspace 边界。只有 signoff 批准才能完成项目 step；有 Gate 时要求 FULL Gate 通过，无 Gate 时审批须标明未经过自动测试。
 
 容器运行时：Colima（`colima start --cpu 4 --memory 8`）+ docker CLI + docker-compose。
 
@@ -423,6 +439,7 @@ usage_ledger (id, ts, role, model_alias, model, tokens_in, tokens_out, cost_cent
 | Agent 运行时 | Google ADK（Python）；raw / fake 兜底 |
 | 模型网关 | 单一 OpenAI 兼容 endpoint；LiteLLM Proxy（S2 起） |
 | 存储 | Postgres 16 + pgvector；SQLAlchemy 2 + Alembic |
+| Embedding / Rerank | 本地进程内多语言小模型（默认，v1.9）；远程 OpenAI 兼容接口（可选） |
 | 结构化输出 | Pydantic v2（`extra="forbid"`） |
 | 沙箱 | Docker via Colima |
 | 工具层 | MCP（自研工具也写成 MCP server） |
@@ -517,7 +534,7 @@ agentlab/
 | `components/OfficeThemePicker` | 切换地图（office / brooklyn99） | 切换不再删除 agent，去掉确认弹窗 |
 | `components/AskMeTab` + `askMeOrder` | 待人工决策列表；回答 approve/abort/其它文字 = 反馈 | `WAITING_HUMAN` run 映射为 humanQA 卡片 |
 | `components/TaskDetailOverlay` | 看板卡片详情 | assign → 跳到该 run |
-| `assets/tilesets/*`, `assets/maps/*.tmj` | 地图与素材 | **LimeZu 许可，必须署名** |
+| `assets/tilesets/*`, `assets/maps/*.tmj` | 地图与素材 | **LimeZu 许可，必须署名；禁止再分发，开源前替换（§15.6）** |
 | `assets/fonts/*` | Press Start 2P / Inter / JetBrains Mono | OFL 1.1 |
 | `i18n/locales/{en,zh-CN}.json` 的 `office.*` 段 | 场景文案 | 只保留用到的 key |
 
@@ -587,6 +604,40 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - 记账入口统一为 record_usage：UsageRecorder 同时处理预算与带 call ID 的流水，支持未直接记账的 runtime 返回值；元数据不进入 step/root 的 Usage JSON。后续保存失败时保留已返回的 provider 用量，不能降格为零 token 未计量请求。
 - 崩溃恢复：启动及 run 恢复/中断审批时补记无 usage 的 attempt，call ID 去重；启动补记先取得执行锁，跳过仍在其他进程执行的 run、对话和规划。Monitor 使用 SQL GROUP BY role，内存后端维护增量汇总及嵌套事务撤销日志，不复制历史流水。
 
+### 15.6 开源素材与 IP 清理（v1.9，ADR-031）
+
+**目的**：开源仓库中不包含任何无权再分发的素材或影视 IP。范围不仅是 LimeZu 素材，而是所有可能侵权的内容。
+
+**现状盘点（2026-10-10 代码扫描）**
+
+| 类别 | 现有内容 | 位置 | 问题 |
+|---|---|---|---|
+| 办公室素材 | LimeZu Modern Interiors 的 3 张 16×16 tileset：`interiors.png`、`office-tileset.png`、`a5-office-floors-walls.png` | `ui/src/assets/tilesets/` | 许可明确禁止再分发（"YOU CAN'T … DISTRIBUTE THE ASSET"） |
+| 地图 | `office.tmj`、`brooklyn99.tmj`（来自 shahar061/the-office，基于 LimeZu tileset） | `ui/src/assets/maps/` | 依赖 LimeZu 图块；地图名使用剧名 |
+| 主题 | `office`、`brooklyn99` 主题及主题选择器 | `scene/office/themeRegistry.ts`、`OfficeThemePicker.tsx`、i18n | 使用《The Office》《Brooklyn Nine-Nine》剧名 |
+| 角色 | Michael / Jim / Pam / Dwight / Kevin / Angela / Oscar / Stanley / Phyllis / Creed / Meredith / Toby / Ryan / Andy 等；简介如 "World's best boss"、"Assistant (to the) RM" | `scene/office/cast.ts`、`portraitArt.ts`（按角色 likeness 绘制）、`scene/adapter/mapping.ts` | 剧中角色名、身份与形象（人物像素图虽为程序原创绘制，但按剧中人物造型设计） |
+| 台词 | 茶水间对话与思考气泡：剧中台词与梗（如 "that's what she said"、"identity theft is not a joke"、"Dunder Mifflin, this is Pam"、Schrute Farms 等） | `scene/office/cafeteriaLines.ts`、`ThoughtBubble.ts` | 直接引用剧中台词与虚构公司名 |
+| 界面文案 | 默认 root 名 `Michael`（`DEFAULT_GOD_NAME`）；i18n key 与文案 `dispatchViaMichael`、`michaelDecides`、`sentToMichael`、`askMichael`；代码注释中的 Dunder Mifflin / Scranton | `shared/godIdentity.ts`、`i18n/locales/*.json`、多处注释 | 剧中角色名与公司名 |
+
+**不需要替换**：munder-difflin 的 MIT 代码与署名（MIT 要求保留版权声明，`THIRD_PARTY_NOTICES.md` 中的上游仓库名属于署名，不是本项目品牌）；Press Start 2P / Inter / JetBrains Mono 字体（OFL 允许再分发）。
+
+**替换方案**
+
+| 类别 | 方案 |
+|---|---|
+| 办公室素材 | **CC0 拼装为主**：2dPig「Pixel Office」（CC0，俯视办公家具 / 电脑 / 植物，非网格 tileset）+ Kenney「Roguelike Indoor Pack」（CC0，室内地板 / 墙 / 通用家具）。用 Tiled 重画地图，补显示器亮屏版本（`DeskScreen.ts` 需要亮 / 暗两种），统一配色。若两套风格无法统一，改为与人物相同的程序绘制方式自绘家具。备选：Masalimov Ilnur「Pixel Office」（CC-BY 4.0，32×32，需署名、需调整比例）。不可用：Donarg、LimeZu Modern Office、Maru、GameDevMarket 等禁止再分发的包。 |
+| LimeZu 可选皮肤 | 仓库只附带 CC0 默认素材；已购买 LimeZu 的用户把自己的文件放到指定目录后自动加载，仓库与发布包中不含 LimeZu 文件。 |
+| 主题 | 删除 `office` / `brooklyn99` 两个影视主题，改为原创主题（名称、地图、配色均原创），主题选择器保留。 |
+| 角色 | 改为与 agent 角色对应的原创人物（名称、造型、配色、简介均原创），沿用 `portraitArt.ts` 的程序绘制方式；不再以任何真实或影视人物为原型。 |
+| 台词 | 删除剧中台词与梗，改写为原创的通用办公 / 编程闲聊。 |
+| 界面文案 | 默认 root 名改为中性名称（如 `Root`）；i18n key 与文案、代码注释去除剧中人物名与公司名。 |
+
+**验收**
+- 仓库与 UI 构建产物（`ui/dist`）中不含 LimeZu 图片与基于它的地图。
+- 全仓库搜索剧名、角色名、公司名、台词（The Office / Brooklyn Nine-Nine / Dunder Mifflin / Scranton / Michael / Dwight 等）无命中，`THIRD_PARTY_NOTICES.md` 中的上游署名除外。
+- 每个第三方素材在 `ui/src/assets/ATTRIBUTION.md` 与 `THIRD_PARTY_NOTICES.md` 中列出来源、作者与许可（CC0 也记录来源）。
+- 未放入 LimeZu 文件时，Office Floor 用默认素材正常显示；放入后切换为 LimeZu 皮肤。
+
 ---
 
 ## 十六、开发 Phase / Steps（v1.2 更新：按实际进度重排）
@@ -602,9 +653,9 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
 | P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
-| P4 | S5a 可视化 v0 | **大部分完成** | munder 可视化已全部接上（2026-10-09 v1.2）；Monitor 已实现（v1.7，§15.5）；缺 Gate 诊断表、openapi 类型 |
-| P5 | S3 多语言 Gate | 部分 | 4 种语言 YAML 已写；镜像未建、未实测 |
-| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；summarizer 与删除项目已完成（v1.8，§9.1）；pgvector 索引、完整记忆导入导出未做 |
+| P4 | S5a 可视化 v0 | **完成** | Office Floor、Monitor、Gate 诊断表与 FastAPI 生成 TS 类型均已接线 |
+| P5 | ~~S3 多语言 Gate~~ → Gate 可选（v1.9，ADR-029） | 完成 | 取消 TS / Java / C++ 镜像；改为无 Gate 时跳过 GATING，终审标明未经过自动测试 |
+| P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；summarizer 与删除项目已完成（v1.8，§9.1）；本地 embedding / rerank 已完成（v1.9，§7.4）；pgvector 索引与完整记忆导入导出未做 |
 | P7 | S5b 可视化 v2 + 可观测 | 部分 | Memory Graph 已接 agent 记忆；React Flow / Monaco / 回放 / Langfuse 未做 |
 | P8 | S6 Eval | 基线完成 | 10 个固定修复 + 5 条 Root 对话；agentlab eval 输出评分卡；fake 不代表模型语义质量 |
 
@@ -687,10 +738,10 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；网络 / Git 危险操作仍待接入 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
-| Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言尚未建镜像 | P5 |
-| Gate 诊断表、成本看板 | UI 未做 | P4 |
+| Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言不再建镜像，无 Gate 时跳过（v1.9，ADR-029） | P5 |
+| Gate 诊断表、成本看板 | file:line / code / message / 日志尾部与 Monitor 已接线 | 已完成 |
 | `step.prompt_ref / response_ref` | prompt / response 内容寻址并落库；逐 attempt 可追溯 | 已完成 |
-| UI 类型 | 手写 TS 类型，未用 openapi-typescript 生成 | P4 |
+| UI 类型 | FastAPI OpenAPI 导出 + openapi-typescript；核心模型及请求类型改为生成类型，提供 check:api | 已完成 |
 
 ### 16.3 接下来的步骤
 
@@ -750,16 +801,19 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 
 #### P4 · S5a 可视化 v0 收尾（0.5–1 天）
 - [x] SSE 事件流、Office Floor 接事件流、Run 列表 / 时间线、评审对比、审批横幅
-- [ ] Gate 诊断表（file:line、code、message）
+- [x] Gate 诊断表（file:line、code、message）
 - [x] Monitor 模块（v1.7，§15.5）：`usage_ledger` 落库（迁移 + 在现有记账点追加写入）、`GET /monitor/usage` 按角色汇总、控制台 `monitor` 标签（表格 + 条形图）；历史 run 的 step 与 root_turn 用量一次性回填
   - 验收：跑一个 fake 任务 + 一轮对话后，root / planner / coder / 三个 reviewer 的调用次数与 token 和 step、root_turn 记录一致；跨两个项目的数据合并显示
-- [ ] openapi-typescript 生成类型，替换手写类型
+- [x] openapi-typescript 生成类型，替换手写类型
 
-#### P5 · S3 多语言 Gate（每语言 0.5–1 天）
-- [x] 4 种语言 Gate YAML
-- [ ] `docker/` 下 node / jdk / cpp 镜像
-- [ ] 按顺序实测 TypeScript → Java → C++（ccache、compile_commands.json、分级超时）
-- 演示：同一套 loop 在 4 种语言的 repo 上跑通
+#### P5 · Gate 可选（v1.9，ADR-029；取代原「S3 多语言 Gate」）
+- ~~`docker/` 下 node / jdk / cpp 镜像；实测 TypeScript → Java → C++~~（取消）
+- [x] 找不到匹配 Gate 时不报错：CODING 直接进入 REVIEWING，不跑 FULL Gate
+- [x] signoff 审批记录 `automated_checks: not_run`；终审卡片与对话总结明确标出「未经过自动测试」
+- [x] 移除 TS / Java / C++ Gate YAML 与相关文档；Python Gate 保持不变
+- [x] Coder prompt：有 Gate 时使用，无 Gate 时不假装已测试
+- 验收：在一个 Go 仓库（无 Gate）上创建 run 成功，经评审到达 signoff 并显示未测试标记；Python 仓库行为与之前一致（fast / FULL Gate 照常）
+- 以后按需：项目设置中的自定义检查命令（本机环境执行），不在当前计划内
 
 #### P6 · S4 Memory + Project 化（2–3 天）
 - [x] memory / blackboard 表（DDL）
@@ -774,7 +828,11 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
   - 验收：同一问题在两个 run 中被指出 → 只留一条经验（第二次为 update）；你的 reject 反馈中的偏好进入 global，项目约定进入 project；pinned 条目不被改动；summarizer 失败时 run 仍正常结束
 - [x] 删除项目（v1.8，§9.1）：`DELETE /projects/{id}` + 控制台按钮（二次确认）；有未结束 run 时拒绝；删除项目 schema、路由登记、`.agentlab` 快照与对象、进程内缓存；保留 workspace、global 记忆与 `usage_ledger`
   - 验收：删除后该项目的 project / agent 记忆不再出现在任何检索与列表中，其他项目与 global 不受影响；Postgres 与内存两种 Store 行为一致
-- [ ] `pin_memory` 工具；rerank
+- [x] 本地 embedding（v1.9，§7.4、ADR-030）：未配置远程接口时默认使用进程内多语言模型，后台线程执行；远程接口 Key 改为可选（支持本机 Ollama）
+- [ ] pgvector HNSW 索引 + tsvector，替换 Python 内的 cosine / BM25 计算；维度随所选模型
+- [x] rerank：本地中英文模型（默认），不可用时保留融合排序；远程 rerank 接口留待后续
+  - 验收：全新环境不填任何 embedding 配置，上传中文文档后混合检索返回向量命中；填写远程接口后改用远程；两者都不可用时降级为关键词且 run 不受影响
+- [ ] `pin_memory` 工具
 - [x] per-project schema，既有数据一次性迁移；`pg_dump -n` 导出/数据库级恢复验证
 - [ ] 完整项目导入 UI/CLI（目录注册、共享依赖与 blobs/snapshots 一起恢复）
 - 演示：第二个 project 复用第一个 project 沉淀的经验
@@ -787,6 +845,17 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 #### P8 · S6 Eval（持续，P1 起就开始积累）
 - [x] 10 个固定回归任务 + 5 条 Root 对话；`agentlab eval` 输出评分卡
 - 评分卡结构（摘自 homerail `scorecard.ts`，无需再查原 repo）：每项 check = `{name, passed, severity(hard|soft), gate, source_type, detail}`；汇总 = `{run_id, passed, verdict, score, total, hard_error_count, soft_warning_count, blind_spot_count, categories: {name: passed}}`；任一 hard 失败即 FAIL，soft 只计数；CLI 退出码 = passed ? 0 : 1，便于 CI
+
+#### P9 · 开源前素材与 IP 替换（v1.9，§15.6、ADR-031）
+- [ ] 办公室素材：下载并核对 2dPig Pixel Office 与 Kenney Roguelike Indoor 的实际内容与许可文件，拼装 CC0 tileset；风格不统一时改为程序绘制家具
+- [ ] 重画地图并补显示器亮屏图块；删除 LimeZu tileset 与 `office.tmj` / `brooklyn99.tmj`
+- [ ] LimeZu 可选皮肤：用户自备文件放入指定目录后加载，仓库与构建产物不含 LimeZu 文件
+- [ ] 主题：删除影视主题，新增原创主题
+- [ ] 角色：原创人物名称、造型、配色、简介，替换 `cast.ts` / `portraitArt.ts` / `mapping.ts` 中的剧中角色
+- [ ] 台词：重写 `cafeteriaLines.ts` 与思考气泡文案
+- [ ] 界面文案：默认 root 名改为中性名称；清理 i18n key、文案与代码注释中的剧名 / 角色名 / 公司名
+- [ ] 更新 `ATTRIBUTION.md` / `THIRD_PARTY_NOTICES.md`
+- 验收：见 §15.6
 
 ---
 
@@ -819,16 +888,16 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
 | memory 文档 | global 明确共享；project 上传/替换/移除仅影响本项目，保留历史版本；agent 私有记忆需 project | 相同文档名跨项目隔离测试，移除文档不误删同 source 的 note |
 | RAG | 项目选择 off / keyword / hybrid，默认 keyword；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
-| embedding 配置 | 独立 embedding URL/Key 保存至本机 .env；模型/维度/version 在 models.yaml；可测试接口、重建共享知识与项目/agent 记忆向量 | 有凭据不等于可用：只有实际调用成功才 ready；当前没有可用 embedding 服务，真实向量验收需用户补充 |
+| embedding 配置 | 独立 embedding URL/Key 保存至本机 .env；模型/维度/version 在 models.yaml；可测试接口、重建共享知识与项目/agent 记忆向量 | 有凭据不等于可用：只有实际调用成功才 ready；v1.9 起默认改用本地 embedding（§7.4），真实向量验收不再依赖外部服务 |
 | 配置即代码 | 控制台支持项目设置 YAML 导出/校验导入，适合提交 Git；run 固化完整配置 | 全局模型能力/价格仍在 config/*.yaml，项目选项是持久化运行数据。导入不改变已存在 run |
 
 本轮检查可复现：后端 `tests/unit/test_project_experience.py`、Postgres `test_project_dispatch_and_conversation_survive_postgres_restart`，前端 `store.test.ts`；浏览器在隔离 fake 服务验证了创建 auto/manual 项目、对话启动、审批、实际 diff 和项目切换。测试 workspace 与 UI 服务数据不写入生产项目。
 
 剩余需要产品确认或外部资料：
-- 用户提供可调用的 embedding URL、Key、model ID、维度，再做真实混合检索验收与 pgvector 索引选择。当前网关的聊天模型不能代替 embedding 模型。
+- ~~用户提供可调用的 embedding URL、Key、model ID、维度~~ v1.9 改为本地默认 embedding（ADR-030），远程接口可选；pgvector 索引维度随所选本地模型确定。
 - 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
 - 当前已启用跨厂商路由：planner / coder 的 Opus worker 别名通过 Anthropic 执行，其余角色按模型策略路由；Monitor 的模型列记录实际使用的模型，可同时显示多个厂商。
-- ADK、工具白名单执行、危险操作审批、memory pin UI、全量 memory 导入导出、其他语言 Gate 镜像和 Monaco/iteration 回放仍是后续工作。当前不会开放任意 agent 工具来绕过安全边界。
+- ADK、工具白名单执行、危险操作审批、memory pin UI、全量 memory 导入导出、Monaco/iteration 回放仍是后续工作；其他语言 Gate 镜像已取消（v1.9，ADR-029）。当前不会开放任意 agent 工具来绕过安全边界。
 
 ---
 
@@ -856,14 +925,17 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADK 无图级 checkpoint | 复杂回放受限 | Loop Driver 自管状态机 + artifact 内容寻址 |
 | ADK HIL 需手写样板 | 开发成本 | HIL 走 `approval` 表 + run 状态 |
 | ADK 版本迭代快 | 升级痛 | `AgentRuntime` 接口隔离；保留 raw runtime |
-| C++ Gate 构建慢 | 每轮几分钟 | ccache + 持久 build volume + fast/full 两档 |
+| ~~C++ Gate 构建慢~~ | ~~每轮几分钟~~ | v1.9 取消多语言 Gate，不再适用 |
+| 无 Gate 的项目缺少客观检查（v1.9） | 代码可能无法编译或测试失败，仅靠评审发现不了 | 终审明确标出「未经过自动测试」，由人工决定是否批准；以后可加项目自定义检查命令 |
+| 本地 embedding 模型（v1.9） | 首次下载几百 MB；CPU 推理较慢；换模型需重建向量 | 后台线程执行、失败降级为关键词；模型与维度落库，提供重建功能 |
 | 三个 reviewer 成本高 | 烧钱 | Gate 前置 + 第三 reviewer 廉价档 + 硬预算 |
 | 多模型结构化输出格式不一 | 解析失败 | Pydantic + `max_repairs=2` + 能力矩阵降级 ReAct |
 | 云端全量依赖 | 断网即停摆 | retry=3 + fallback + run 可暂停续跑 |
 | Reviewer 无限挑 nit | 永不收敛 | `blocking + major == 0` 即 signoff |
 | 单网关单 key（v1.1） | 网关限流影响所有角色 | 角色级 RPM 配置 + 预算中间件；reviewer 并发可配 |
 | munder 移植代码量大（~5.6k 行场景 + 组件） | 维护负担 | 只改数据适配层，场景代码尽量保持原样便于对照上游 |
-| LimeZu 素材许可（v1.1） | 开源分发受限（"不可再分发素材"） | 开源前评估：替换为自绘/CC0 素材或要求使用者自购；署名常驻 |
+| LimeZu 素材许可（v1.1） | 开源分发受限（"不可再分发素材"） | v1.9 决定：开源前替换为 CC0 / 自绘素材，LimeZu 仅作用户自备的可选皮肤（§15.6） |
+| 影视 IP（v1.9） | 《The Office》《Brooklyn Nine-Nine》剧名、角色名与形象、台词可能涉及商标 / 版权 | 开源前全部替换为原创主题、角色与文案（§15.6、P9） |
 | root 意图误判（v1.6） | 问题被当成任务，或任务被当成问题 | 用户可以直接说「只回答」或「直接改」；即使误开任务，也要经过 Gate、评审与人工终审才会完成 |
 | 会话成本累积（v1.6） | 频繁提问持续花费 | 默认单轮预算与 8 次工具调用上限；会话花费计入项目账目 |
 
@@ -872,13 +944,63 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 ## 十九、待办与开放问题
 
 - [x] 网关 URL / key 与模型 id 已配置，P1 已验证；更多模型由用户后续补充。
-- [ ] 网关是否提供 embedding 端点？否则 S4 需额外 embedding 来源
-- [ ] C++ Gate 的 GTest 发现策略：CTest 注册 vs 直接跑二进制
-- [ ] Java 项目 Maven 与 Gradle 优先级
+- [x] ~~网关是否提供 embedding 端点？~~ v1.9 改为本地默认 embedding，远程接口可选（ADR-030）
+- [x] ~~C++ Gate 的 GTest 发现策略；Java 项目 Maven 与 Gradle 优先级~~ v1.9 取消多语言 Gate，不再需要（ADR-029）
+- [ ] （v1.9）本地 embedding / rerank 的具体模型与库：实现时按中文效果、模型大小与 Apple Silicon 兼容性实测后确定
 - [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
 - [x] （v1.6）`agentlab ping --search` 实测 Responses `web_search` 可用；Chat 无搜索证据，不启用
 - [x] （v1.6）root 每轮默认最多 8 次工具调用、使用默认单轮预算（用户确认）
-- [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**LimeZu 素材替换方案**
+- [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**素材与影视 IP 替换（v1.9 已定方案，§15.6、P9）**
+- [ ] 是否给其他人使用 / 开源：未决定。若决定分发，按 §20 的打包方案排期
+
+---
+
+## 二十、可能的打包与分发方案（备选，未排期）
+
+> 状态：**仅记录方案，不在开发计划内**。是否给其他人使用尚未决定；决定分发时再排期，并先完成 P9（§15.6 素材与 IP 替换）与 §19 开源前清单。
+
+**目标**：其他用户在自己电脑上安装一份独立的系统，使用自己的 LLM key、自己的数据库与记忆，并在**经过允许后**读写自己本机的项目文件夹进行开发。各用户之间不共享任何数据。
+
+**为什么不把整个系统装进 Docker**
+
+| 问题 | 说明 |
+|---|---|
+| 无法运行中授权文件夹 | 容器能看到哪些本机文件夹在启动时固定，无法在使用中「询问并允许」访问新项目，只能改配置重启 |
+| 缺少用户的开发环境 | 容器内没有用户本机的 Go / Node / Python 版本与依赖，agent 无法用它们检查改动 |
+
+**推荐形态：后端装在本机，只有 Postgres 用 Docker**（与 Claude Code 类似：程序在用户电脑上运行，访问范围由应用内授权控制）
+
+```
+用户电脑
+├── agentlab（本机安装：后端 + 界面，http://127.0.0.1:8765）
+│     ├── 只读写用户授权过的项目文件夹
+│     └── 使用用户本机的 git 与开发工具
+└── Docker：仅 Postgres（由 agentlab 启动与管理）
+```
+
+**用户流程**
+1. 安装：`uv tool install agentlab`（或 `pipx`）；本机需有 Docker。
+2. 启动：`agentlab up` —— 检查 Docker、启动 Postgres 容器、执行迁移、启动服务并打开浏览器。
+3. 添加项目：在项目目录执行 `agentlab open .`（在哪个目录执行即表示授权该目录），或在界面填写路径并在确认框中允许「agent 读写此文件夹」。
+4. 在界面填写自己的 LLM key 后使用。
+
+**授权与安全**
+- 只有授权过的文件夹可以作为项目 workspace；后端保存授权列表并校验每个项目路径。
+- 沿用现有边界：写出 workspace 或碰到秘密文件时暂停并转为审批。
+- 删除项目只删除系统内记录，不删除用户代码。
+- 授权可在设置中撤销；服务只监听 `127.0.0.1`。
+
+**需要实现的内容（届时排期）**
+
+| 项 | 内容 |
+|---|---|
+| 打包 | 前端构建产物打进 Python 包，由 FastAPI 提供页面（单端口）；发布到 PyPI |
+| `agentlab up` | 检查 Docker、启动并管理 Postgres 容器、自动迁移、启动服务、打开浏览器 |
+| 文件夹授权 | `agentlab open <path>`、界面确认框、授权列表的存储与校验、撤销 |
+| Gate | 保持可选（ADR-029）；以后的「自定义检查命令」直接使用用户本机工具链 |
+| 首次使用 | 界面引导填写 LLM key；embedding 默认本地（ADR-030），无需额外 key |
+
+**不采用的方案**：全部装进 Docker（原因见上）；桌面应用（Electron / Tauri + 内嵌 Postgres，工作量大，且 ADR-015 已决定不做 Electron）。
 
 ---
 
@@ -888,12 +1010,12 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 |---|---|---|---|
 | ADR-001 | 编排用「自研 Loop Driver + Google ADK 执行层」 | 2026-10-09 | ADK 的 ParallelAgent、Callbacks、MCP 契合度高；checkpoint 短板由自研状态机补齐 |
 | ADR-002 | Python 后端 + TypeScript 前端 | 2026-10-09 | ADK 生态为 Python；前端仅作观察窗 |
-| ADR-003 | LLM 不跑本地模型，全部云端 API；embedding / rerank 例外见 ADR-030 | 2026-10-09 | 降低硬件与运维负担 |
+| ADR-003 | 不跑本地模型，全部云端 API（v1.9：LLM 仍如此；embedding / rerank 例外，见 ADR-030） | 2026-10-09 | 降低硬件与运维负担 |
 | ADR-004 | 客观 Gate 前置于 LLM 评审 | 2026-10-09 | 砍掉 60–70% 无效评审轮次 |
 | ADR-005 | `blocking + major == 0` 即 signoff | 2026-10-09 | 防止多 reviewer 在 nit 上死循环 |
 | ADR-006 | 熔断用确定性中间件，不用 agent | 2026-10-09 | 非确定性的熔断等于没有熔断 |
 | ADR-007 | LLM retry = 3（额外重试，共 4 次请求），仅瞬时错误 | 2026-10-09 | 区分可重试与不可重试；JSON 修复独立预算 |
-| ADR-008 | 支持 Python / TS / Java / C++，Gate 做适配器 | 2026-10-09 | 目标代码库多语言 |
+| ADR-008 | 支持 Python / TS / Java / C++，Gate 做适配器（v1.9 被 ADR-029 取代） | 2026-10-09 | 目标代码库多语言 |
 | ADR-009 | 记忆归属 `project × role` 而非 agent 实例 | 2026-10-09 | agent 是任务级临时实例 |
 | ADR-010 | 记忆版本化（`superseded_by` / `valid_to`），不物理删除 | 2026-10-09 | 可回溯；开源后可审计 |
 | ADR-011 | 前端全量借鉴 munder-difflin 可视化（Pixi Office Floor + 像素设计系统 + 看板/瀑布/记忆图） | 2026-10-09 | 成熟实现，MIT；素材按 LimeZu/OFL 署名 |
@@ -914,7 +1036,9 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-026 | 上网搜索直接使用模型 / 网关自带的搜索能力，不单独接搜索服务 | 2026-10-10 | 用户要求保持简单；系统重点是 multi-agent 分工，而不是增加限制 |
 | ADR-027 | 新增 Monitor 模块：按 agent 汇总累计 token 与费用，跨项目合并；数据来自 `public.usage_ledger` 单一流水表 | 2026-10-10 | 用户要求只按 agent 区分、不分 project；单表追加写入，比每次扫描所有项目 schema 简单、快 |
 | ADR-028 | summarizer 在每个 run 结束时运行一次，读人工反馈与 review findings，输出 add / update / retire 并自行标注 global / project / agent 层；去重在写入时完成，不设定时任务；新增删除项目，项目 / agent 记忆随项目 schema 删除，global 与 usage 流水保留；对话偏好总结暂不做 | 2026-10-10 | 用户决定：以总结经验为主，偏好与高优先级经验进 global、其余进 project / agent；需要去重退役，且项目记忆随项目删除。按 run 而非按迭代或按天，信息完整、调用最少、无需调度器 |
+| ADR-029 | Gate 改为可选：有匹配的 Gate 就运行，没有就跳过 GATING 与 FULL Gate，由评审 + 人工终审收敛，终审标明 `automated_checks: not_run`；取消 TS / Java / C++ Gate 镜像（取代 ADR-008） | 2026-10-10 | 用户要求：任务可能是任何语言（如 Go），不应因缺少语言配置而无法运行；参照 Claude Code 不预先为语言准备工具链。保留 Python Gate；自定义检查命令以后按需再做 |
 | ADR-030 | embedding / rerank 默认使用本地进程内中文小模型；Settings 的远程 OpenAI 兼容 URL 覆盖 embedding（Key 可选），远程失败回退本地；都不可用时降级为关键词，rerank 失败保留 RRF（ADR-003 的例外；远程 rerank 暂未实现） | 2026-10-10 | 用户要求其他用户能快速上手、不必申请 key；本地小模型 CPU 即可运行，比额外容器（如 TEI）少一个服务、无 Apple Silicon 镜像兼容问题 |
+| ADR-031 | 开源前替换所有可能侵权的内容：LimeZu tileset 与地图改为 CC0 拼装（2dPig + Kenney）或自绘，LimeZu 仅作用户自备的可选皮肤；删除《The Office》《Brooklyn Nine-Nine》主题、角色、台词与相关文案，改为原创；保留 munder-difflin MIT 署名与 OFL 字体 | 2026-10-10 | 用户决定：办公室与人物、影视主题等任何可能侵权的内容都要替换。LimeZu 许可禁止再分发；剧名、角色与台词属于权利人 |
 
 
 ### 可靠性复核补充（2026-10-09）
