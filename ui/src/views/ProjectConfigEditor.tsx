@@ -39,6 +39,7 @@ export function ProjectConfigEditor({
         retrieval: 'hybrid',
         retrieval_k: 6,
         check_commands: [],
+        workspace_mode: 'branch',
       });
   }, [catalog, value, onChange]);
   if (!catalog || !value) return <Muted>{error || '…'}</Muted>;
@@ -161,6 +162,13 @@ export function ProjectConfigEditor({
           value={value.retrieval_k}
           onChange={(e) => update({ retrieval_k: Number(e.target.value) })}
         />
+      </Field>
+      <Field id={`${prefix}-workspace-mode`} label={t('lab.workspaceMode')}>
+        <select id={`${prefix}-workspace-mode`} style={inputStyle} value={value.workspace_mode ?? 'branch'}
+          onChange={(e) => update({ workspace_mode: e.target.value as ProjectSettings['workspace_mode'] })}>
+          <option value="branch">{t('lab.workspaceModeBranch')}</option>
+          <option value="worktree">{t('lab.workspaceModeWorktree')}</option>
+        </select>
       </Field>
       <Field id={`${prefix}-check-commands`} label={t('lab.checkCommands')} hint={t('lab.checkCommandsHint')}>
         <textarea
