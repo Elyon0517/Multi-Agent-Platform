@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from agentlab.api.app import create_app
+from agentlab.core.project_config import ProjectSettings
 from agentlab.demo import seed_demo_workspace
 from tests.unit.test_memory_project import _svc
 
@@ -21,6 +22,13 @@ def _repo(path: Path) -> Path:
     return ws
 
 
+def _worktree_project(svc, repo: Path):
+    project = svc.projects.create("p", "fix add", str(repo))
+    project.settings = ProjectSettings(workspace_mode="worktree")
+    svc.projects.save(project)
+    return project
+
+
 def _wait(client: TestClient, run_id: str, status: str) -> dict:
     for _ in range(200):
         detail = client.get(f"/runs/{run_id}").json()
@@ -35,7 +43,7 @@ def test_parallel_runs_carry_uncommitted_work_and_apply_back_on_signoff(tmp_path
     repo = _repo(tmp_path / "repo")
     (repo / "notes.md").write_text("draft\n")  # uncommitted user work the agents must see
     original = (repo / "calc.py").read_text()
-    project = svc.projects.create("p", "fix add", str(repo))
+    project = _worktree_project(svc, repo)
     with TestClient(create_app(svc)) as client:
         first = client.post("/runs", json={"goal": "fix add", "project_id": project.id, "runtime": "fake"}).json()
         second = client.post("/runs", json={"goal": "again", "project_id": project.id, "runtime": "fake"})
@@ -64,7 +72,7 @@ def test_parallel_runs_carry_uncommitted_work_and_apply_back_on_signoff(tmp_path
 def test_conflict_keeps_signoff_pending_and_aborting_discards_the_worktree(tmp_path: Path) -> None:
     svc = _svc(tmp_path)
     repo = _repo(tmp_path / "repo")
-    project = svc.projects.create("p", "fix add", str(repo))
+    project = _worktree_project(svc, repo)
     with TestClient(create_app(svc)) as client:
         run = client.post("/runs", json={"goal": "fix add", "project_id": project.id, "runtime": "fake"}).json()
         _wait(client, run["id"], "WAITING_HUMAN")

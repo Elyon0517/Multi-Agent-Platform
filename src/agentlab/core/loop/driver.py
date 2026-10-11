@@ -118,11 +118,9 @@ class Driver:
             return self._create(goal, **overrides)
 
     def _check_workspace_available(self) -> None:
-        if any(
-            r.workspace == str(self.workspace.root) and r.status not in {S.DONE, S.CANCELLED}
-            for r in self.store.list_runs()
-        ):
-            raise RunBusy("workspace already has an unfinished run; finish or abort it before starting another")
+        # Only a run that is executing blocks the workspace; one waiting for a decision never holds it up.
+        if any(r.workspace == str(self.workspace.root) and r.status in ACTIVE for r in self.store.list_runs()):
+            raise RunBusy("another task is running in this workspace; stop it or wait until it pauses")
 
     def _create(self, goal: str, on_create: Callable[[Run], None] | None = None, **overrides: Any) -> Run:
         defaults = {"max_iter": self.cfg.budget.loop.max_iter, "budget_cents": self.cfg.budget.default_run_budget_cents}

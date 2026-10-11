@@ -17,6 +17,7 @@ from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.conversation import Message, RootTurn
 from agentlab.core.loop.driver import Decision, Driver
+from agentlab.core.loop.states import ACTIVE
 from agentlab.core.ports import RunBusy
 from agentlab.core.schemas import Approval, Artifact, ArtifactKind, Event, GateResult, Iteration, Run, Step
 from agentlab.run_service import CreateRun
@@ -431,7 +432,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
 
     @app.post("/runs/{run_id}/decision", response_model=Run)
     async def decide(run_id: str, body: DecideBody) -> Run:
-        get_run(run_id)
+        current = get_run(run_id)
+        if body.decision != "abort" and any(
+            r.id != run_id and r.workspace == current.workspace and r.status in ACTIVE for r in svc.store.list_runs()
+        ):
+            # Resuming would edit the same files as the executing task; refuse instead of failing in the background.
+            raise HTTPException(409, "another task is running in this workspace; stop it or wait until it pauses")
         driver = drivers.get(run_id)
         if driver is None:
             try:
