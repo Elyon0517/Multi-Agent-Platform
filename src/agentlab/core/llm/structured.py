@@ -61,10 +61,9 @@ class StructuredCaller:
         log = AttemptLog()
         started = time.monotonic()
         last: Exception | None = None
-        tool_counter = [0]
         for alias in route.chain:
             try:
-                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log, tool_counter)
+                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
                 result = AgentResult[output_type](  # type: ignore[valid-type]
                     role=role,
                     output=output,
@@ -94,7 +93,6 @@ class StructuredCaller:
         output_type: type[T],
         ctx: RunContext,
         log: AttemptLog,
-        tool_counter: list[int],
     ) -> tuple[T, Usage]:
         alias_cfg = self._cfg.models.aliases[alias]
         system = self._cfg.prompt(role)
@@ -103,7 +101,8 @@ class StructuredCaller:
         schema = output_type.model_json_schema()
         repairs = 0
         while repairs <= self._cfg.retry.structured_output_repair.max_repairs:
-            available_tools = ctx.tool_specs if tool_counter[0] < ctx.max_tool_calls else []
+            # No call-count cap: the budget guard (checked before every attempt and tool) bounds the loop.
+            available_tools = ctx.tool_specs
             prompt_chars = (
                 len(system.encode())
                 + len(json.dumps(schema).encode())
@@ -237,7 +236,6 @@ class StructuredCaller:
                 )
                 for tool in completion.tool_calls:
                     ctx.check_budget(0)
-                    tool_counter[0] += 1
                     function = tool["function"]
                     entry: dict[str, Any] = {
                         "id": tool["id"],
@@ -252,13 +250,7 @@ class StructuredCaller:
                         args = json.loads(function["arguments"])
                         if not isinstance(args, dict):
                             raise ValueError("arguments must be an object")
-                        if tool_counter[0] > ctx.max_tool_calls:
-                            value = {
-                                "error": "tool_call_limit",
-                                "instruction": "Answer using information already collected.",
-                            }
-                        else:
-                            value = await ctx.execute_tool(function["name"], args)
+                        value = await ctx.execute_tool(function["name"], args)
                     except BudgetExceeded:
                         raise
                     except Exception as exc:

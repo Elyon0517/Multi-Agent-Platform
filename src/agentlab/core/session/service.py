@@ -213,10 +213,8 @@ class SessionService:
             if summary:
                 save()
                 raise
-            limited = type(exc).__name__ == "BudgetExceeded" or str(exc) == "tool_call_limit"
-            reply = (
-                "本轮预算或工具次数已达上限,请缩小问题后重试。" if limited else "本轮回答未完成,请检查网关配置后重试。"
-            )
+            limited = type(exc).__name__ == "BudgetExceeded"
+            reply = "本轮预算已达上限,请缩小问题后重试。" if limited else "本轮回答未完成,请检查网关配置后重试。"
             fallback = RootTurn(intent="answer", reply=reply)
             record.update(intent=fallback.intent, output=fallback.model_dump(mode="json"))
             save()

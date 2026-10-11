@@ -110,7 +110,7 @@ def test_five_discovery_conversations(tmp_path: Path, case: str):
         assert usage["conversation_cost_cents"] > 0
 
 
-async def test_tools_are_bounded_budgeted_and_replayed(cfg):
+async def test_tools_stay_available_budgeted_and_replayed(cfg):
     cfg = cfg.model_copy(deep=True)
     cfg.model_policy.roles["root"].fallback = []
     calls = AsyncMock(
@@ -134,7 +134,8 @@ async def test_tools_are_bounded_budgeted_and_replayed(cfg):
         "root", AgentInput(run_id=run.id, iteration=0, goal="inspect"), RootTurn, ctx
     )
     assert result.output.reply == "Collected evidence"
-    assert "tools" not in calls.call_args.kwargs
+    # Only the budget bounds tool use; tools are still offered after many calls.
+    assert "tools" in calls.call_args.kwargs
     assert execute.await_count == 8 and len(records) == 16
     assert checks.count(0) == 8
     assert run.tokens_in == 90
