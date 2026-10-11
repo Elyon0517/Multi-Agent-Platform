@@ -1514,6 +1514,9 @@
     "interruptedCall": "上次请求在确认 usage 前中断，结算状态未知。批准将重试缺失调用；网关可能已对中断请求计费。可选择终止。",
     "agentConfiguration": "Agent 配置",
     "selectProjectHint": "请在左侧选择项目，或点击「新建项目」创建。",
+    "connectionLostTitle": "无法连接服务",
+    "connectionRetrying": "{{seconds}} 秒后再检查一次（第 {{attempt}}/{{total}} 次）。断开期间不会发送其他请求。",
+    "retryNow": "立即重试",
     "dispatchMode": "分配模式",
     "autoDispatch": "Root 自动分配模型和任务",
     "manualDispatch": "完全手动分配模型和任务",
@@ -1558,7 +1561,32 @@
     "signoffChecks": "自动检查",
     "signoffFullPassed": "FULL Gate 通过",
     "signoffFindings": "未解决的 findings",
-    "signoffNone": "无"
+    "signoffNone": "无",
+    "devServerDown": "提供这个页面的开发服务器（5173 端口）没有运行，所有请求都到不了后端。请重新启动它，恢复后页面会自动重新连接。",
+    "backendDown": "开发服务器在，但后面的后端（agentlab serve）没有响应。请先在它的终端里查看报错原因，再重新启动。",
+    "connectionGaveUp": "已停止自动检查。请先排查原因，处理后点「立即重试」。",
+    "rootThinking": "正在思考… {{seconds}} 秒",
+    "collapseSidebar": "隐藏侧栏",
+    "expandSidebar": "显示侧栏",
+    "resizeConsole": "拖动调整右侧宽度（双击恢复默认）",
+    "officeFullscreen": "全屏",
+    "officeExitFullscreen": "退出全屏",
+    "officeMinimize": "最小化办公室监控",
+    "officeRestore": "展开办公室",
+    "officeMinimized": "办公室监控已最小化，agent 仍在正常工作。",
+    "deleteConversation": "删除对话",
+    "deleteConversationConfirm": "删除对话「{{title}}」？消息会被永久删除；已完成的 run 仍保留在 runs 记录中。",
+    "messageHint": "问 Root 问题，或描述你想要的改动",
+    "allowTool": "允许",
+    "denyTool": "拒绝",
+    "mcpServers": "MCP 工具服务器",
+    "mcpHint": "在 config/mcp.yaml 中配置。只读工具直接执行；会改动外部状态的工具会在对话中请求你批准。",
+    "mcpRunning": "运行中 · {{count}} 个工具",
+    "mcpIdle": "首次使用时启动",
+    "mcpError": "不可用",
+    "composerHint": "Enter 发送 · Shift+Enter 换行",
+    "openFindings": "最近一轮评审中未解决的问题",
+    "errorKind": "错误类型"
   },
   "monitor": {
     "loading": "正在加载用量…",
@@ -1581,5 +1609,51 @@
     "byAgent": "各 agent 用量 · 按总 token 排序",
     "reviewers": "Reviewer 合计",
     "grandTotal": "全部 agent 合计"
+  },
+  "approvalReason": {
+    "signoff": {
+      "title": "准备好请你终审",
+      "body": "团队已完成，评审已通过。批准：把改动应用到你的工作目录（不提交）。拒绝：写下反馈，退回给 coder 重做。中止：丢弃这个任务。"
+    },
+    "oscillation_detected": {
+      "title": "团队在原地打转",
+      "body": "连续两轮评审都卡在同样的问题上，为了不继续浪费预算而暂停。批准：让 coder 再试一轮（迭代计数清零）。拒绝并写反馈：告诉团队换个做法（推荐）。中止：结束任务。"
+    },
+    "reviewer_conflict": {
+      "title": "评审意见相互矛盾",
+      "body": "几位 reviewer 的结论互相矛盾。请在反馈框里说明以哪边为准，再点批准按你的意见继续。中止：结束任务。"
+    },
+    "inconsistent_verdict": {
+      "title": "评审结论自相矛盾",
+      "body": "某位 reviewer 给了「阻止」却没有具体的阻止理由。请在反馈框里说明怎么处理，再点批准。中止：结束任务。"
+    },
+    "budget_exceeded": {
+      "title": "预算已用完",
+      "body": "这个任务的预算已经用完。在下方填入更高的预算后点批准继续。中止：到此为止。"
+    },
+    "max_iter_exceeded": {
+      "title": "达到迭代上限",
+      "body": "这个任务已用完允许的评审轮数。在下方填入更大的上限后点批准继续，或者拒绝并写反馈给出方向。中止：结束任务。"
+    },
+    "interrupted_call": {
+      "title": "模型调用被中断",
+      "body": "进程中断时有一次模型调用还在进行，网关可能已经计费。批准：重试这次调用（可能再次计费）。中止：结束任务。"
+    },
+    "workspace_escape": {
+      "title": "试图写入项目之外的文件",
+      "body": "coder 试图修改工作区之外或受保护的文件，没有写入任何内容。批准：让 coder 在项目内重新尝试。中止：结束任务。"
+    },
+    "dispatch_invalid": {
+      "title": "模型分派无效",
+      "body": "Root 分派的模型或任务不符合项目设置。拒绝并写反馈：重新生成分派。中止：结束任务。"
+    },
+    "execution_error": {
+      "title": "任务执行出错",
+      "body": "某一步执行失败（错误类型见下方，例如网关或 key 有问题）。排除原因后点批准，从同一步重试。中止：结束任务。"
+    },
+    "unknown": {
+      "title": "任务需要你决定",
+      "body": "批准：继续。拒绝并写反馈：调整方向。中止：结束任务。"
+    }
   }
 }

@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { api, type RunDetail } from '@/api/client';
 import { useStore, type ConsoleTab } from '@/store/store';
 import { OWNER_BY_RUN_STATUS, seatFor } from '@/scene/adapter/mapping';
-import { OfficeFloor } from '@/scene/office/OfficeFloor';
 import { PixelPanel } from '@/components/PixelPanel';
 import { PixelButton } from '@/components/PixelButton';
 import { TasksKanban } from '@/components/TasksKanban';
@@ -19,6 +18,9 @@ import { ActivityView } from '@/views/ActivityView';
 import { KnowledgeView } from '@/views/KnowledgeView';
 import { ProjectView } from '@/views/ProjectView';
 import { ProjectDialogs } from '@/views/ProjectDialogs';
+import { ConnectionDialog } from '@/views/ConnectionDialog';
+import { ConsoleSplitter, OfficeMonitor } from '@/views/LayoutControls';
+import { loadLayout, saveLayout, type LayoutPrefs } from '@/views/layoutPrefs';
 import { Icon } from '@/components/Icon';
 import { MonitorView } from '@/views/MonitorView';
 import { SettingsView } from '@/views/SettingsView';
@@ -38,17 +40,18 @@ export function App() {
   const { t, i18n } = useTranslation();
   const { activeRunId, runs, setRoster, setRuns, setActiveRun, applyEvent, commandCenterTab: tab,
     requestCommandCenterTab: setTab, selectedId, activeProjectId, activeThreadId, setActiveThread } = useStore();
-  const [goal, setGoal] = useState('make test_add pass');
-  const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState(false);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const runtime = demo ? 'fake' : undefined;
+  const [layout, setLayout] = useState<LayoutPrefs>(loadLayout);
+  const updateLayout = (patch: Partial<LayoutPrefs>) => setLayout((old) => { const next = { ...old, ...patch }; saveLayout(next); return next; });
+  const sidebarWidth = layout.sidebarCollapsed ? 32 : 200;
 
   useEffect(() => {
     let alive = true;
     api.runs(activeProjectId ?? undefined).then(x => { if (alive) setRuns(activeProjectId ? x : x.filter(r => r.project_id === 'default')); }).catch(() => undefined);
-    setError(null); setGoal('');
+    setError(null);
     return () => { alive = false; };
   }, [activeProjectId, setRoster, setRuns]);
 
@@ -105,60 +108,46 @@ export function App() {
     setTab('runs');
   };
 
-  const start = async () => {
-    if (busy || !goal.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const projectId = activeProjectId;
-      let threadId = activeThreadId;
-      if (projectId && !threadId) { const thread = await api.createThread(projectId, goal.slice(0, 80) || t('lab.newConversation')); threadId = thread.id; if (useStore.getState().activeProjectId === projectId) setActiveThread(thread.id); }
-      const run = await api.createRun({ goal, runtime, project_id: projectId ?? undefined, thread_id: threadId ?? undefined });
-      if (useStore.getState().activeProjectId === projectId) await openRun(run.id);
-    } catch (e) {
-      setError(errorText(e));
-    } finally { setBusy(false); }
-  };
-
   return (
-    <div className="app-layout" style={{ display: 'grid', gridTemplateColumns: '200px minmax(300px, 1fr) 460px', height: '100vh', gap: 8, padding: 8, boxSizing: 'border-box' }}>
-      <ProjectSidebar />
-      <main className="workspace-main" style={{ minWidth: 0, display: 'grid', gridTemplateRows: detail?.pending_approval ? 'auto minmax(0, 1fr) auto auto' : 'auto minmax(0, 1fr) auto', gap: 8, minHeight: 0 }}>
-        <PixelPanel title="Multi-Agent Platform">
-          <form onSubmit={(e) => { e.preventDefault(); void start(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <label htmlFor="goal" style={{ position: 'absolute', left: -9999 }}>{t('lab.goal')}</label>
-            <input id="goal" value={goal} onChange={(e) => setGoal(e.target.value)}
-              style={{ minWidth: 120, flex: 1, fontFamily: 'var(--cth-font-mono)', padding: 6 }} />
+    <div className={`app-layout${layout.sidebarCollapsed ? ' sidebar-collapsed' : ''}`} style={{ display: 'grid', gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) 6px ${layout.consoleWidth}px`, columnGap: 0, height: '100vh', padding: 8, boxSizing: 'border-box' }}>
+      <ProjectSidebar collapsed={layout.sidebarCollapsed} onCollapsedChange={(sidebarCollapsed) => updateLayout({ sidebarCollapsed })} />
+      <main className="workspace-main" style={{ minWidth: 0, margin: '0 0 0 8px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignContent: layout.officeMinimized ? 'start' : undefined, gridTemplateRows: `auto ${layout.officeMinimized ? 'auto' : 'minmax(0, 1fr)'} auto${detail?.pending_approval ? ' auto' : ''}`, gap: 8, minHeight: 0 }}>
+        {/* Work starts in the Root conversation; the header only holds global toggles. */}
+        <header style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px',
+          background: 'var(--cth-cream-200)', boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)' }}>
+          <h1 style={{ margin: 0, fontFamily: 'var(--cth-font-display)', fontSize: 11 }}>Multi-Agent Platform</h1>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center', whiteSpace: 'nowrap' }}>
               <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} /> {t('lab.demoOffline')}
             </label>
             <select aria-label={t('lab.language')} value={i18n.resolvedLanguage ?? 'en'} onChange={(e) => setLanguage(e.target.value)}>
               {LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
             </select>
-            <PixelButton disabled={busy || !goal.trim()} onClick={() => void start()}>{t('lab.run')}</PixelButton>
-          </form>
-          <Status error={error} />
-        </PixelPanel>
-        <section aria-label={t('lab.officeFloor')} style={{ position: 'relative', minHeight: 0 }}>
-          <OfficeFloor />
-        </section>
-        {detail?.run.id === activeRunId && detail?.pending_approval && <ApprovalBar key={detail.pending_approval.id} runId={detail.run.id} approval={detail.pending_approval} />}
+          </div>
+          {error && <div style={{ flexBasis: '100%' }}><Status error={error} /></div>}
+        </header>
+        <OfficeMonitor minimized={layout.officeMinimized} onMinimizedChange={(officeMinimized) => updateLayout({ officeMinimized })} />
+        {detail?.run.id === activeRunId && detail?.pending_approval && <ApprovalBar key={detail.pending_approval.id} runId={detail.run.id} approval={detail.pending_approval} detail={detail} />}
         <AgentStrip />
       </main>
+      <ConsoleSplitter width={layout.consoleWidth} leftWidth={sidebarWidth} onChange={(consoleWidth) => updateLayout({ consoleWidth })} />
       <aside className="workspace-console" style={{ minWidth: 0, display: 'grid', gridTemplateRows: 'auto 1fr', gap: 8, minHeight: 0 }}>
-        <nav role="tablist" aria-label={t('lab.console')} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {TABS.map((t) => (
-            <PixelButton key={t.key} size="sm" variant={t.key === tab ? 'primary' : 'secondary'} onClick={() => setTab(t.key)}>
-              {i18n.t(`lab.${t.label}`)}
-            </PixelButton>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <nav role="tablist" aria-label={t('lab.console')} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+            {TABS.map((t) => (
+              <PixelButton key={t.key} size="sm" variant={t.key === tab ? 'primary' : 'secondary'} onClick={() => setTab(t.key)}>
+                {i18n.t(`lab.${t.label}`)}
+              </PixelButton>
+            ))}
+          </nav>
           {activeProjectId && (
-            <span style={{ marginLeft: 'auto' }}>
+            <span title={t('lab.agentConfiguration')} style={{ flex: 'none' }}>
               <PixelButton size="sm" variant="secondary" onClick={() => useStore.getState().openProjectDialog('config')}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="gear" /> {t('lab.agentConfiguration')}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center' }} aria-label={t('lab.agentConfiguration')}><Icon name="gear" /></span>
               </PixelButton>
             </span>
           )}
-        </nav>
+        </div>
         <div style={{ overflow: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: tab === 'chat' ? 'flex' : 'none', flex: 1, minHeight: 0 }}><ConversationView /></div>
           {selectedId && <AgentDetail />}
@@ -192,6 +181,7 @@ export function App() {
       </aside>
       <TaskDetailOverlay />
       <ProjectDialogs runtime={runtime} />
+      <ConnectionDialog />
     </div>
   );
 }

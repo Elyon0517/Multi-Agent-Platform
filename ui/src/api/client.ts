@@ -32,25 +32,80 @@ export type Verdict = components['schemas']['Verdict'];
 
 const BASE = '/api';
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+// Whether the backend answered the last request. A refused connection means the dev server serving
+// this page is down (a TypeError); a dead backend behind the Vite proxy comes back as an empty 500,
+// or a 502-504 elsewhere. While unreachable, requests fail fast without touching the network and
+// only the explicit health probe goes out, so polling views stop generating traffic.
+export type ConnectionFailure = 'dev-server' | 'backend';
+type ConnectionListener = (reachable: boolean, failure: ConnectionFailure | null) => void;
+const connectionListeners = new Set<ConnectionListener>();
+let reachable = true;
+function setReachable(next: boolean, failure: ConnectionFailure | null = null) {
+  if (next === reachable) return;
+  reachable = next;
+  connectionListeners.forEach((listener) => listener(next, next ? null : failure));
+}
+export function onConnectionChange(listener: ConnectionListener): () => void {
+  connectionListeners.add(listener);
+  return () => { connectionListeners.delete(listener); };
+}
+
+async function json<T>(path: string, init?: RequestInit, probe = false): Promise<T> {
+  if (!reachable && !probe) throw new Error(`${init?.method ?? 'GET'} ${path}: server unreachable`);
   const isForm = init?.body instanceof FormData;
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: isForm ? init?.headers : { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: isForm ? init?.headers : { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (e) {
+    if (e instanceof TypeError) setReachable(false, 'dev-server');
+    throw new Error(`${init?.method ?? 'GET'} ${path}: server unreachable`);
+  }
   if (!res.ok) {
     const text = await res.text();
+    const backendDown = [502, 503, 504].includes(res.status) || (res.status === 500 && !text.trim());
+    if (backendDown) setReachable(false, 'backend'); else setReachable(true);
     let detail = text;
     try { detail = (JSON.parse(text) as { detail?: string }).detail ?? text; } catch { /* plain text */ }
     throw new Error(`${init?.method ?? 'GET'} ${path}: ${res.status} ${detail}`);
   }
+  setReachable(true);
   return res.json() as Promise<T>;
+}
+
+/** EventSource that does not let the browser reconnect forever. On error it closes, checks health once,
+ *  and reopens only when the server answers again. */
+function stream(url: string, setup: (es: EventSource) => void): () => void {
+  let es: EventSource | null = null;
+  let stopped = false;
+  let stopListening: (() => void) | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  const open = () => {
+    if (stopped || es) return;
+    stopListening?.(); stopListening = null;
+    es = new EventSource(url);
+    setup(es);
+    es.onerror = () => {
+      es?.close(); es = null;
+      if (stopped) return;
+      // Reopen at most once per second, whichever comes first: the probe or the reconnect notice.
+      const reopen = () => { if (!retry) retry = setTimeout(() => { retry = null; open(); }, 1000); };
+      stopListening = onConnectionChange((ok) => { if (ok) reopen(); });
+      void api.health().then(reopen, () => undefined);
+    };
+  };
+  open();
+  return () => { stopped = true; stopListening?.(); if (retry) clearTimeout(retry); es?.close(); };
 }
 
 const post = <T>(path: string, body: unknown, method = 'POST') =>
   json<T>(path, { method, body: JSON.stringify(body) });
 
 export const api = {
+  /** The only request sent while unreachable; it is what brings the connection back. */
+  health: () => json<{ ok: boolean }>('/health', undefined, true),
   monitorUsage: () => json<MonitorUsage>('/monitor/usage'),
   roster: (projectId?: string, runId?: string) => json<RosterEntry[]>(`/roster?${new URLSearchParams({ ...(projectId ? { project_id: projectId } : {}), ...(runId ? { run_id: runId } : {}) })}`),
   runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
@@ -91,16 +146,20 @@ export const api = {
   updateProjectSettings: (id: string, settings: ProjectSettings) => post<Project>(`/projects/${id}/settings`, settings, 'PUT'),
   sendMessage: (id: string, tid: string, text: string) => post<components['schemas']['SendMessageResult']>(`${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/messages`, { text }),
   threadEvents: (id: string, tid: string, callback: (type: string, payload: Record<string, unknown>) => void) => {
-    const es = new EventSource(`${BASE}${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/events`);
-    es.onopen = () => callback('sync', {});
-    for (const type of ['message.created', 'message.delta', 'turn.finished']) {
-      es.addEventListener(type, (e) => callback(type, JSON.parse((e as MessageEvent).data).payload));
-    }
-    return () => es.close();
+    return stream(`${BASE}${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/events`, (es) => {
+      es.onopen = () => callback('sync', {});
+      for (const type of ['message.created', 'message.delta', 'turn.finished']) {
+        es.addEventListener(type, (e) => callback(type, JSON.parse((e as MessageEvent).data).payload));
+      }
+    });
   },
   threads: (id: string) => json<Conversation[]>(`${id === 'global' ? '' : `/projects/${id}`}/threads`),
   createThread: (id: string, title: string) => post<Conversation>(`${id === 'global' ? '' : `/projects/${id}`}/threads`, { title }),
   pickFolder: () => post<{ path: string | null }>('/local/pick-folder', {}),
+  decideTool: (id: string, tid: string, approvalId: string, decision: 'allow' | 'deny') =>
+    post<{ status: string }>(`${id === 'global' ? '' : `/projects/${encodeURIComponent(id)}`}/threads/${encodeURIComponent(tid)}/tool-approvals/${encodeURIComponent(approvalId)}`, { decision }),
+  mcpStatus: () => json<Array<{ name: string; roles: string[]; running: boolean; tools: number; error: string | null }>>('/mcp/status'),
+  deleteThread: (id: string, tid: string) => json<{ deleted: boolean }>(`${id === 'global' ? '' : `/projects/${encodeURIComponent(id)}`}/threads/${encodeURIComponent(tid)}`, { method: 'DELETE' }),
   deleteProject: (id: string) => json<{ deleted: boolean }>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   projects: () => json<Project[]>('/projects'),
   project: (id: string) => json<Project>(`/projects/${id}`),
@@ -109,13 +168,13 @@ export const api = {
   patchStep: (projectId: string, stepId: string, status: StepStatus) =>
     post<Project>(`/projects/${projectId}/steps/${stepId}`, { status }, 'PATCH'),
   events: (runId: string, onEvent: (e: LabEvent) => void): (() => void) => {
-    const es = new EventSource(`${BASE}/runs/${runId}/events`);
     const handler = (m: MessageEvent<string>) => onEvent(JSON.parse(m.data) as LabEvent);
     const types: EventType[] = [
       'run.created', 'run.status', 'step.started', 'step.tool_call', 'step.finished', 'artifact.created',
       'gate.finished', 'arbiter.decision', 'approval.requested', 'approval.decided', 'budget.warning',
     ];
-    for (const t of types) es.addEventListener(t, handler as EventListener);
-    return () => es.close();
+    return stream(`${BASE}/runs/${runId}/events`, (es) => {
+      for (const t of types) es.addEventListener(t, handler as EventListener);
+    });
   },
 };

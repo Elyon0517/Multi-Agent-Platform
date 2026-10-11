@@ -79,6 +79,27 @@ export function SettingsView() {
       <PixelPanel title={t('lab.office')}>
         <OfficeThemePicker />
       </PixelPanel>
+      <McpStatus />
     </>
+  );
+}
+
+/** External MCP tool servers (config/mcp.yaml). They start the first time Root or the planner needs them. */
+function McpStatus() {
+  const { t } = useTranslation();
+  const [servers, setServers] = useState<Awaited<ReturnType<typeof api.mcpStatus>>>([]);
+  useEffect(() => { api.mcpStatus().then(setServers).catch(() => setServers([])); }, []);
+  return (
+    <PixelPanel title={t('lab.mcpServers')}>
+      <p style={{ fontSize: 12, margin: '0 0 6px' }}>{t('lab.mcpHint')}</p>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+        {servers.map((s) => (
+          <li key={s.name}>
+            <strong>{s.name}</strong> · {s.roles.join(', ')} · {s.error ? `${t('lab.mcpError')}: ${s.error}`
+              : s.running ? t('lab.mcpRunning', { count: s.tools }) : t('lab.mcpIdle')}
+          </li>
+        ))}
+      </ul>
+    </PixelPanel>
   );
 }
