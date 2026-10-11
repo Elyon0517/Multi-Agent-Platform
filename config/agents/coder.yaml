@@ -1,5 +1,5 @@
 role: coder
 output: diff
 prompt: prompts/coder.md
-tool_grants: [workspace_read, workspace_write, gate_run]
+tool_grants: [workspace_read, workspace_write, workspace_search, git_read, gate_run, memory_search]
 kind: worker

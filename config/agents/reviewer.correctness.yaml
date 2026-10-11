@@ -1,5 +1,5 @@
 role: correctness-reviewer
 output: review
 prompt: prompts/reviewer.correctness.md
-tool_grants: [workspace_read]
+tool_grants: [workspace_read, workspace_search, git_read, memory_search]
 kind: reviewer
