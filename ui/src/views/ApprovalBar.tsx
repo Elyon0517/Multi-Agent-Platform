@@ -11,7 +11,9 @@ const EXPLAINED = new Set(['signoff', 'no_changes', 'oscillation_detected', 'rev
 // Reasons where the reviewers' open findings explain what is stuck.
 const SHOW_FINDINGS = new Set(['oscillation_detected', 'reviewer_conflict', 'inconsistent_verdict', 'max_iter_exceeded']);
 
-export function ApprovalBar({ runId, approval, detail }: { runId: string; approval: Approval; detail?: RunDetail }) {
+export function ApprovalBar({ runId, approval, detail, onDecided }: {
+  runId: string; approval: Approval; detail?: RunDetail; onDecided?: () => void;
+}) {
   const { t } = useTranslation();
   const [feedback, setFeedback] = useState('');
   const [budget, setBudget] = useState('');
@@ -28,6 +30,7 @@ export function ApprovalBar({ runId, approval, detail }: { runId: string; approv
         budget_cents: budget ? Number(budget) : undefined,
         max_iter: maxIter ? Number(maxIter) : undefined,
       });
+      onDecided?.();
     } catch (e) {
       setError(errorText(e));
     } finally {

@@ -1591,7 +1591,8 @@
     "checkCommandsHint": "每行一条，例如 npm run typecheck。coder 会在自己的 worktree 中运行（gate_run），终审前必须全部通过。留空表示不做自动检查。",
     "coderSaid": "coder 的说明",
     "stopRun": "停止",
-    "stopRunTitle": "停止这个对话中正在运行的任务"
+    "stopRunTitle": "停止这个对话中正在运行的任务",
+    "stopAndDeleteConversation": "这个对话里还有正在运行或等待你决定的任务。要停止任务并删除对话吗？"
   },
   "monitor": {
     "loading": "正在加载用量…",
