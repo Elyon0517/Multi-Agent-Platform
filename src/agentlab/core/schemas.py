@@ -120,6 +120,8 @@ class FileEdit(Strict):
 
 class CoderOutput(Strict):
     edits: list[FileEdit]
+    # Why no change could be made (missing information, access or capability); shown to the user.
+    blocked_reason: str | None = None
 
 
 class MemoryNote(Strict):

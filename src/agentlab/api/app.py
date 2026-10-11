@@ -80,6 +80,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
     svc = svc or build_services()
     drivers: dict[str, Driver] = {}
     tasks: set[asyncio.Task[Run]] = set()
+    run_tasks: dict[str, asyncio.Task[Run]] = {}
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -134,9 +135,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def spawn(driver: Driver, run_id: str) -> None:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)
+        run_tasks[run_id] = task
 
         def finished(done: asyncio.Task[Run]) -> None:
             tasks.discard(done)
+            if run_tasks.get(run_id) is done:
+                del run_tasks[run_id]
             if not done.cancelled() and (error := done.exception()) is not None:
                 log.error("background run %s failed: %s", run_id, type(error).__name__)
 
@@ -403,6 +407,27 @@ def create_app(svc: Services | None = None) -> FastAPI:
         if art is None:
             raise HTTPException(404, "artifact not found")
         return {"kind": art.kind, "content": svc.blobs.get(art.content_ref)}
+
+    @app.post("/runs/{run_id}/cancel", response_model=Run)
+    async def cancel_run(run_id: str) -> Run:
+        """Stop a run immediately, whether it is executing or waiting for a decision."""
+        get_run(run_id)
+        task = run_tasks.get(run_id)
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(task, 30)
+        driver = drivers.get(run_id)
+        if driver is None:
+            try:
+                driver = svc.restore_driver(run_id)
+                drivers[run_id] = driver
+            except Exception as exc:
+                raise HTTPException(409, f"recovery failed: {type(exc).__name__}") from exc
+        try:
+            return await driver.cancel(run_id)
+        except RunBusy as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.post("/runs/{run_id}/decision", response_model=Run)
     async def decide(run_id: str, body: DecideBody) -> Run:

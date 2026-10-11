@@ -199,6 +199,27 @@ class Driver:
                 log.exception("on_finished hook failed for run %s", run.id)
         return run
 
+    async def cancel(self, run_id: str, by: str = "human") -> Run:
+        """Stop a run in any non-terminal state (the caller has already cancelled its executing task)."""
+        with self.store.lock_run(run_id):
+            run = self.store.get_run(run_id)
+            if run.status in TERMINAL:
+                return run
+            # A model call cut off by the stop may have been billed; record it as unmetered, never retried.
+            recover_run_calls(self.store, run_id)
+            with self._atomic():
+                approval = self.store.pending_approval(run_id)
+                if approval:
+                    approval.status, approval.decided_by, approval.decided_at = ApprovalStatus.ABORTED, by, utcnow()
+                    self.store.save_approval(approval)
+                for item in self.store.records("attempt"):
+                    if item.get("run_id") == run_id and item.get("status") == "in_flight":
+                        self.store.put_record("attempt", item["id"], {**item, "status": "unknown_closed"})
+                run.paused_reason = None
+                self._advance_committed(run, S.CANCELLED)
+            self._clear_agent_cache(run_id)
+        return await self._after_run(run)
+
     def decide(
         self,
         run_id: str,
@@ -366,6 +387,11 @@ class Driver:
         res = await self._agent(run, "coder", self._coder_input(run), CoderOutput)
         self.workspace.apply_edits(res.output.edits)
         diff = await self.workspace.diff()
+        if not diff.strip():
+            # Nothing changed: reviewing an empty diff only spends budget, so ask the user right away.
+            self._escalate(run, "no_changes", {"blocked_reason": (res.output.blocked_reason or "")[:2000]},
+                           on_approve=S.CODING)
+            return
         with self._atomic():
             self._save_artifact(run, "diff", diff, "coder", to="gate" if self.gate else "reviewers")
             if self.gate is None:
