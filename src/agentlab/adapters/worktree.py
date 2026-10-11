@@ -14,6 +14,8 @@ from pathlib import Path
 
 from agentlab.adapters.sandbox.local import scrubbed_env
 
+# Ignored dependency directories linked from the user's repository into each worktree.
+LINKED_DEPENDENCIES = ("node_modules",)
 # Commits made here are bookkeeping on a throwaway branch: no user identity, hooks or signing.
 _COMMIT = ["-c", "user.name=agentlab", "-c", "user.email=agentlab@local", "-c", "commit.gpgsign=false"]
 
@@ -57,6 +59,12 @@ def create(repo: Path, path: Path, run_id: str) -> dict[str, str]:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target, follow_symlinks=False)
         base = _commit(path, f"agentlab base for run {run_id}")
+        # Installed dependencies are ignored by Git, so a fresh worktree has none; link the user's copy so the
+        # project's check commands (tests, type checks) work. The link is ignored and never applied back.
+        for name in LINKED_DEPENDENCIES:
+            source = repo / name
+            if source.is_dir() and not (path / name).exists():
+                (path / name).symlink_to(source, target_is_directory=True)
     except Exception:
         remove({"repo": str(repo), "path": str(path), "branch": branch})
         raise

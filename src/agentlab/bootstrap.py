@@ -16,7 +16,7 @@ from agentlab.adapters.sandbox.local import LocalSandbox
 from agentlab.adapters.store.blobs import FileBlobStore
 from agentlab.adapters.store.memory import InMemoryStore
 from agentlab.adapters.workspace import GitWorkspace
-from agentlab.core.config import AppConfig, GateCfg, load_config
+from agentlab.core.config import AppConfig, GateCfg, GateStepCfg, load_config
 from agentlab.core.loop.driver import Driver
 from agentlab.core.memory.store import InMemoryMemoryStore, PersistentMemoryStore
 from agentlab.core.ports import AgentRuntime, Sandbox, Store
@@ -204,7 +204,11 @@ class Services:
             secrets=self.workspace_secrets(),
             snapshot_dir=self.settings.data_dir.resolve() / "snapshots" / uuid4().hex,
         )
-        if (runtime or self.settings.runtime) == "fake":
+        checks = project.settings.check_commands if project and project.settings else []
+        if checks:
+            store_log = lambda text: self.blobs.put(text)[0]  # noqa: E731
+            gate: ConfigGate | None = ConfigGate(project_gate_cfg(checks), LocalSandbox(), store_log)
+        elif (runtime or self.settings.runtime) == "fake":
             from agentlab.demo import demo_gate_cfg
 
             gate = resolve_gate([ConfigGate(demo_gate_cfg(), LocalSandbox())], ws.root, language)
@@ -213,7 +217,8 @@ class Services:
         driver = Driver(cfg, self.store, self.blobs, self.bus, self.runtime(runtime, cfg), gate, ws, self.hooks)
         driver.recovery_options = {
             "runtime": runtime or self.settings.runtime,
-            "sandbox": self.settings.sandbox,
+            # Project checks use the host toolchain, so a restored run must not move them into Docker.
+            "sandbox": "local" if checks else self.settings.sandbox,
             "gate": gate.cfg.model_dump(mode="json") if gate else None,
             "project_settings": project.settings.model_dump(mode="json") if project and project.settings else None,
         }
@@ -307,3 +312,16 @@ def build_services(settings: Settings | None = None) -> Services:
         knowledge=KnowledgeService(memory),
         projects=ProjectService(store),
     )
+
+
+def project_gate_cfg(commands: list[str]) -> GateCfg:
+    """A Gate from a project's own check commands; every command runs in both FAST and FULL mode."""
+    import shlex
+
+    from agentlab.core.schemas import GateMode
+
+    steps = [
+        GateStepCfg(name=command[:60], argv=shlex.split(command), timeout_s=900, modes=[GateMode.FAST, GateMode.FULL])
+        for command in commands if command.strip()
+    ]
+    return GateCfg(language="project", image="local", markers=[], steps=steps)
