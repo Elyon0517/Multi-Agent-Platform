@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.10 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）· 可持续更新
+> 状态：v1.11 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）；v1.11 开发能力补强：空交付暂停、停止按钮、coder 只读外部工具、项目检查命令（§16.7、ADR-035）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -945,6 +945,23 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - 测试不会启动真实 server（`tests/conftest.py` 的 `no_mcp_servers`）；`tests/unit/test_mcp_tools.py` 覆盖只读直接执行、写操作等待批准、拒绝不执行、只能决定一次、planner 只拿只读工具、配置严格校验。
 - 真实验收（2026-10-10）：Root 通过 GitHub 工具读出 `Elyon0517/multi-agent-platform` main 的最新 commit（`75e3011` update readme file），并通过 fetch 读取 example.com 标题。
 
+## 16.7 开发能力补强（v1.11，ADR-035）
+
+**背景**：真实任务「参考 a2ui-crm 把 MVP 接入 crm-frontend 的 AI Coach」连续 6 轮空 diff，花费约 417 美分。原因叠加：计划被上一个任务的调查内容带偏（要求先跑 shell 命令、能力不足就停止）；coder 读不到参考仓库；TypeScript 项目没有 Gate、coder 不能跑测试，而 reviewer 每轮因缺少测试输出给 BLOCK；空 diff 仍被送去三方评审；coder 无法说明为什么没改。
+
+| 项 | 决定 |
+|---|---|
+| 空交付 | coder 结束时工作区没有任何改动 → 不送评审，立即暂停（`no_changes`），显示 coder 在 `CoderOutput.blocked_reason` 中写的原因；批准 = 原样重试，退回修改 = 带反馈重试，中止 = 结束 |
+| 停止 | `POST /runs/{id}/cancel` 可在任意未结束状态（包括执行中）停止任务：取消执行中的协程、把被打断的模型调用记为未计量、关闭待审批、清理 worktree。对话输入框为空且本对话有未结束任务时，发送按钮变为 **■ 停止**（参照 Claude / Codex） |
+| 权限总表 | **coder**：读写工作区文件、代码全文搜索、Git 只读（status / branch / log / diff / show，含其他分支）、记忆、项目检查命令（`gate_run`）、GitHub / 网页只读。**reviewer × 3 与 planner**：广泛只读（文件、代码搜索、Git 只读、记忆、GitHub / 网页只读），不能写文件、不能执行命令。**Root**：只读 + GitHub 写操作（开 PR、评论等，需在对话中批准），不直接写代码。「外部写操作」仅指 GitHub 等外部系统，不影响 coder 写本地代码 |
+| 项目检查命令 | 项目设置新增 `check_commands`（每行一条，最多 10 条），作为该项目的 Gate：在任务 worktree 中用本机工具链执行（不进 Docker）；coder 可通过 `gate_run` 自行运行，终审前 FULL 检查必须通过。worktree 自动链接仓库中被忽略的 `node_modules`，链接不会被应用回去 |
+| 评审规则 | 三个 reviewer 的提示词明确：仅因缺少自动检查或命令输出不能给 blocking / major；报告问题前用只读工具核实上下文 |
+| 按钮文案 | 「拒绝」改为「退回修改」：它会带着反馈继续执行，结束任务请用「中止」或「停止」 |
+
+- 只放进能在 main 上通过的命令，否则每次终审都会被已有失败挡住。例：crm-frontend 的 `npm test`（95 个文件、529 个测试在 main 上全部通过）；`tsc` 在 main 上已有约 124 个错误，不适合作为检查。
+- 使用建议：重新开始任务时开新对话，避免旧对话里的调查与审批内容被带进新计划。
+- 测试：`tests/unit/test_dev_capabilities.py`（空交付暂停且不调用 reviewer、执行中停止并清理 worktree、检查命令在 worktree 中运行并能看到 `node_modules`）；`tests/unit/test_role_permissions.py`（reviewer / planner 广泛只读且不能写，coder 可读写）。
+
 ---
 
 ## 十七、可参考的开源项目
@@ -1088,6 +1105,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-032 | signoff 时生成确定性终审报告，只含任务目标与验收标准、自动检查结果（或未经过自动测试）、最后一轮未解决的 findings | 2026-10-10 | 用户要求精简：审核时只看这三项；不调用模型，内容不会编造 |
 | ADR-033 | 每个 run 使用独立 Git worktree（携带未提交改动作为基线）；批准 signoff 时用 `git apply` 把该 run 的改动应用到用户工作目录且不提交，冲突则停下并保持待审批；结束后清理 worktree 与分支。同时取消工具调用次数上限，只保留预算约束 | 2026-10-10 | 用户要求在同一项目中并行多个任务，旧的「一个工作区一个未完成 run」规则会被等待审批的任务卡住；用户选择「独立 worktree + 自动合并（有冲突就停下）」。用 `git apply` 而不是 merge commit，保持改动未提交、由用户自己 commit 的旧习惯，并能干净地处理用户未提交的工作 |
 | ADR-034 | 接入 MCP（Model Context Protocol）工具服务器：GitHub 与 Fetch，配置在 `config/mcp.yaml`；只读工具自动允许、写操作在对话中批准后执行；Root 与 planner 可用，planner 仅只读 | 2026-10-10 | 用户要求像 Codex / Claude Code 一样具备 GitHub 与网页访问，并在需要时请求权限；用户选择「只读自动允许，写操作才问」和「Root + planner」 |
+| ADR-035 | 空交付立即暂停并显示 coder 的原因；任务可随时停止（对话中发送按钮变为停止）；coder 获得只读 GitHub / Fetch；项目可配置检查命令作为 Gate，在 worktree 中用本机工具链运行并链接 `node_modules`；reviewer 不得仅因缺少检查输出而阻止 | 2026-10-11 | 真实任务 6 轮空 diff、约 417 美分；用户要求「适当开放权限，让多 agent 能真正帮我开发」，并要求像 Claude / Codex 一样提供停止按钮 |
 
 
 ### 可靠性复核补充（2026-10-09）
