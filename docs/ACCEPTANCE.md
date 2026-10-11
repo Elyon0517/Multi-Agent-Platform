@@ -54,7 +54,7 @@ cd ui && npm run dev
 
 | 场景 | 看什么 |
 |---|---|
-| S1 正常流程 | Claude 的 planner、coder（调用工具时显示工作中）→ Gate → 三个 reviewer 同时出现、逐个离开（GPT / Claude 混合）；同一 workspace 再开 run 被拒（终端显示 409） |
+| S1 正常流程 | Claude 的 planner、coder（调用工具时显示工作中）→ Gate → 三个 reviewer 同时出现、逐个离开（GPT / Claude 混合） |
 | S2 Gate 失败 + 评审要求修改 | Gate 变红，coder 回来重做；下一轮 arch-reviewer 提意见；第三轮通过 |
 | S3 Claude 故障 | planner 重试变慢，最后用 GPT 完成（显示 GPT 模型名），coder 仍是 Claude |
 | S4 预算中途暂停 | 三个 reviewer 出现后立即暂停，必须全部离开；提高预算后重新出现 |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from agentlab.bootstrap import MissingGatewayConfig, Services
 from agentlab.core.loop.driver import Driver
 from agentlab.core.ports import RunBusy, execution_error_reason
-from agentlab.core.schemas import Run
+from agentlab.core.schemas import Run, new_id
 from agentlab.demo import seed_demo_workspace
 
 
@@ -67,14 +68,32 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
         new_conversation = True
     if not body.goal.strip() or len(body.goal) > 20000:
         raise HTTPException(422, "goal must contain 1 to 20000 characters")
+    run_id = new_id()
+    # Each run works in its own worktree, so runs in one repository never block or overwrite each other.
+    isolation = await _isolate(svc, Path(body.workspace), run_id) if body.workspace else None
     ws = (
-        Path(body.workspace) if body.workspace else seed_demo_workspace(Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
+        Path(isolation["path"]) if isolation
+        else Path(body.workspace) if body.workspace
+        else seed_demo_workspace(Path(tempfile.mkdtemp(prefix="agentlab-demo-")))
     )
+
+    def discard() -> None:
+        driver.workspace.close()  # type: ignore[attr-defined]
+        if isolation:
+            from agentlab.adapters.worktree import remove
+
+            remove(isolation)
+
     try:
         driver = svc.driver(ws, body.runtime, body.language, body.project_id)
+        driver.workspace.isolation = isolation  # type: ignore[attr-defined]
         if conversation:
             driver.recovery_options["conversation"] = [m.model_dump(mode="json") for m in conversation.messages[-20:]]
     except MissingGatewayConfig as e:
+        if isolation:
+            from agentlab.adapters.worktree import remove
+
+            remove(isolation)
         raise HTTPException(400, f"{type(e).__name__}: {e}") from e
 
     def record_conversation(run: Run) -> None:
@@ -102,16 +121,17 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
     try:
         await driver.workspace.ensure_repo()  # type: ignore[attr-defined]
         run = await driver.create_async(
-            body.goal, project_id=body.project_id or "default", thread_id=body.thread_id, on_create=record_conversation
+            body.goal, id=run_id, project_id=body.project_id or "default", thread_id=body.thread_id,
+            on_create=record_conversation,
         )
     except RunBusy as exc:
-        driver.workspace.close()  # type: ignore[attr-defined]
+        discard()
         raise HTTPException(409, str(exc)) from exc
     except HTTPException:
-        driver.workspace.close()  # type: ignore[attr-defined]
+        discard()
         raise
     except Exception as exc:
-        driver.workspace.close()  # type: ignore[attr-defined]
+        discard()
         reason = execution_error_reason(exc)
         status = 422 if reason in {"workspace_unreadable", "workspace_escape", "workspace_root_required"} else 503
         raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
@@ -121,3 +141,23 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
         except (KeyError, StopIteration) as e:
             raise HTTPException(404, "project or step not found") from e
     return run, driver
+
+
+async def _isolate(svc: Services, workspace: Path, run_id: str) -> dict[str, str] | None:
+    """Create the run's worktree; repositories without a first commit keep working in place."""
+    from agentlab.adapters.workspace import GitWorkspace
+    from agentlab.adapters.worktree import can_isolate, create
+
+    repo = GitWorkspace(workspace)
+    try:
+        await repo.ensure_repo()
+        if not await asyncio.to_thread(can_isolate, repo.root):
+            return None
+        path = svc.settings.data_dir.resolve() / "worktrees" / run_id
+        return await asyncio.to_thread(create, repo.root, path, run_id)
+    except Exception as exc:
+        reason = execution_error_reason(exc)
+        status = 422 if reason in {"workspace_unreadable", "workspace_escape", "workspace_root_required"} else 503
+        raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
+    finally:
+        repo.close()

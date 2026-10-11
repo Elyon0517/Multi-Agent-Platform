@@ -187,6 +187,12 @@ class Driver:
             close = getattr(self.workspace, "close", None)
             if close:
                 close()
+            release = getattr(self.workspace, "release", None)
+            if release:
+                try:
+                    await asyncio.to_thread(release)
+                except Exception:  # a leftover worktree is harmless; never fail the finished run
+                    log.exception("worktree cleanup failed for run %s", run.id)
             try:
                 await self.hooks.on_finished(run)
             except Exception:  # post-run bookkeeping must not change the outcome
@@ -244,6 +250,11 @@ class Driver:
                 raise ValueError("increase max_iter before resuming")
             if approval.on_approve == S.DONE and approval.reason != "signoff":
                 raise ValueError("only signoff approval can complete a run")
+            if approval.reason == "signoff":
+                # Isolated runs land in the user's working tree now; a conflict leaves the approval pending.
+                integrate = getattr(self.workspace, "integrate_back", None)
+                if integrate:
+                    integrate()
         if (
             decision != "abort"
             and self.runtime_factory is not None

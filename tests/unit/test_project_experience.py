@@ -166,9 +166,12 @@ def test_project_step_run_gets_a_conversation_and_terminal_message(tmp_path: Pat
         assert response.status_code == 200, response.text
         run = response.json()
         assert run["thread_id"]
-        assert client.post("/runs", json={"goal": "second", "project_id": project.id, "runtime": "fake"}).status_code == 409
+        # Runs in one project no longer block each other: each gets its own worktree.
+        second = client.post("/runs", json={"goal": "second", "project_id": project.id, "runtime": "fake"})
+        assert second.status_code == 200 and second.json()["workspace"] != run["workspace"]
         threads = client.get(f"/projects/{project.id}/threads").json()
-        assert len(threads) == 1 and threads[0]["messages"][0]["run_id"] == run["id"]
+        first = next(t for t in threads if t["id"] == run["thread_id"])
+        assert first["messages"][0]["run_id"] == run["id"]
         for _ in range(100):
             detail = client.get(f'/runs/{run["id"]}').json()
             if detail["run"]["status"] == "WAITING_HUMAN":
@@ -177,8 +180,9 @@ def test_project_step_run_gets_a_conversation_and_terminal_message(tmp_path: Pat
         assert detail["pending_approval"]["reason"] == "signoff"
         assert client.post(f'/runs/{run["id"]}/decision', json={"decision": "approve"}).status_code == 200
         for _ in range(100):
-            messages = client.get(f"/projects/{project.id}/threads").json()[0]["messages"]
-            if any(m.get("kind") == "summary" for m in messages):
+            threads = client.get(f"/projects/{project.id}/threads").json()
+            messages = next(t for t in threads if t["id"] == run["thread_id"])["messages"]
+            if any(m.get("kind") == "summary" and "DONE" in m["text"] for m in messages):
                 break
             time.sleep(0.05)
         assert any(m["author"] == "assistant" and m.get("kind") == "summary" and "DONE" in m["text"] for m in messages)
