@@ -140,6 +140,9 @@ export function ConversationView() {
   const [approvals, setApprovals] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [toolBusy, setToolBusy] = useState(false);
+  const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
+  const [runStatus, setRunStatus] = useState<Record<string, string>>({});
+  const [stopping, setStopping] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -172,13 +175,31 @@ export function ConversationView() {
   useEffect(() => {
     if (!thread) return;
     let alive = true;
-    const ids = [...new Set(thread.messages.filter((m) => m.kind === 'approval' && m.run_id).map((m) => m.run_id!))];
+    // Every run started from this conversation: its pending approval and whether it is still going.
+    const ids = [...new Set(thread.messages.filter((m) => m.run_id).map((m) => m.run_id!))];
     void Promise.all(ids.map(async (id) => {
       const detail = await api.run(id);
-      return [id, detail.pending_approval?.id ?? ''] as const;
-    })).then((items) => { if (alive) setApprovals(Object.fromEntries(items)); }).catch(() => undefined);
+      return [id, detail.pending_approval?.id ?? '', detail.run.status] as const;
+    })).then((items) => {
+      if (!alive) return;
+      setApprovals(Object.fromEntries(items.map(([id, approval]) => [id, approval])));
+      setRunStatus(Object.fromEntries(items.map(([id, , status]) => [id, status])));
+      const active = items.filter(([, , status]) => status !== 'DONE' && status !== 'CANCELLED').map(([id]) => id);
+      setActiveRunIds(active);
+      // Follow the conversation's running task so the office and agent strip show its live events, even when
+      // the task was started elsewhere (another tab, the API or a project step).
+      const latest = active.at(-1);
+      const store = useStore.getState();
+      if (latest && store.activeRunId !== latest && !active.includes(store.activeRunId ?? '')) {
+        void api.run(latest).then((detail) => {
+          if (!alive || useStore.getState().activeThreadId !== activeThreadId) return;
+          useStore.getState().setRuns([...useStore.getState().runs.filter((r) => r.id !== latest), detail.run]);
+          useStore.getState().setActiveRun(latest);
+        }).catch(() => undefined);
+      }
+    }).catch(() => undefined);
     return () => { alive = false; };
-  }, [thread, runs]);
+  }, [thread]);
   // Follow new content only while the reader is already at the bottom; opening a conversation always jumps there.
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -216,6 +237,13 @@ export function ConversationView() {
       if (current()) setApprovals((old) => ({ ...old, [runId]: '' }));
     }).catch((e) => { if (current()) setError(String(e)); });
   };
+  const stopRuns = () => {
+    setStopping(true); setError(null);
+    void Promise.all(activeRunIds.map((id) => api.cancelRun(id)))
+      .then(() => { if (current()) setActiveRunIds([]); })
+      .catch((e) => { if (current()) setError(String(e)); })
+      .finally(() => { if (current()) setStopping(false); });
+  };
   const decideTool = (approvalId: string, decision: 'allow' | 'deny') => {
     setToolBusy(true); setError(null);
     void api.decideTool(activeProjectId ?? 'global', activeThreadId!, approvalId, decision)
@@ -249,7 +277,7 @@ export function ConversationView() {
                 )}
                 {m.run_id && (
                   <button type="button" className="chat-run" onClick={() => setActiveRun(m.run_id)}>
-                    <span className="chat-run-status">{t('lab.run')} · {run?.status ?? '…'}</span>
+                    <span className="chat-run-status">{t('lab.run')} · {runStatus[m.run_id] ?? run?.status ?? '…'}</span>
                     <span className="chat-run-goal">{run?.goal ?? m.run_id}</span>
                   </button>
                 )}
@@ -261,9 +289,9 @@ export function ConversationView() {
                 )}
                 {m.kind === 'approval' && m.run_id && approvals[m.run_id] && m.payload?.approval_id === approvals[m.run_id] && (
                   <div className="chat-actions">
-                    <button type="button" className="primary" onClick={() => decideRun(m.run_id!, 'approve')}>approve</button>
-                    <button type="button" onClick={() => decideRun(m.run_id!, 'reject')}>reject</button>
-                    <button type="button" onClick={() => decideRun(m.run_id!, 'abort')}>abort</button>
+                    <button type="button" className="primary" onClick={() => decideRun(m.run_id!, 'approve')}>{t('lab.approve')}</button>
+                    <button type="button" onClick={() => decideRun(m.run_id!, 'reject')}>{t('lab.reject')}</button>
+                    <button type="button" onClick={() => decideRun(m.run_id!, 'abort')}>{t('lab.abort')}</button>
                   </div>
                 )}
               </article>
@@ -297,7 +325,10 @@ export function ConversationView() {
             }} />
           <div className="chat-composer-bar">
             <span>{t('lab.composerHint')}</span>
-            <button type="submit" className="primary" disabled={busy || !draft.trim()} aria-label="Send">{busy ? '…' : '↑'}</button>
+            {/* Like Claude / Codex: with an empty composer and a task running, the send button becomes Stop. */}
+            {!draft.trim() && activeRunIds.length > 0 && !busy
+              ? <button type="button" className="primary" disabled={stopping} title={t('lab.stopRunTitle')} onClick={stopRuns}>■ {t('lab.stopRun')}</button>
+              : <button type="submit" className="primary" disabled={busy || !draft.trim()} aria-label="Send">{busy ? '…' : '↑'}</button>}
           </div>
         </form>
       )}

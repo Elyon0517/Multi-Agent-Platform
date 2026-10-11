@@ -1925,6 +1925,46 @@
         }
       }
     },
+    "/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Cancel Run",
+        "description": "Stop a run immediately, whether it is executing or waiting for a decision.",
+        "operationId": "cancel_run_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/decision": {
       "post": {
         "summary": "Decide",
@@ -3746,6 +3786,14 @@
             "minimum": 1.0,
             "title": "Retrieval K",
             "default": 6
+          },
+          "check_commands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Check Commands"
           }
         },
         "additionalProperties": false,
@@ -3813,6 +3861,14 @@
             "minimum": 1.0,
             "title": "Retrieval K",
             "default": 6
+          },
+          "check_commands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Check Commands"
           }
         },
         "additionalProperties": false,
@@ -3825,7 +3881,8 @@
           "budget_cents",
           "max_iter",
           "retrieval",
-          "retrieval_k"
+          "retrieval_k",
+          "check_commands"
         ],
         "title": "ProjectSettings"
       },
