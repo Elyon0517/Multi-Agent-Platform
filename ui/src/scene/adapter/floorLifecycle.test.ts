@@ -16,7 +16,7 @@ const roster: RosterEntry[] = [
 ];
 const run: Run = {
   thread_id: null, workspace: "/tmp/test", language: null, policy: "auto", iteration_base: 0,
-  id: 'r1', goal: 'fix add', status: 'PLANNING', project_id: 'p', max_iter: 5, budget_cents: 100,
+  id: 'r1', goal: 'fix add', status: 'PLANNING', project_id: 'p', max_iter: 5, budget_cents: 100, budget_unlimited: false,
   cost_cents: 0, tokens_in: 0, tokens_out: 0, paused_reason: null, created_at: '2026-10-10T00:00:00Z',
 };
 

@@ -357,7 +357,14 @@ class GitWorkspace:
                 break
         return files
 
-    def read_source(self, rel: str) -> str:
+    def read_source(self, rel: str, line_start: int = 1, line_end: int | None = None) -> str:
+        # Dependencies are excluded from source tools, but asking to inspect one
+        # is an ordinary unsupported read, not a request to escape the workspace.
+        # Resolve first so an external dependency symlink still stops the run.
+        if "node_modules" in Path(rel.casefold()).parts:
+            if not (self.root / rel).resolve().is_relative_to(self.root):
+                raise WorkspaceEscape(rel)
+            raise SourceUnavailable("excluded_dependency_directory: use project source or API documentation")
         path = self._resolve(rel)
         if not path.exists() and not (self.root / rel).is_symlink():
             raise WorkspaceNotFound(f"source file not found: {rel}")
@@ -377,7 +384,17 @@ class GitWorkspace:
             raise SourceUnavailable("binary_file")
         if self._secret_text(text):
             raise WorkspaceEscape("secret content")
-        return text[:12000]
+        if line_start < 1 or (line_end is not None and line_end < line_start):
+            raise ValueError("invalid line range")
+        lines = text.splitlines(keepends=True)
+        end = min(line_end if line_end is not None else line_start + 199, len(lines))
+        selected = "".join(lines[line_start - 1:end])
+        encoded = selected.encode()
+        if len(encoded) > 12000:
+            return encoded[:12000].decode(errors="ignore") + "\n[truncated; request a smaller line range]"
+        if end < len(lines):
+            selected += f"\n[more lines; continue with line_start={end + 1}; total_lines={len(lines)}]"
+        return selected
 
     async def inspect_git(self, command: str, ref: str = "", path: str = "") -> str:
         """Fixed read-only commands; callers cannot supply Git options or shell code."""

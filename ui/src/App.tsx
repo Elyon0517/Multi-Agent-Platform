@@ -2,6 +2,7 @@ import { LANGUAGES, setLanguage } from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api, type RunDetail } from '@/api/client';
+import { watchRun } from '@/api/watchRun';
 import { useStore, type ConsoleTab } from '@/store/store';
 import { OWNER_BY_RUN_STATUS, seatFor } from '@/scene/adapter/mapping';
 import { PixelPanel } from '@/components/PixelPanel';
@@ -54,6 +55,7 @@ export function App() {
   }, [activeProjectId, setRoster, setRuns]);
 
   useEffect(() => {
+    if (activeRunId) return;
     let alive = true;
     api.roster(activeProjectId ?? undefined, activeRunId ?? undefined)
       .then(x => { if (alive) setRoster(x); })
@@ -64,20 +66,26 @@ export function App() {
   useEffect(() => {
     setDetail(null);
     if (!activeRunId) { setDetail(null); return; }
-    const refresh = () => api.run(activeRunId).then((next) => {
-      if (useStore.getState().activeRunId !== activeRunId) return;
+    let alive = true;
+    const refresh = async () => {
+      const next = await api.run(activeRunId);
+      if (!alive || useStore.getState().activeRunId !== activeRunId) return;
+      const roster = await api.roster(next.run.project_id === 'default' ? undefined : next.run.project_id, activeRunId);
+      if (!alive || useStore.getState().activeRunId !== activeRunId) return;
+      setRoster(roster);
       setDetail(next);
-      void api.roster(next.run.project_id === 'default' ? undefined : next.run.project_id, activeRunId)
-        .then(x => { if (useStore.getState().activeRunId === activeRunId) setRoster(x); })
-        .catch(() => undefined);
       const current = useStore.getState().runs;
       setRuns(current.map((run) => run.id === next.run.id ? next.run : run));
-    }).catch(() => undefined);
-    void refresh();
-    return api.events(activeRunId, (e) => {
+      // Rebuild live agent state after the roster exists, including after a reconnect.
+      const history = await api.runHistory(activeRunId);
+      if (!alive || useStore.getState().activeRunId !== activeRunId) return;
+      history.forEach(applyEvent);
+    };
+    const stop = watchRun(refresh, (refreshAgain) => api.events(activeRunId, (e) => {
       applyEvent(e);
-      if (e.type === 'run.status' || e.type === 'step.finished' || e.type.startsWith('approval')) void refresh();
-    });
+      if (e.type === 'run.status' || e.type === 'step.finished' || e.type.startsWith('approval')) refreshAgain();
+    }));
+    return () => { alive = false; stop(); };
   }, [activeRunId, applyEvent, setRuns]);
 
   // `?follow=1` (used by scripts/showcase.py): keep the newest run without a project on screen.

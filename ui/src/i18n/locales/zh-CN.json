@@ -1594,8 +1594,11 @@
     "stopRunTitle": "停止这个对话中正在运行的任务",
     "stopAndDeleteConversation": "这个对话里还有正在运行或等待你决定的任务。要停止任务并删除对话吗？",
     "workspaceMode": "agent 在哪里改代码",
-    "workspaceModeBranch": "直接改你的仓库，在任务分支上（IDE 里实时看到改动）",
-    "workspaceModeWorktree": "每个任务一个隔离副本，终审后应用（适合并行任务）"
+    "workspaceModeBranch": "直接修改当前工作区和分支（IDE 实时可见，不 commit/push）",
+    "workspaceModeWorktree": "每个任务一个隔离副本，终审后应用（适合并行任务）",
+    "deliveryComplete": "任务已完成",
+    "deliveryNotice": "修改已在当前工作区。剩余评审意见请查看交付报告。",
+    "acknowledgeDelivery": "确认"
   },
   "monitor": {
     "loading": "正在加载用量…",

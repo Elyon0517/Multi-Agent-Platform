@@ -28,6 +28,8 @@ class BudgetGuard:
         self._warned = run.cost_cents >= run.budget_cents * warn_ratio
 
     def check(self, estimate_cents: float = 0.0) -> None:
+        if self._run.budget_unlimited:
+            return
         if self._run.cost_cents + self._reserved + estimate_cents > self._run.budget_cents:
             raise BudgetExceeded(
                 f"run {self._run.id}: {self._run.cost_cents:.2f}+{estimate_cents:.2f} "
@@ -46,6 +48,10 @@ class BudgetGuard:
         self._run.cost_cents += usage.cost_cents
         self._run.tokens_in += usage.tokens_in
         self._run.tokens_out += usage.tokens_out
-        if not self._warned and self._run.cost_cents >= self._run.budget_cents * self._warn_ratio:
+        if (
+            not self._run.budget_unlimited
+            and not self._warned
+            and self._run.cost_cents >= self._run.budget_cents * self._warn_ratio
+        ):
             self._warned = True
             self._on_warn(self._run)

@@ -25,7 +25,7 @@ class ProjectSettings(Strict):
     # Project checks (e.g. "npm run typecheck", "npm test") the coder can run in its worktree via gate_run.
     # They run on this machine with the project's own toolchain; empty means the project has no Gate.
     check_commands: list[str] = Field(default_factory=list, max_length=10)
-    # branch: agents edit your repository directly (switching off main/master to agentlab/<run>), so the IDE
+    # branch: agents edit your current checkout and branch directly without commit/push, so the IDE
     # shows changes live. worktree: each run gets an isolated copy applied back on signoff, for parallel runs.
     workspace_mode: Literal["branch", "worktree"] = "branch"
 

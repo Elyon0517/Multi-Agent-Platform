@@ -1594,8 +1594,11 @@
     "stopRunTitle": "Stop the running task in this conversation",
     "stopAndDeleteConversation": "This conversation has a task that is running or waiting. Stop the task and delete the conversation?",
     "workspaceMode": "Where agents edit code",
-    "workspaceModeBranch": "Your repository, on a run branch (see changes live in your IDE)",
-    "workspaceModeWorktree": "An isolated copy per task, applied on signoff (parallel tasks)"
+    "workspaceModeBranch": "Current checkout and branch (live IDE changes; no commit/push)",
+    "workspaceModeWorktree": "An isolated copy per task, applied on signoff (parallel tasks)",
+    "deliveryComplete": "Task completed",
+    "deliveryNotice": "Changes are available in your working tree. Check the delivery report for remaining findings.",
+    "acknowledgeDelivery": "Got it"
   },
   "monitor": {
     "loading": "Loading usage…",

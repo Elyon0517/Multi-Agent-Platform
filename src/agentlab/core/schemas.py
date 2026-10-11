@@ -206,6 +206,7 @@ class Run(Strict):
     max_iter: int = 5
     iteration_base: int = 0
     budget_cents: float = 500.0
+    budget_unlimited: bool = False
     cost_cents: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0

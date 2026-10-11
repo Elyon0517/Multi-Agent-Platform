@@ -57,7 +57,7 @@ def store(request):
 
 
 def test_store_contract(store):
-    r = Run(goal="goal", workspace="/tmp/test")
+    r = Run(goal="goal", workspace="/tmp/test", budget_unlimited=True)
     store.create_run(r)
     it = Iteration(run_id=r.id, n=1, phase=RunStatus.GATING, diff_hash="abc")
     store.add_iteration(it)
@@ -732,6 +732,7 @@ def test_root_messages_are_rows_and_legacy_threads_are_migrated(database_url):
         target = schema_name(base, "root_rows")
         c.execute(sql.SQL("SET LOCAL search_path TO {}, {}").format(sql.Identifier(target), sql.Identifier(base)))
         c.execute("DROP TABLE root_turn, message, thread")
+        c.execute("ALTER TABLE run DROP COLUMN budget_unlimited")
         c.execute("UPDATE alembic_version SET version_num='project_threads'")
         c.execute(
             "INSERT INTO state_record(kind,key,data) VALUES ('thread',%s,%s::jsonb)",
@@ -849,8 +850,10 @@ def test_monitor_legacy_backfill_is_once_and_does_not_duplicate_attempts(databas
     # Simulate a pre-Monitor database in this disposable fixture schema.
     store._query('DROP TABLE usage_ledger')
     store._query("DELETE FROM state_record WHERE kind='migration' AND key='usage_monitor_backfill'")
+    store._query("ALTER TABLE run DROP COLUMN budget_unlimited")
     store._query("UPDATE alembic_version SET version_num='root_alignment'")
     for pid in store._schemas():
+        store._query("ALTER TABLE run DROP COLUMN budget_unlimited", project_id=pid)
         store._query("UPDATE alembic_version SET version_num='root_alignment'", project_id=pid)
     upgrade(database_url)
     entries = store.usage_entries()
@@ -884,7 +887,7 @@ def test_monitor_upgrade_from_p2_recovery_with_old_project_schema(database_url):
         for schema in [base, *projects]:
             for table in ('message', 'root_turn', 'thread'):
                 c.execute(sql.SQL('DROP TABLE {}').format(sql.Identifier(schema, table)))
-            c.execute(sql.SQL('ALTER TABLE {} DROP COLUMN thread_id').format(sql.Identifier(schema, 'run')))
+            c.execute(sql.SQL('ALTER TABLE {} DROP COLUMN thread_id, DROP COLUMN budget_unlimited').format(sql.Identifier(schema, 'run')))
             c.execute(sql.SQL("UPDATE {} SET version_num='p2_recovery'").format(sql.Identifier(schema, 'alembic_version')))
     upgrade(database_url)
     rows = store.usage_entries()

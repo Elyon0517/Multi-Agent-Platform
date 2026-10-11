@@ -157,6 +157,7 @@ export function ConversationView() {
   const [runStatus, setRunStatus] = useState<Record<string, string>>({});
   const [runDetails, setRunDetails] = useState<Record<string, RunDetail>>({});
   const [refreshTick, setRefreshTick] = useState(0);
+  const [acknowledged, setAcknowledged] = useState<string[]>([]);
   const [stopping, setStopping] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
@@ -192,14 +193,14 @@ export function ConversationView() {
     let alive = true;
     // Every run started from this conversation: its pending approval and whether it is still going.
     const ids = [...new Set(thread.messages.filter((m) => m.run_id).map((m) => m.run_id!))];
-    void Promise.all(ids.map(async (id) => {
+    const reloadRuns = () => Promise.all(ids.map(async (id) => {
       const detail = await api.run(id);
       return [id, detail.run.status, detail] as const;
     })).then((items) => {
       if (!alive) return;
       setRunDetails(Object.fromEntries(items.map(([id, , detail]) => [id, detail])));
       setRunStatus(Object.fromEntries(items.map(([id, status]) => [id, status])));
-      const active = items.filter(([, status]) => status !== 'DONE' && status !== 'CANCELLED').map(([id]) => id);
+      const active = items.filter(([, status]) => status !== 'DONE' && status !== 'CANCELLED' && status !== 'WAITING_HUMAN').map(([id]) => id);
       setActiveRunIds(active);
       // Follow the conversation's running task so the office and agent strip show its live events, even when
       // the task was started elsewhere (another tab, the API or a project step).
@@ -213,7 +214,11 @@ export function ConversationView() {
         }).catch(() => undefined);
       }
     }).catch(() => undefined);
-    return () => { alive = false; };
+    // Decisions made through another tab or the API do not create chat messages.
+    // Refresh authoritative run details so resolved approvals disappear here too.
+    void reloadRuns();
+    const timer = ids.length ? window.setInterval(() => { void reloadRuns(); }, 3000) : undefined;
+    return () => { alive = false; if (timer !== undefined) window.clearInterval(timer); };
   }, [thread, refreshTick]);
   // Follow new content only while the reader is already at the bottom; opening a conversation always jumps there.
   useLayoutEffect(() => {
@@ -313,6 +318,14 @@ export function ConversationView() {
           )}
         </div>
       </div>
+      {Object.values(runDetails).filter((d) => d.run.status === 'DONE' && !acknowledged.includes(d.run.id)).map((d) => (
+        <div key={`done-${d.run.id}`} className="chat-decision" role="status">
+          <strong>{t('lab.deliveryComplete')}</strong>
+          <p>{d.run.goal.slice(0, 120)}</p>
+          <p>{t('lab.deliveryNotice')}</p>
+          <button type="button" onClick={() => setAcknowledged((ids) => [...ids, d.run.id])}>{t('lab.acknowledgeDelivery')}</button>
+        </div>
+      ))}
       {/* Decisions the team is waiting for sit right above the composer, like Claude / Codex permission prompts. */}
       {Object.values(runDetails).filter((d) => d.pending_approval).map((d) => (
         <div key={d.pending_approval!.id} className="chat-decision">
@@ -333,7 +346,7 @@ export function ConversationView() {
               void send();
             }} />
           <div className="chat-composer-bar">
-            <span>{t('lab.composerHint')}</span>
+            <span>{activeRunIds.length > 0 ? `${t('lab.run')} · ${[...new Set(activeRunIds.map((id) => runStatus[id]))].join(' / ')}` : t('lab.composerHint')}</span>
             {/* Like Claude / Codex: with an empty composer and a task running, the send button becomes Stop. */}
             {!draft.trim() && activeRunIds.length > 0 && !busy
               ? <button type="button" className="primary" disabled={stopping} title={t('lab.stopRunTitle')} onClick={stopRuns}>■ {t('lab.stopRun')}</button>
