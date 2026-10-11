@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.9 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）· 可持续更新
+> 状态：v1.10 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -30,6 +30,8 @@
 | 6 | （v1.9）**Gate 改为可选**：有匹配的 Gate（目前只有 Python）就照常运行；没有就跳过 GATING，由 reviewer 评审 + 人工终审收敛，终审时标明「未经过自动测试」。取消 P5 多语言 Gate（TS / Java / C++ 镜像） | 任务可能是任何语言的项目（如 Go），不应因没有 Gate 配置而无法创建 run；参照 Claude Code，不为每种语言预先准备工具链 | ADR-029 |
 | 7 | （v1.9）**embedding / rerank 默认在本地运行**（进程内 CPU 小模型），在 Settings 填写远程 OpenAI 兼容接口时改用远程；都不可用时仍降级为关键词检索 | 其他用户无需申请任何 key 即可使用向量检索；pgvector / rerank 不再等待外部 embedding 服务 | ADR-030 |
 | 8 | （v1.9）**开源前替换所有可能侵权的内容**：LimeZu 办公室 tileset 与基于它的地图、《The Office》/《Brooklyn Nine-Nine》主题名、角色名与形象、剧中台词与梗；改为授权干净（CC0 等）或原创的素材、主题与角色 | LimeZu 许可禁止再分发；影视剧名、角色与台词属于 NBC 等权利人，开源分发有商标 / 版权风险 | ADR-031 |
+| 9 | （v1.10）**每个 run 一个独立 Git worktree**：同一仓库可同时进行多个任务（包括等待审批的任务），互不阻塞、互不覆盖；批准 signoff 时只把该任务自己的改动应用回你的工作目录，有冲突就停下。另：取消工具调用次数上限，自主开发只由预算约束 | 用户需要在同一项目里并行工作；旧规则让一个等待审批的任务挡住所有新任务 | ADR-033 |
+| 10 | （v1.10）**接入 MCP 工具服务器**：GitHub（官方 github-mcp-server）与 Fetch（读取网页）；只读工具直接执行，会改动外部状态的工具在对话中弹出「允许 / 拒绝」后才执行；Root 与 planner 可用（planner 只有只读工具） | 让 agent 像 Codex / Claude Code 一样核验 GitHub 仓库与网页内容，而不是声称无法访问 | ADR-034 |
 
 ---
 
@@ -126,7 +128,7 @@ Layer 1  Model Gateway（LiteLLM Proxy → 单一 OpenAI 兼容上游）
 - **上网搜索**：直接使用模型或网关自带的联网搜索能力（ADR-026），不单独接搜索服务。网关不支持时，root 如实说明拿不到实时信息，不编造。
 - **任务进行中提问**：同一对话有正在进行的任务时，root 能看到它的进度、diff 和评审结果，用来回答「现在到哪了？」「为什么测试没过？」这类问题。
 
-为了不失控，只保留两个默认上限：每轮最多 8 次工具调用、每轮有单轮预算（§8）。root 的回答路径本身不改文件；要改代码就走任务路径。
+为了不失控，只保留单轮预算（§8）；（v1.10）不再限制工具调用次数，预算在每次模型调用和工具调用前检查。root 的回答路径本身不改文件；要改代码就走任务路径。
 
 ### 2.5.4 对话中显示什么
 
@@ -321,7 +323,7 @@ auto 模式的 override 白名单由项目模型目录和 reviewer 档位约束�
 1. LiteLLM virtual key（每 project 一把）—— `max_budget` / `rpm_limit` / 模型白名单（S2 起）。
 2. 应用层熔断中间件（ADK `before_model_callback` / raw runtime 调用前）—— 估算成本，超 run 预算直接短路，run 置 `WAITING_HUMAN`。
 3. per-run 软预算 —— `run.budget_cents`，80% 告警，实际 usage 达到预算后，在下一批付费调用前暂停；已返回的成功结果先保存。
-4. root 会话单轮上限（v1.6）—— 默认每轮最多 8 次工具调用 + 单轮预算 `budget.ask.max_turn_cents`；超限时停止并在回复中说明。会话花费计入项目账目。
+4. root 会话单轮上限（v1.6）—— 单轮预算 `budget.ask.max_turn_cents`；超限时停止并在回复中说明。（v1.10）原「每轮最多 8 次工具调用」已取消，Root 与 run 内所有 agent 都只受预算约束。会话花费计入项目账目。
 
 估算系数由 `models.yaml` 每个别名控制：`estimate_input_tokens_per_byte`（输入 UTF-8 字节到 token 的系数）与 `estimate_output_token_ratio`（输出 token 上限的预留比例）。当前均为 0.5；实际 usage 按完整账单计费，不乘估算系数。缺省均为 1.0，便于选择保守模式。可用预算约为总预算减去下一批调用的预估；80,000 字节 prompt、16384 输出上限及当前价格下，每 reviewer 预估 36.384c，三人共 109.152c。系数为估算策略，不保证网关结算硬上限。
 
@@ -652,7 +654,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
-| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；ADK、外部 MCP 尚未完成 |
+| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；外部 MCP（GitHub、Fetch）已接入（v1.10，§16.6）；ADK 尚未完成 |
 | P4 | S5a 可视化 v0 | **完成** | Office Floor、Monitor、Gate 诊断表与 FastAPI 生成 TS 类型均已接线 |
 | P5 | ~~S3 多语言 Gate~~ → Gate 可选（v1.9，ADR-029） | 完成 | 取消 TS / Java / C++ 镜像；改为无 Gate 时跳过 GATING，终审标明未经过自动测试 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；summarizer 与删除项目已完成（v1.8，§9.1）；本地 embedding / rerank 已完成（v1.9，§7.4）；pgvector 索引与完整记忆导入导出未做 |
@@ -736,7 +738,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | summarizer 角色 | 已在 `on_finished` 调用，结构化 MemoryOps + 三层归属校验 + pinned/document 保护；独立 25c 预算与 usage 流水，失败降级 | 已完成 |
 | 删除项目 | DELETE API + 控制台确认按钮；清除项目 schema、路由、缓存与快照，独占 blobs 删除、共享引用保留；未结束 run 拒绝删除 | 已完成 |
 | 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
-| 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；网络 / Git 危险操作仍待接入 | P3 |
+| 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；（v1.10）MCP 写操作（建 PR、评论等）须在对话中批准后才执行（§16.6）；agent 本身仍不能执行 shell / git 写命令 | P3 |
 | `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
 | Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言不再建镜像，无 Gate 时跳过（v1.9，ADR-029） | P5 |
 | Gate 诊断表、成本看板 | file:line / code / message / 日志尾部与 Monitor 已接线 | 已完成 |
@@ -777,7 +779,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] `config/agents/root.yaml` + `prompts/root.md`：输出 `RootTurn`，模型跟随项目 root
 - [x] root 能力：读项目文件、检索记忆、任务进行中查看进度与 diff
 - [x] 上网搜索：先用 `agentlab ping` 确认网关是否支持模型自带搜索；支持就打开，不支持时 root 如实说明
-- [x] 默认上限：每轮最多 8 次工具调用 + 单轮预算
+- [x] 默认上限：单轮预算（v1.10 取消原 8 次工具调用上限）
 - [x] 回复流式输出；任务进度消息由 run 事件自动生成；审批卡片显示在对话中；任务结束由 root 总结
 - [x] UI：对话窗口为主入口
 
@@ -794,7 +796,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [x] 审批流：approval 表结构 + API 审批
 - [x] 3 个 reviewer 用不同模型 ID 真实运行（gpt-6-astra / gpt-6.1-sol / gpt-6-sol，2026-10-10）
 - [ ] supervisor 接入：仅在 policy 允许处做调度 / override 决策，决策写 `routing_reason`
-- [x] Raw function calling 工具层 + `tool_grants` 强制；Coder 读写 / Gate，其他角色只读 / 记忆；越界写仍走 approval。外部 MCP 接入另行扩展
+- [x] Raw function calling 工具层 + `tool_grants` 强制；Coder 读写 / Gate，其他角色只读 / 记忆；越界写仍走 approval。外部 MCP 接入见 §16.6（v1.10）
 - [ ] LiteLLM Proxy + per-project virtual key
 - [ ] `AdkRuntime`（ParallelAgent + before_model_callback 熔断）
 - 演示：一个带安全隐患的改动，三方结果并排展示
@@ -894,7 +896,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | auto → run → 恢复 | supervisor 输出 Dispatch，限制在模型目录与 reviewer tier 范围；artifact、分配、输入与 run 配置一起 checkpoint | fake E2E 和 Postgres 重建 Services 验证；本轮新增调度尚未做真实网关验收 |
 | 左侧 project → 对话 → run | 逐条消息与 RootTurn 持久化；最近 20 条历史 + 项目信息 + 记忆；回答 / 澄清 / 任务分流 | project/thread 归属先验证；编码任务复用 run service，进度 / 审批 / 总结回到对话。项目外可聊天 |
 | 切换 project | 清空 active run/thread、事件、telemetry、审批、任务、选择和答案草稿；重新加载项目 roster 与 runs | Vitest 与浏览器验证；异步响应守卫，组件唯一 key；私人便签按 project × role 分开 |
-| 同 workspace 多 run | 未完成 run 占用 workspace，新 run 返回 409；同一项目须结束/abort 当前 run，或者另建 worktree | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
+| 同 workspace 多 run | （v1.10 起）每个 run 自动使用独立 worktree，同一仓库可并行多个 run，不再返回 409（§16.5）。v1.9 及以前：未完成 run 占用 workspace，新 run 返回 409 | 创建 run 时在 workspace 锁内检查。禁止重叠 project；外部编辑器/进程不受此锁约束 |
 | 人工终审 | 控制台可查看实际 diff、plan、dispatch、review、Gate 等 artifacts；审批保留 budget/max_iter 与错误反馈 | 浏览器看到 calc.py 的实际代码变化；纯文本 viewer，Monaco/回放仍未实现 |
 | memory 文档 | global 明确共享；project 上传/替换/移除仅影响本项目，保留历史版本；agent 私有记忆需 project | 相同文档名跨项目隔离测试，移除文档不误删同 source 的 note |
 | RAG | 项目选择 off / keyword / hybrid，新项目默认 hybrid；检索按项目与角色授权范围，失败降级 | 混合检索的向量仍在 Python 中做 cosine + BM25/RRF；Postgres 持久化不等于已使用 pgvector HNSW |
@@ -908,6 +910,40 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - 项目已统一使用 `proj_<id>` schema（包括既有项目/default run），共享知识和路由目录留在 public；数据库使用同一连接账号，schema 隔离不等于独立数据库账号权限。
 - 当前已启用跨厂商路由：planner / coder 的 Opus worker 别名通过 Anthropic 执行，其余角色按模型策略路由；Monitor 的模型列记录实际使用的模型，可同时显示多个厂商。
 - ADK、工具白名单执行、危险操作审批、memory pin UI、全量 memory 导入导出、Monaco/iteration 回放仍是后续工作；其他语言 Gate 镜像已取消（v1.9，ADR-029）。当前不会开放任意 agent 工具来绕过安全边界。
+
+## 16.5 每个 run 独立 worktree（v1.10，ADR-033）
+
+**目的**：同一仓库同时进行多个任务；一个等待审批的任务不再挡住新任务，两个任务也不会互相覆盖文件或污染彼此的 diff。
+
+| 阶段 | 行为 |
+|---|---|
+| 创建 run | 在 `.agentlab/worktrees/<run-id>` 执行 `git worktree add`，分支 `agentlab/<run-id>`，从你当前的 `HEAD` 开始；**同时复制你未提交的改动**（已跟踪文件的 diff + 未被忽略的未跟踪文件），让 agent 看到和你本地一致的代码，然后提交一次作为该 run 的基线。`run.workspace` 指向这个 worktree |
+| 执行 | agent 只修改 worktree；workspace 锁按 worktree 路径生效，不同 run 互不阻塞 |
+| 批准 signoff | 把 worktree 中「基线 → 最终」的改动用 `git apply --check` 检查后应用到你当前的工作目录，**不提交**（与旧行为一致，由你自己 commit）。冲突时**不改动任何文件**，返回 409，signoff 保持待审批，提示冲突文件与分支名；你手动合并该分支后再次批准即可完成（已手动应用的改动会被识别） |
+| 结束 | DONE 或 CANCELLED 后删除 worktree 与 `agentlab/<run-id>` 分支；中止的 run 不会影响你的工作目录 |
+
+- 只在通过 API / 对话 / 项目 step 创建 run 时启用；CLI `agentlab run`、`smoke`、`eval` 仍在给定目录中直接运行。
+- 仓库没有任何 commit 时（无法建 worktree）退回原来的就地运行方式，旧的 workspace 锁仍然生效。
+- 限制：被 `.gitignore` 忽略的文件（如 `node_modules`、`.env`）不会复制到 worktree，需要依赖这些文件运行的检查无法在 worktree 中执行；Python Gate 的依赖预装在镜像中，不受影响。
+- 实现：`src/agentlab/adapters/worktree.py`（创建 / 应用 / 清理），`GitWorkspace.isolation` 随 checkpoint 保存，重启恢复后照常应用与清理。
+- 验收：同一项目连续创建两个 run 均成功且 workspace 不同；你未提交的文件出现在 worktree 中；批准前你的仓库不变，批准后改动以未提交状态出现；你在同一处修改后批准返回 409 且文件不变；中止后 worktree 与分支被删除（`tests/unit/test_worktree_runs.py`）。
+
+## 16.6 MCP 工具服务器（v1.10，ADR-034）
+
+**目的**：Root 与 planner 能直接读取 GitHub 仓库 / 分支 / 文件 / PR 与网页内容来核验信息；会改变外部状态的操作必须经过用户批准。
+
+| 项 | 决定 |
+|---|---|
+| 配置 | `config/mcp.yaml`（严格校验，未知字段报错）：每个 server 声明 `command` / `args` / `env` / `roles` / `read_only_tools`；`${VAR}` 从 `.env` 或环境变量读取 |
+| 已接入 | **github**：`docker run -i --rm ghcr.io/github/github-mcp-server`（46 个工具，27 个只读）；token 取 `GITHUB_PERSONAL_ACCESS_TOKEN`，未设置时取 `gh auth token`。**fetch**：`uvx mcp-server-fetch`（读取任意 URL） |
+| 启动 | 首次使用时启动并在进程内常驻（首次可能拉取镜像 / 下载包，最长 90 秒）；启动失败只记日志，Root 与 run 照常运行；状态见设置页「MCP 工具服务器」与 `GET /mcp/status`；后端关闭时一并关闭 |
+| 权限 | 工具带 `readOnlyHint` 或列在 `read_only_tools` 中 → 直接执行；其余工具（建 PR、发评论、推送等）→ 不执行，在对话中插入「允许 / 拒绝」卡片（`tool_approval`），用户允许后才执行并把结果写回对话（`tool_result`）；每个请求只能决定一次 |
+| 使用范围 | Root：只读工具 + 需批准的写工具；planner：只读工具（通过 `RunHooks.external_tools` 注入）；coder 与 reviewer 不使用 |
+| 结果大小 | 工具返回超过 16 KB 时截断（沿用工具层统一上限）；工具次数不限，只受预算约束（ADR-033） |
+
+- 联网搜索仍使用网关自带的 `web_search`；换 Root 模型后需运行一次 `uv run agentlab ping --search` 重新探测（v1.10 发现：Root 换成 gpt-6.1-sol 后因缺少探测记录而关闭了搜索）。
+- 测试不会启动真实 server（`tests/conftest.py` 的 `no_mcp_servers`）；`tests/unit/test_mcp_tools.py` 覆盖只读直接执行、写操作等待批准、拒绝不执行、只能决定一次、planner 只拿只读工具、配置严格校验。
+- 真实验收（2026-10-10）：Root 通过 GitHub 工具读出 `Elyon0517/multi-agent-platform` main 的最新 commit（`75e3011` update readme file），并通过 fetch 读取 example.com 标题。
 
 ---
 
@@ -947,7 +983,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | LimeZu 素材许可（v1.1） | 开源分发受限（"不可再分发素材"） | v1.9 决定：开源前替换为 CC0 / 自绘素材，LimeZu 仅作用户自备的可选皮肤（§15.6） |
 | 影视 IP（v1.9） | 《The Office》《Brooklyn Nine-Nine》剧名、角色名与形象、台词可能涉及商标 / 版权 | 开源前全部替换为原创主题、角色与文案（§15.6、P9） |
 | root 意图误判（v1.6） | 问题被当成任务，或任务被当成问题 | 用户可以直接说「只回答」或「直接改」；即使误开任务，也要经过 Gate、评审与人工终审才会完成 |
-| 会话成本累积（v1.6） | 频繁提问持续花费 | 默认单轮预算与 8 次工具调用上限；会话花费计入项目账目 |
+| 会话成本累积（v1.6） | 频繁提问持续花费 | 默认单轮预算（v1.10 起不限工具调用次数）；会话花费计入项目账目 |
 
 ---
 
@@ -959,7 +995,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - [x] （v1.9）本地 embedding / rerank 模型与库已确定并实测：FastEmbed 0.7.4，multilingual MiniLM（384 维）+ BAAI/bge-reranker-base；Apple Silicon CPU 上传与检索 smoke 通过（§7.4）
 - [ ] 是否需要"同一 reviewer 跑两次取一致性"（成本翻倍，先不做）
 - [x] （v1.6）`agentlab ping --search` 实测 Responses `web_search` 可用；Chat 无搜索证据，不启用
-- [x] （v1.6）root 每轮默认最多 8 次工具调用、使用默认单轮预算（用户确认）
+- [x] （v1.6）root 每轮使用默认单轮预算；（v1.10，用户决定）取消工具调用次数上限，自主开发只由预算约束
 - [ ] 开源前清单：移除个人路径、示例 config、LICENSE、最小可复现 demo repo、**素材与影视 IP 替换（v1.9 已定方案，§15.6、P9）**
 - [ ] 是否给其他人使用 / 开源：未决定。若决定分发，按 §20 的打包方案排期
 
@@ -1050,6 +1086,8 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-030 | embedding / rerank 默认使用本地进程内中文小模型；Settings 的远程 OpenAI 兼容 URL 覆盖 embedding（Key 可选），远程失败回退本地；都不可用时降级为关键词，rerank 失败保留 RRF（ADR-003 的例外；远程 rerank 暂未实现） | 2026-10-10 | 用户要求其他用户能快速上手、不必申请 key；本地小模型 CPU 即可运行，比额外容器（如 TEI）少一个服务、无 Apple Silicon 镜像兼容问题 |
 | ADR-031 | 开源前替换所有可能侵权的内容：LimeZu tileset 与地图改为 CC0 拼装（2dPig + Kenney）或自绘，LimeZu 仅作用户自备的可选皮肤；删除《The Office》《Brooklyn Nine-Nine》主题、角色、台词与相关文案，改为原创；保留 munder-difflin MIT 署名与 OFL 字体 | 2026-10-10 | 用户决定：办公室与人物、影视主题等任何可能侵权的内容都要替换。LimeZu 许可禁止再分发；剧名、角色与台词属于权利人 |
 | ADR-032 | signoff 时生成确定性终审报告，只含任务目标与验收标准、自动检查结果（或未经过自动测试）、最后一轮未解决的 findings | 2026-10-10 | 用户要求精简：审核时只看这三项；不调用模型，内容不会编造 |
+| ADR-033 | 每个 run 使用独立 Git worktree（携带未提交改动作为基线）；批准 signoff 时用 `git apply` 把该 run 的改动应用到用户工作目录且不提交，冲突则停下并保持待审批；结束后清理 worktree 与分支。同时取消工具调用次数上限，只保留预算约束 | 2026-10-10 | 用户要求在同一项目中并行多个任务，旧的「一个工作区一个未完成 run」规则会被等待审批的任务卡住；用户选择「独立 worktree + 自动合并（有冲突就停下）」。用 `git apply` 而不是 merge commit，保持改动未提交、由用户自己 commit 的旧习惯，并能干净地处理用户未提交的工作 |
+| ADR-034 | 接入 MCP（Model Context Protocol）工具服务器：GitHub 与 Fetch，配置在 `config/mcp.yaml`；只读工具自动允许、写操作在对话中批准后执行；Root 与 planner 可用，planner 仅只读 | 2026-10-10 | 用户要求像 Codex / Claude Code 一样具备 GitHub 与网页访问，并在需要时请求权限；用户选择「只读自动允许，写操作才问」和「Root + planner」 |
 
 
 ### 可靠性复核补充（2026-10-09）
