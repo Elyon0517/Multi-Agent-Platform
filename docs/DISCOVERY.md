@@ -1,6 +1,6 @@
 # Multi-Agent Platform Discovery
 
-> 状态：v1.11 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）；v1.11 开发能力补强：空交付暂停、停止按钮、coder 只读外部工具、项目检查命令（§16.7、ADR-035）· 可持续更新
+> 状态：v1.12 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）；v1.11 开发能力补强：空交付暂停、停止按钮、coder 只读外部工具、项目检查命令（§16.7、ADR-035）；v1.12 默认分支模式（直接改你的仓库）、审批显示在对话中（§16.5、ADR-036）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。
 > 正本：本文件（`docs/DISCOVERY.md`）。原始 `dicovery-agent.pdf` v1.0 只读归档。
@@ -911,7 +911,9 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 - 当前已启用跨厂商路由：planner / coder 的 Opus worker 别名通过 Anthropic 执行，其余角色按模型策略路由；Monitor 的模型列记录实际使用的模型，可同时显示多个厂商。
 - ADK、工具白名单执行、危险操作审批、memory pin UI、全量 memory 导入导出、Monaco/iteration 回放仍是后续工作；其他语言 Gate 镜像已取消（v1.9，ADR-029）。当前不会开放任意 agent 工具来绕过安全边界。
 
-## 16.5 每个 run 独立 worktree（v1.10，ADR-033）
+## 16.5 每个 run 独立 worktree（v1.10，ADR-033；v1.12 起改为可选，默认分支模式，ADR-036）
+
+> **v1.12 变更**：默认改为**分支模式**——agent 直接修改你的仓库，你可以在 IDE 中实时看到 diff；在 `main` / `master` 上时先切到 `agentlab/<run-id>` 分支（未提交的改动一起带过去），在其他分支上则原地工作；终审后改动已在原处。只有**正在执行**的任务会占用仓库，等待审批的任务不再阻塞新任务；同一仓库有任务在执行时，批准另一个任务会返回 409 并说明原因。下面的 worktree 隔离保留为项目设置 `workspace_mode: worktree`，用于需要并行执行的场景。
 
 **目的**：同一仓库同时进行多个任务；一个等待审批的任务不再挡住新任务，两个任务也不会互相覆盖文件或污染彼此的 diff。
 
@@ -1106,6 +1108,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-033 | 每个 run 使用独立 Git worktree（携带未提交改动作为基线）；批准 signoff 时用 `git apply` 把该 run 的改动应用到用户工作目录且不提交，冲突则停下并保持待审批；结束后清理 worktree 与分支。同时取消工具调用次数上限，只保留预算约束 | 2026-10-10 | 用户要求在同一项目中并行多个任务，旧的「一个工作区一个未完成 run」规则会被等待审批的任务卡住；用户选择「独立 worktree + 自动合并（有冲突就停下）」。用 `git apply` 而不是 merge commit，保持改动未提交、由用户自己 commit 的旧习惯，并能干净地处理用户未提交的工作 |
 | ADR-034 | 接入 MCP（Model Context Protocol）工具服务器：GitHub 与 Fetch，配置在 `config/mcp.yaml`；只读工具自动允许、写操作在对话中批准后执行；Root 与 planner 可用，planner 仅只读 | 2026-10-10 | 用户要求像 Codex / Claude Code 一样具备 GitHub 与网页访问，并在需要时请求权限；用户选择「只读自动允许，写操作才问」和「Root + planner」 |
 | ADR-035 | 空交付立即暂停并显示 coder 的原因；任务可随时停止（对话中发送按钮变为停止）；coder 获得只读 GitHub / Fetch；项目可配置检查命令作为 Gate，在 worktree 中用本机工具链运行并链接 `node_modules`；reviewer 不得仅因缺少检查输出而阻止 | 2026-10-11 | 真实任务 6 轮空 diff、约 417 美分；用户要求「适当开放权限，让多 agent 能真正帮我开发」，并要求像 Claude / Codex 一样提供停止按钮 |
+| ADR-036 | 默认分支模式：agent 直接编辑用户仓库（在 main / master 上先切到 `agentlab/<run-id>`），worktree 隔离改为项目可选；仅执行中的任务占用仓库；待用户决定的事项（审批、退回、预算、外部工具请求）统一显示在对话底部、输入框上方，移除 Ask Me 标签和 Office 下方的审批栏；删除有任务的对话时可先停止任务 | 2026-10-11 | 用户希望像 Codex / Claude 一样在 IDE 中实时看到改动，而不是等终审后才应用；审批藏在 Ask Me 与可视化区域里不易发现 |
 
 
 ### 可靠性复核补充（2026-10-09）
