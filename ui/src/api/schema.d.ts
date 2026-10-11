@@ -1335,6 +1335,12 @@ export interface components {
             retrieval_k?: number;
             /** Check Commands */
             check_commands?: string[];
+            /**
+             * Workspace Mode
+             * @default branch
+             * @enum {string}
+             */
+            workspace_mode?: "branch" | "worktree";
         };
         /** ProjectSettings */
         "ProjectSettings-Output": {
@@ -1384,6 +1390,12 @@ export interface components {
             retrieval_k: number;
             /** Check Commands */
             check_commands: string[];
+            /**
+             * Workspace Mode
+             * @default branch
+             * @enum {string}
+             */
+            workspace_mode: "branch" | "worktree";
         };
         /** ProjectStep */
         "ProjectStep-Input": {
