@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type Project, type Conversation } from '@/api/client';
 import { useStore } from '@/store/store';
@@ -7,7 +7,7 @@ import { Icon } from '@/components/Icon';
 import ReactMarkdown from 'react-markdown';
 import { Status } from './ui';
 import { conversationTitle, hasConversationContent } from './conversationNavigation';
-export function ProjectSidebar() {
+export function ProjectSidebar({ collapsed, onCollapsedChange }: { collapsed: boolean; onCollapsedChange: (collapsed: boolean) => void }) {
   const { t } = useTranslation();
   const { activeProjectId, activeThreadId, setActiveProject, setActiveThread, requestCommandCenterTab, openProjectDialog, runs } = useStore();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -60,15 +60,43 @@ export function ProjectSidebar() {
     } catch (e) { setError(String(e)); }
     finally { creatingRef.current = false; setCreating(false); }
   };
+  const deleteThread = async (thread: Conversation, projectId: string | null) => {
+    if (!window.confirm(t('lab.deleteConversationConfirm', { title: conversationTitle(thread) }))) return;
+    setError(null);
+    try {
+      await api.deleteThread(projectId ?? 'global', thread.id);
+      setThreads((old) => old.filter((x) => x.id !== thread.id));
+      setGlobalThreads((old) => old.filter((x) => x.id !== thread.id));
+      if (useStore.getState().activeThreadId === thread.id) setActiveThread(null);
+    } catch (e) { setError(String(e)); }
+  };
   const threadList = (items: Conversation[], projectId: string | null) => items.filter(hasConversationContent).map(thread => (
-    <button className="sidebar-item sidebar-thread" type="button" key={thread.id}
-      aria-current={thread.id === activeThreadId ? 'page' : undefined}
-      title={conversationTitle(thread)} onClick={() => { setActiveProject(projectId); setActiveThread(thread.id); }}>
-      {conversationTitle(thread)}
-    </button>
+    <div className="sidebar-project-row" key={thread.id}>
+      <button className="sidebar-item sidebar-thread" type="button"
+        aria-current={thread.id === activeThreadId ? 'page' : undefined}
+        title={conversationTitle(thread)} onClick={() => { setActiveProject(projectId); setActiveThread(thread.id); }}>
+        {conversationTitle(thread)}
+      </button>
+      <button className="sidebar-icon-button danger" type="button" title={t('lab.deleteConversation')}
+        aria-label={`${t('lab.deleteConversation')}: ${conversationTitle(thread)}`} onClick={() => void deleteThread(thread, projectId)}>
+        <Icon name="trash" />
+      </button>
+    </div>
   ));
+  if (collapsed) {
+    return (
+      <nav className="project-navigation sidebar-rail" aria-label={t('lab.projects')}>
+        <button type="button" className="sidebar-icon-button" title={t('lab.expandSidebar')} aria-label={t('lab.expandSidebar')}
+          onClick={() => onCollapsedChange(false)}><Icon name="sidebar" /></button>
+      </nav>
+    );
+  }
   return (
     <nav className="project-navigation" aria-label={t('lab.projects')}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '-6px -2px 6px 0' }}>
+        <button type="button" className="sidebar-icon-button" title={t('lab.collapseSidebar')} aria-label={t('lab.collapseSidebar')}
+          onClick={() => onCollapsedChange(true)}><Icon name="sidebar" /></button>
+      </div>
       <div className="sidebar-actions">
         <PixelButton size="sm" disabled={creating} onClick={() => void newChat(null)}>{t('lab.newConversation')}</PixelButton>
         <PixelButton size="sm" variant="secondary" onClick={() => openProjectDialog('new')}>{t('lab.newProject')}</PixelButton>
@@ -80,13 +108,16 @@ export function ProjectSidebar() {
           <div className="sidebar-project-row">
             <button className="sidebar-item sidebar-project" type="button" aria-current={project.id === activeProjectId ? 'page' : undefined}
               onClick={() => { setActiveProject(project.id); requestCommandCenterTab('chat'); }}>▣ {project.name}</button>
-            <button className="sidebar-icon-button" type="button" title={t('lab.deleteProject')}
+            <button className="sidebar-icon-button" type="button" disabled={creating} title={t('lab.newConversation')}
+              aria-label={`${t('lab.newConversation')}: ${project.name}`} onClick={() => void newChat(project.id)}>
+              <Icon name="plus" />
+            </button>
+            <button className="sidebar-icon-button danger" type="button" title={t('lab.deleteProject')}
               aria-label={`${t('lab.deleteProject')}: ${project.name}`} onClick={() => void deleteProject(project)}>
               <Icon name="trash" />
             </button>
           </div>
           {project.id === activeProjectId && <div className="sidebar-project-threads">
-            <button className="sidebar-item" type="button" disabled={creating} onClick={() => void newChat(project.id)}>＋ {t('lab.newConversation')}</button>
             {threadList(threads, project.id)}
           </div>}
         </div>
@@ -107,8 +138,22 @@ export function ConversationView() {
   const [delta, setDelta] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState<string | null>(null);
+  const [toolBusy, setToolBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const scroller = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  // The composer grows with its content up to a limit, then scrolls.
+  useLayoutEffect(() => {
+    const el = composer.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+  }, [draft]);
   useEffect(() => {
-    setThread(null); setDraft(''); setDelta(''); setBusy(false); setError(null); setApprovals({});
+    setThread(null); setDraft(''); setDelta(''); setBusy(false); setError(null); setApprovals({}); setPending(null);
+    stickToBottom.current = true;
     if (!activeThreadId) return;
     let alive = true;
     const reload = () => api.threads(activeProjectId ?? 'global').then((ts) => {
@@ -134,11 +179,23 @@ export function ConversationView() {
     })).then((items) => { if (alive) setApprovals(Object.fromEntries(items)); }).catch(() => undefined);
     return () => { alive = false; };
   }, [thread, runs]);
+  // Follow new content only while the reader is already at the bottom; opening a conversation always jumps there.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [thread?.messages.length, delta, pending, busy]);
+  // Visible elapsed time tells a slow answer apart from a stuck one.
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
   const current = () => useStore.getState().activeProjectId === activeProjectId && useStore.getState().activeThreadId === activeThreadId;
   const send = async () => {
     if (!activeThreadId || !draft.trim() || busy) return;
     setBusy(true); useStore.getState().setRootBusy(true); setError(null);
-    const text = draft; setDraft('');
+    const text = draft; setDraft(''); setPending(text); stickToBottom.current = true;
     try {
       const response = await api.sendMessage(activeProjectId ?? 'global', activeThreadId, text);
       if (!current()) return;
@@ -150,38 +207,102 @@ export function ConversationView() {
         setActiveRun(response.run.id);
       }
     } catch (e) { if (current()) { setError(String(e)); setDraft(text); } }
-    finally { if (current()) { useStore.getState().setRootBusy(false); setBusy(false); setDelta(''); } }
+    finally { if (current()) { useStore.getState().setRootBusy(false); setBusy(false); setDelta(''); setPending(null); } }
+  };
+  const decideRun = (runId: string, decision: 'approve' | 'reject' | 'abort') => {
+    const feedback = decision === 'reject' ? window.prompt('Feedback') : undefined;
+    if (decision === 'reject' && feedback === null) return;
+    void api.decide(runId, decision, feedback ?? undefined).then(() => {
+      if (current()) setApprovals((old) => ({ ...old, [runId]: '' }));
+    }).catch((e) => { if (current()) setError(String(e)); });
+  };
+  const decideTool = (approvalId: string, decision: 'allow' | 'deny') => {
+    setToolBusy(true); setError(null);
+    void api.decideTool(activeProjectId ?? 'global', activeThreadId!, approvalId, decision)
+      .catch((e) => { if (current()) setError(String(e)); })
+      .finally(() => { if (current()) setToolBusy(false); });
   };
   return (
-    <section aria-label={t('lab.conversation')} style={{ height: '100%', minHeight: 0, width: '100%', display: 'flex', flexDirection: 'column', fontSize: 12, padding: 8 }}>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', overflowWrap: 'anywhere' }}>
-      {thread?.messages.map((m) => (
-        <article key={m.id} style={{ borderBottom: '1px solid #ddd', padding: 6 }}>
-          <strong>{m.author === 'assistant' ? 'Root' : m.author}: </strong><ReactMarkdown>{m.text}</ReactMarkdown>
-          {m.sources?.map((source) => <div key={source.ref}>
-            {source.kind === 'web' && /^https?:\/\//.test(source.ref)
-              ? <a href={source.ref} target="_blank" rel="noreferrer">{source.title || source.ref}</a>
-              : <span>{source.kind}: {source.title || source.ref}</span>}
-          </div>)}
-          {m.run_id && <button type="button" onClick={() => setActiveRun(m.run_id)}>{t('lab.run')}: {runs.find(r => r.id === m.run_id)?.goal ?? 'Root'}</button>}
-          {m.kind === 'approval' && m.run_id && approvals[m.run_id] && m.payload?.approval_id === approvals[m.run_id] && <div>
-            {(['approve', 'reject', 'abort'] as const).map((decision) => <button key={decision} type="button" onClick={() => {
-              const feedback = decision === 'reject' ? window.prompt('Feedback') : undefined;
-              if (decision === 'reject' && feedback === null) return;
-              void api.decide(m.run_id!, decision, feedback ?? undefined).then(() => {
-                if (current()) setApprovals((old) => ({...old, [m.run_id!]: ''}));
-              }).catch((e) => { if (current()) setError(String(e)); });
-            }}>{decision}</button>)}
-          </div>}
-        </article>
-      ))}
-      {delta && <article aria-live="polite"><strong>Root: </strong><ReactMarkdown>{delta}</ReactMarkdown></article>}
+    <section aria-label={t('lab.conversation')} className="chat">
+      <div ref={scroller} className="chat-scroll" onScroll={(e) => {
+        const el = e.currentTarget;
+        stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      }}>
+        <div className="chat-column">
+          {thread?.messages.map((m) => {
+            const run = m.run_id ? runs.find((r) => r.id === m.run_id) : undefined;
+            const toolApproval = m.kind === 'tool_approval' && typeof m.payload?.approval_id === 'string'
+              && !thread.messages.some((r) => r.kind === 'tool_result' && r.payload?.approval_id === m.payload?.approval_id);
+            if (m.author === 'user') {
+              return <article key={m.id} className="chat-msg user"><div className="chat-bubble">{m.text}</div></article>;
+            }
+            return (
+              <article key={m.id} className={`chat-msg ${m.author === 'system' || m.kind === 'summary' || m.kind === 'tool_result' ? 'note' : 'assistant'}`}>
+                {m.author === 'assistant' && m.kind !== 'summary' && <div className="chat-author">Root</div>}
+                <div className="chat-md"><ReactMarkdown>{m.text}</ReactMarkdown></div>
+                {!!m.sources?.length && (
+                  <div className="chat-sources">
+                    {m.sources.map((source) => source.kind === 'web' && /^https?:\/\//.test(source.ref)
+                      ? <a key={source.ref} className="chat-chip" href={source.ref} target="_blank" rel="noreferrer" title={source.ref}>↗ {source.title || source.ref}</a>
+                      : <span key={source.ref} className="chat-chip" title={source.ref}>{source.kind === 'file' ? '▤' : '◆'} {source.title || source.ref}</span>)}
+                  </div>
+                )}
+                {m.run_id && (
+                  <button type="button" className="chat-run" onClick={() => setActiveRun(m.run_id)}>
+                    <span className="chat-run-status">{t('lab.run')} · {run?.status ?? '…'}</span>
+                    <span className="chat-run-goal">{run?.goal ?? m.run_id}</span>
+                  </button>
+                )}
+                {toolApproval && (
+                  <div className="chat-actions">
+                    <button type="button" className="primary" disabled={toolBusy} onClick={() => decideTool(String(m.payload.approval_id), 'allow')}>{t('lab.allowTool')}</button>
+                    <button type="button" disabled={toolBusy} onClick={() => decideTool(String(m.payload.approval_id), 'deny')}>{t('lab.denyTool')}</button>
+                  </div>
+                )}
+                {m.kind === 'approval' && m.run_id && approvals[m.run_id] && m.payload?.approval_id === approvals[m.run_id] && (
+                  <div className="chat-actions">
+                    <button type="button" className="primary" onClick={() => decideRun(m.run_id!, 'approve')}>approve</button>
+                    <button type="button" onClick={() => decideRun(m.run_id!, 'reject')}>reject</button>
+                    <button type="button" onClick={() => decideRun(m.run_id!, 'abort')}>abort</button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+          {pending && !thread?.messages.some((m) => m.author === 'user' && m.text === pending) && (
+            <article className="chat-msg user pending"><div className="chat-bubble">{pending}</div></article>
+          )}
+          {delta && (
+            <article className="chat-msg assistant" aria-live="polite">
+              <div className="chat-author">Root</div><div className="chat-md"><ReactMarkdown>{delta}</ReactMarkdown></div>
+            </article>
+          )}
+          {busy && !delta && (
+            <article className="chat-msg assistant" role="status" aria-live="polite">
+              <div className="chat-author">Root</div><div className="thinking-dots chat-thinking">{t('lab.rootThinking', { seconds: elapsed })}</div>
+            </article>
+          )}
+        </div>
       </div>
-      {activeThreadId && <form onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        <textarea aria-label="Message root" value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={20000} disabled={busy} style={{width: '100%'}} />
-        <button type="submit" disabled={busy || !draft.trim()}>{busy ? '…' : 'Send'}</button>
-      </form>}
+      {activeThreadId && (
+        <form className="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+          <textarea ref={composer} aria-label="Message root" rows={3} value={draft} maxLength={20000} disabled={busy}
+            placeholder={t('lab.messageHint')}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter adds a line. Enter that confirms an IME candidate (e.g. pinyin) must not send.
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              void send();
+            }} />
+          <div className="chat-composer-bar">
+            <span>{t('lab.composerHint')}</span>
+            <button type="submit" className="primary" disabled={busy || !draft.trim()} aria-label="Send">{busy ? '…' : '↑'}</button>
+          </div>
+        </form>
+      )}
       <Status error={error} />
     </section>
   );
 }
+

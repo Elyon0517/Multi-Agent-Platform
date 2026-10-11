@@ -5,7 +5,7 @@ import i18next from 'i18next';
 import en from '@/i18n/locales/en.json';
 import { GateDiagnostics } from './GateDiagnostics';
 import { ApprovalBar } from './ApprovalBar';
-import type { Approval, GateResult } from '@/api/client';
+import type { Approval, GateResult, RunDetail } from '@/api/client';
 
 const translation = i18next.createInstance();
 void translation.init({ lng: 'en', resources: { en: { translation: en } }, initAsync: false });
@@ -61,4 +61,19 @@ it('renders the saved signoff evidence and escapes goals and findings', () => {
   expect(untested).toContain('No automated tests were run');
   expect(untested).toContain('None');
   expect(untested).not.toContain('FULL Gate passed');
+});
+
+it('explains an oscillation pause and lists the open findings instead of fingerprints', () => {
+  const approval: Approval = { id: 'a', run_id: 'r', reason: 'oscillation_detected', status: 'pending',
+    on_approve: 'CODING', report: null, decided_by: null, feedback: null, decided_at: null,
+    payload: { finding_set: ['086f2c18c3de0196'] } };
+  const detail = { iterations: [{ verdicts: [{ reviewer_id: 'arch-reviewer@x', verdict: 'BLOCK', findings: [
+    { severity: 'blocking', file: 'src/panel.tsx', line: 12, issue: 'Adapter is not wired into the panel' },
+    { severity: 'nit', file: 'src/panel.tsx', line: 3, issue: 'naming' },
+  ] }] }] } as unknown as RunDetail;
+  const html = render(<ApprovalBar runId="r" approval={approval} detail={detail} />);
+  expect(html).toContain('going in circles');
+  expect(html).toContain('Adapter is not wired into the panel');
+  expect(html).not.toContain('naming');
+  expect(html).not.toContain('086f2c18c3de0196');
 });

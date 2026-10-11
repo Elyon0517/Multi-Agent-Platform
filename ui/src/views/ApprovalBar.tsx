@@ -3,9 +3,15 @@ import { useState } from 'react';
 import { SignoffReportView } from './SignoffReportView';
 import { BlockedBanner } from '@/components/BlockedBanner';
 import { Field, Status, errorText, inputStyle } from '@/views/ui';
-import { api, type Approval } from '@/api/client';
+import { api, type Approval, type RunDetail } from '@/api/client';
 
-export function ApprovalBar({ runId, approval }: { runId: string; approval: Approval }) {
+// Pause reasons with a plain-language explanation in i18n (approvalReason.*); anything else uses `unknown`.
+const EXPLAINED = new Set(['signoff', 'oscillation_detected', 'reviewer_conflict', 'inconsistent_verdict', 'budget_exceeded',
+  'max_iter_exceeded', 'interrupted_call', 'workspace_escape', 'dispatch_invalid', 'execution_error']);
+// Reasons where the reviewers' open findings explain what is stuck.
+const SHOW_FINDINGS = new Set(['oscillation_detected', 'reviewer_conflict', 'inconsistent_verdict', 'max_iter_exceeded']);
+
+export function ApprovalBar({ runId, approval, detail }: { runId: string; approval: Approval; detail?: RunDetail }) {
   const { t } = useTranslation();
   const [feedback, setFeedback] = useState('');
   const [budget, setBudget] = useState('');
@@ -28,15 +34,23 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
       setBusy(false);
     }
   };
+  const key = EXPLAINED.has(approval.reason) ? approval.reason : 'unknown';
+  const errorKind = typeof approval.payload.error_kind === 'string' ? approval.payload.error_kind : null;
+  const lastRound = detail?.iterations.at(-1);
+  const findings = SHOW_FINDINGS.has(approval.reason)
+    ? (lastRound?.verdicts ?? []).flatMap((v) => v.findings.filter((f) => f.severity === 'blocking' || f.severity === 'major')
+      .map((f) => ({ ...f, reviewer: v.reviewer_id.split('@')[0] }))).slice(0, 8)
+    : [];
   return (
-    <div aria-busy={busy}>
+    <div aria-busy={busy} style={{ maxHeight: '45vh', overflowY: 'auto' }}>
       {approval.reason === 'signoff' && approval.report && <SignoffReportView report={approval.report} />}
       {approval.reason === 'signoff' && !approval.report && approval.payload.automated_checks === 'not_run' &&
         <p role="status"><strong>{t('lab.untestedSignoff')}</strong></p>}
       <BlockedBanner
         reason={{
-          summary: approval.reason,
-          detail: approval.report ? '' : JSON.stringify(approval.payload).slice(0, 400),
+          summary: t(`approvalReason.${key}.title`),
+          detail: t(`approvalReason.${key}.body`) + (errorKind ? ` (${t('lab.errorKind')}: ${errorKind})` : '')
+            + (key === 'unknown' ? ` [${approval.reason}]` : ''),
           actions: [
             ...(approval.reason === 'dispatch_invalid' ? [] : [{ label: t('lab.approve'), kind: 'approve' as const }]),
             { label: t('lab.reject'), kind: 'deny' },
@@ -45,6 +59,17 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
         }}
         onAction={onAction}
       />
+      <Status error={error} />
+      {findings.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12 }}>
+          <strong>{t('lab.openFindings')}</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {findings.map((f, i) => (
+              <li key={i}><code>{f.severity}</code> {f.file}{f.line ? `:${f.line}` : ''} — {f.issue} <span style={{ color: 'var(--cth-ink-500)' }}>({f.reviewer})</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {approval.reason === 'interrupted_call' && <p>{t('lab.interruptedCall')}</p>}
       {approval.reason !== 'signoff' && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -59,7 +84,6 @@ export function ApprovalBar({ runId, approval }: { runId: string; approval: Appr
           </Field>
         </div>
       )}
-      <Status error={error} />
       <label htmlFor="feedback" style={{ display: 'block', marginTop: 4 }}>{t('lab.feedbackForReject')}</label>
       <input id="feedback" value={feedback} onChange={(e) => setFeedback(e.target.value)} style={{ width: '100%' }} />
     </div>

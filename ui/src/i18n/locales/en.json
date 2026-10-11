@@ -1514,6 +1514,9 @@
     "interruptedCall": "The previous request was interrupted before usage was confirmed. Approve to retry the missing calls; the gateway may have charged the interrupted request. Abort to stop.",
     "agentConfiguration": "Agent configuration",
     "selectProjectHint": "Select a project in the left sidebar, or create one with “New project”.",
+    "connectionLostTitle": "Cannot reach the server",
+    "connectionRetrying": "Checking again in {{seconds}}s (attempt {{attempt}} of {{total}}). Nothing else is sent while disconnected.",
+    "retryNow": "Retry now",
     "dispatchMode": "Dispatch mode",
     "autoDispatch": "Root assigns models and tasks",
     "manualDispatch": "Manually assign every agent",
@@ -1558,7 +1561,32 @@
     "signoffChecks": "Automatic checks",
     "signoffFullPassed": "FULL Gate passed",
     "signoffFindings": "Unresolved findings",
-    "signoffNone": "None"
+    "signoffNone": "None",
+    "devServerDown": "The dev server serving this page (port 5173) is not running, so no request can reach the backend. Start it again; the page reconnects once it answers.",
+    "backendDown": "The backend (agentlab serve) is not responding behind the dev server proxy. Check its terminal for the error, then start it again.",
+    "connectionGaveUp": "Stopped checking automatically. Fix the cause, then press Retry now.",
+    "rootThinking": "thinking… {{seconds}}s",
+    "collapseSidebar": "Hide sidebar",
+    "expandSidebar": "Show sidebar",
+    "resizeConsole": "Drag to resize the console (double-click to reset)",
+    "officeFullscreen": "Full screen",
+    "officeExitFullscreen": "Exit full screen",
+    "officeMinimize": "Minimize the office monitor",
+    "officeRestore": "Show office",
+    "officeMinimized": "Office monitor minimized — agents keep working.",
+    "deleteConversation": "Delete conversation",
+    "deleteConversationConfirm": "Delete the conversation “{{title}}”? Its messages are removed permanently; finished runs stay in the run history.",
+    "messageHint": "Ask Root, or describe the change you want",
+    "allowTool": "Allow",
+    "denyTool": "Deny",
+    "mcpServers": "MCP tool servers",
+    "mcpHint": "Configured in config/mcp.yaml. Read-only tools run directly; tools that change something ask for approval in the conversation.",
+    "mcpRunning": "running · {{count}} tools",
+    "mcpIdle": "starts on first use",
+    "mcpError": "unavailable",
+    "composerHint": "Enter to send · Shift+Enter for a new line",
+    "openFindings": "Open findings from the last review",
+    "errorKind": "Error type"
   },
   "monitor": {
     "loading": "Loading usage…",
@@ -1581,5 +1609,51 @@
     "byAgent": "Usage by agent · most tokens first",
     "reviewers": "Reviewers total",
     "grandTotal": "All agents total"
+  },
+  "approvalReason": {
+    "signoff": {
+      "title": "Ready for your final review",
+      "body": "The team finished and the reviewers signed off. Approve to apply the changes to your working tree (uncommitted). Reject with feedback to send it back to the coder. Abort to discard the run."
+    },
+    "oscillation_detected": {
+      "title": "The team is going in circles",
+      "body": "Two review rounds ended with the same problems, so the run paused instead of spending more budget. Approve to give the coder another try with a fresh iteration count. Reject with feedback to tell the team what to do differently (recommended). Abort to stop the run."
+    },
+    "reviewer_conflict": {
+      "title": "Reviewers disagree",
+      "body": "The reviewers gave contradicting verdicts. Write in the feedback box which side is right, then Approve to continue with that guidance. Abort to stop the run."
+    },
+    "inconsistent_verdict": {
+      "title": "A review contradicts itself",
+      "body": "A reviewer blocked the change without a concrete blocking finding. Write how to proceed in the feedback box, then Approve. Abort to stop the run."
+    },
+    "budget_exceeded": {
+      "title": "Budget used up",
+      "body": "The run reached its budget. Enter a higher budget below and Approve to continue. Abort to stop here."
+    },
+    "max_iter_exceeded": {
+      "title": "Iteration limit reached",
+      "body": "The run used all allowed review rounds. Enter a higher limit below and Approve to continue, or Reject with feedback to steer it. Abort to stop."
+    },
+    "interrupted_call": {
+      "title": "A model call was interrupted",
+      "body": "The process stopped while a model call was in flight; the gateway may have billed it. Approve to retry it (it may be billed again). Abort to stop."
+    },
+    "workspace_escape": {
+      "title": "Tried to write outside the project",
+      "body": "The coder tried to change a file outside the workspace or a protected file. Nothing was written. Approve to let the coder try again within the project. Abort to stop."
+    },
+    "dispatch_invalid": {
+      "title": "Invalid model assignment",
+      "body": "Root assigned models or tasks that the project settings do not allow. Reject with feedback to regenerate the assignment. Abort to stop."
+    },
+    "execution_error": {
+      "title": "The run hit an error",
+      "body": "A step failed (see the error type below, e.g. a gateway or key problem). Fix the cause, then Approve to retry from the same step. Abort to stop."
+    },
+    "unknown": {
+      "title": "The run needs your decision",
+      "body": "Approve to continue, Reject with feedback to steer it, or Abort to stop."
+    }
   }
 }
