@@ -1477,7 +1477,7 @@
     "projectMemorySelectAProjectFirst": "Project memory (select a project first)",
     "clickAnAvatarOrCardToSwitchAgent": "Click an avatar or card to switch agent.",
     "approve": "Approve",
-    "reject": "Reject",
+    "reject": "Send back",
     "abort": "Abort",
     "feedbackForReject": "Feedback for reject",
     "close": "close",
@@ -1586,7 +1586,12 @@
     "mcpError": "unavailable",
     "composerHint": "Enter to send · Shift+Enter for a new line",
     "openFindings": "Open findings from the last review",
-    "errorKind": "Error type"
+    "errorKind": "Error type",
+    "checkCommands": "Check commands",
+    "checkCommandsHint": "One per line, e.g. npm run typecheck. The coder runs them in its own worktree (gate_run) and signoff requires them to pass. Leave empty for no automated checks.",
+    "coderSaid": "Coder said",
+    "stopRun": "Stop",
+    "stopRunTitle": "Stop the running task in this conversation"
   },
   "monitor": {
     "loading": "Loading usage…",
@@ -1654,6 +1659,10 @@
     "unknown": {
       "title": "The run needs your decision",
       "body": "Approve to continue, Reject with feedback to steer it, or Abort to stop."
+    },
+    "no_changes": {
+      "title": "The coder made no changes",
+      "body": "The coder finished without changing any file, so nothing was sent to review. Reject with feedback to give it what it needs (recommended), Approve to let it try again as is, or Abort."
     }
   }
 }

@@ -111,6 +111,7 @@ export const api = {
   runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),
   createRun: (body: CreateRunBody) => post<Run>('/runs', body),
+  cancelRun: (id: string) => post<Run>(`/runs/${encodeURIComponent(id)}/cancel`, {}),
   decide: (id: string, decision: 'approve' | 'reject' | 'abort', feedback?: string,
     limits: { budget_cents?: number; max_iter?: number } = {}) =>
     post<Run>(`/runs/${id}/decision`, { decision, feedback, ...limits }),

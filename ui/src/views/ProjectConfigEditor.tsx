@@ -38,6 +38,7 @@ export function ProjectConfigEditor({
         max_iter: 5,
         retrieval: 'hybrid',
         retrieval_k: 6,
+        check_commands: [],
       });
   }, [catalog, value, onChange]);
   if (!catalog || !value) return <Muted>{error || '…'}</Muted>;
@@ -159,6 +160,16 @@ export function ProjectConfigEditor({
           style={inputStyle}
           value={value.retrieval_k}
           onChange={(e) => update({ retrieval_k: Number(e.target.value) })}
+        />
+      </Field>
+      <Field id={`${prefix}-check-commands`} label={t('lab.checkCommands')} hint={t('lab.checkCommandsHint')}>
+        <textarea
+          id={`${prefix}-check-commands`}
+          rows={3}
+          style={{ ...inputStyle, fontFamily: 'var(--cth-font-mono)' }}
+          placeholder={'npm run typecheck\nnpm test -- --run'}
+          value={(value.check_commands ?? []).join('\n')}
+          onChange={(e) => update({ check_commands: e.target.value.split('\n').map((c) => c.trim()).filter(Boolean).slice(0, 10) })}
         />
       </Field>
       <Muted>{t('lab.configurationFrozen')}</Muted>

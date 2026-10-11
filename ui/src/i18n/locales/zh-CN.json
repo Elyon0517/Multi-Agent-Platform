@@ -1586,7 +1586,12 @@
     "mcpError": "不可用",
     "composerHint": "Enter 发送 · Shift+Enter 换行",
     "openFindings": "最近一轮评审中未解决的问题",
-    "errorKind": "错误类型"
+    "errorKind": "错误类型",
+    "checkCommands": "检查命令",
+    "checkCommandsHint": "每行一条，例如 npm run typecheck。coder 会在自己的 worktree 中运行（gate_run），终审前必须全部通过。留空表示不做自动检查。",
+    "coderSaid": "coder 的说明",
+    "stopRun": "停止",
+    "stopRunTitle": "停止这个对话中正在运行的任务"
   },
   "monitor": {
     "loading": "正在加载用量…",
@@ -1654,6 +1659,10 @@
     "unknown": {
       "title": "任务需要你决定",
       "body": "批准：继续。拒绝并写反馈：调整方向。中止：结束任务。"
+    },
+    "no_changes": {
+      "title": "coder 没有做任何修改",
+      "body": "coder 结束时没有改动任何文件，所以没有送去评审。退回修改并写反馈：补充它缺的信息（推荐）。批准：让它按原样再试一次。中止：结束任务。"
     }
   }
 }
