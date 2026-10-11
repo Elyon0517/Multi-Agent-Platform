@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { byActivity } from './agentOrder';
 import { useTranslation } from 'react-i18next';
 import { AgentCard } from './AgentCard';
 import { PixelButton } from './PixelButton';
@@ -15,7 +16,9 @@ export interface AgentStripProps {
 export function AgentStrip({ config }: AgentStripProps) {
   const { t } = useTranslation();
   const rtl = useRtl();
-  const agents = useStore(s => s.agents);
+  const roster = useStore(s => s.agents);
+  // Working agents move to the front so activity is visible without scrolling; Root stays first.
+  const agents = useMemo(() => byActivity(roster), [roster]);
   const rootBusy = useStore(s => s.rootBusy);
   const restorableAgents = useStore(s => s.restorableAgents);
   const selectedId = useStore(s => s.selectedId);
