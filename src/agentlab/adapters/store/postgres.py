@@ -347,6 +347,20 @@ class PostgresStore:
                 self._record_owner(kind, key, data),
             )
 
+    def delete_thread(self, thread_id: str, project_id: str | None) -> None:
+        """Remove a conversation and its messages; finished runs stay in history, detached from it."""
+        with self.transaction():
+            rows = self._query("SELECT payload FROM thread WHERE id=%s FOR UPDATE", (thread_id,), project_id=project_id)
+            if not rows or rows[0]["payload"].get("project_id") != project_id:
+                raise NotFound(thread_id)
+            statements = ["DELETE FROM message WHERE thread_id=%s", "DELETE FROM root_turn WHERE thread_id=%s"]
+            # Runs live only in project schemas (global chats cannot start tasks), and the base schema's run
+            # table is a read-only template, so only project conversations detach runs.
+            if project_id is not None:
+                statements.append("UPDATE run SET thread_id=NULL WHERE thread_id=%s")
+            for statement in [*statements, "DELETE FROM thread WHERE id=%s"]:
+                self._query(statement, (thread_id,), project_id=project_id)
+
     def thread_record(self, thread_id: str, project_id: str | None) -> dict[str, Any] | None:
         rows = self._query("SELECT payload FROM thread WHERE id=%s", (thread_id,), project_id=project_id)
         if not rows or rows[0]["payload"].get("project_id") != project_id:
