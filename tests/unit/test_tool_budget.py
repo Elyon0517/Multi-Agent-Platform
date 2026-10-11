@@ -1,9 +1,7 @@
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-import pytest
-
-from agentlab.core.budget import BudgetExceeded, BudgetGuard
+from agentlab.core.budget import BudgetGuard
 from agentlab.core.conversation import RootTurn
 from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.llm.tools import tool_spec
@@ -37,17 +35,18 @@ async def test_tool_calls_are_not_capped_by_count(tmp_path: Path):
     assert execute.await_count == 20
 
 
-async def test_runaway_tool_loop_stops_at_the_budget(tmp_path: Path):
+async def test_tool_loop_continues_past_legacy_budget(tmp_path: Path):
     cfg = _svc(tmp_path).cfg
-    run = Run(goal="research", workspace=str(tmp_path), budget_cents=2)
+    run = Run(goal="research", workspace=str(tmp_path), budget_cents=0.0001, budget_unlimited=False)
     execute = AsyncMock(return_value=["a.py"])
-    chat = AsyncMock(side_effect=(_tool_call(i) for i in range(10_000)))
-    with pytest.raises(BudgetExceeded):
-        await StructuredCaller(cfg, chat).call(
-            "root", AgentInput(run_id=run.id, iteration=0, goal="research"), RootTurn,
-            _ctx(run, BudgetGuard(run, 0.8, lambda _: None), execute),
-        )
-    assert chat.await_count < 10_000
+    final = Completion(RootTurn(intent="answer", reply="done").model_dump_json(), 10, 5)
+    chat = AsyncMock(side_effect=[*(_tool_call(i) for i in range(20)), final])
+    result = await StructuredCaller(cfg, chat).call(
+        "root", AgentInput(run_id=run.id, iteration=0, goal="research"), RootTurn,
+        _ctx(run, BudgetGuard(run, 0.8, lambda _: None), execute),
+    )
+    assert result.output.reply == "done"
+    assert execute.await_count == 20 and run.cost_cents > run.budget_cents
 
 
 def test_unlimited_budget_keeps_usage_without_checks_or_warnings(tmp_path: Path):
@@ -61,5 +60,4 @@ def test_unlimited_budget_keeps_usage_without_checks_or_warnings(tmp_path: Path)
     assert not warnings
     guard.release(1_000_000)
     run.budget_unlimited = False
-    with pytest.raises(BudgetExceeded):
-        guard.check()
+    guard.check()

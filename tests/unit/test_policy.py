@@ -57,19 +57,20 @@ class TestRouting:
 
 
 class TestBudget:
-    def test_blocks_over_budget(self) -> None:
+    def test_legacy_budget_does_not_block(self) -> None:
         run = Run(goal="g", workspace=".", budget_cents=1.0, cost_cents=0.9)
-        with pytest.raises(BudgetExceeded):
-            BudgetGuard(run, 0.8, lambda r: None).check(0.2)
+        BudgetGuard(run, 0.8, lambda r: None).check(1_000_000)
+        assert run.budget_unlimited
 
-    def test_warns_once_at_ratio(self) -> None:
+    def test_tracks_cost_without_budget_warnings(self) -> None:
         run = Run(goal="g", workspace=".", budget_cents=10.0)
         warned: list[float] = []
         guard = BudgetGuard(run, 0.8, lambda r: warned.append(r.cost_cents))
         guard.record(Usage(cost_cents=5))
         guard.record(Usage(cost_cents=4))
         guard.record(Usage(cost_cents=0.5))
-        assert warned == [9.0]
+        assert warned == []
+        assert run.cost_cents == 9.5
 
 
 RETRY = LlmCallCfg(num_retries=3, backoff_base_s=0, timeout_s=5, retry_on=["rate_limit_429", "server_error_5xx"], do_not_retry_on=["auth_401_403"])

@@ -16,7 +16,7 @@ from agentlab.adapters.workspace import GitWorkspace
 from agentlab.api.app import create_app
 from agentlab.bootstrap import build_services
 from agentlab.cli.main import _drive
-from agentlab.core.budget import BudgetExceeded, BudgetGuard
+from agentlab.core.budget import BudgetGuard
 from agentlab.core.llm.retry import AttemptLog, LlmError, NonRetryable, RetriesExhausted, Retryable, call_with_retry
 from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.loop.arbiter import arbitrate
@@ -65,24 +65,19 @@ async def test_escape_is_an_approval_and_never_writes_outside(cfg, tmp_path):  #
     assert driver.decide(run.id, "approve").status == RunStatus.CODING
 
 
-async def test_budget_approval_requires_an_increase_and_auto_approve_stops(cfg, tmp_path):  # type: ignore[no-untyped-def]
+async def test_auto_approve_continues_past_legacy_budget(cfg, tmp_path):  # type: ignore[no-untyped-def]
     driver = await make_driver(cfg, tmp_path)
     svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
     svc.store = driver.store
     run = await _drive(svc, driver, driver.create("fix add", budget_cents=0.01), True)
-    assert run.paused_reason == "budget_exceeded"
-    before = len(driver.store.events(run.id))
-    with pytest.raises(ValueError, match="increase budget"):
-        driver.decide(run.id, "approve")
-    assert len(driver.store.events(run.id)) == before
-    assert driver.decide(run.id, "reject").status == RunStatus.PLANNING
+    assert run.status == RunStatus.DONE and run.cost_cents > run.budget_cents
 
 
-async def test_budget_pause_can_resume_with_explicit_unlimited_setting(cfg, tmp_path):  # type: ignore[no-untyped-def]
+async def test_legacy_budget_pause_can_resume_without_increase(cfg, tmp_path):  # type: ignore[no-untyped-def]
     driver = await make_driver(cfg, tmp_path)
-    run = await driver.run(driver.create("fix add", budget_cents=0.01).id)
-    assert run.paused_reason == "budget_exceeded"
-    resumed = driver.decide(run.id, "approve", budget_unlimited=True)
+    run = driver.create("fix add", budget_cents=0.01, budget_unlimited=False)
+    driver._escalate(run, "budget_exceeded", {"required_budget_cents": 100}, on_approve=RunStatus.PLANNING)
+    resumed = driver.decide(run.id, "approve", budget_unlimited=False)
     assert resumed.budget_unlimited
     assert driver.store.get_run(run.id).budget_unlimited
     completed = await driver.run(run.id)
@@ -182,8 +177,8 @@ async def test_invalid_json_usage_is_charged_even_after_repair_exhaustion(cfg): 
     assert guard._reserved == 0
 
 
-async def test_parallel_budget_reservations_and_completed_usage_survive_failure(cfg):  # type: ignore[no-untyped-def]
-    # Reservation boundaries depend on a fixed price fixture, not the live model catalog.
+async def test_parallel_reservations_allow_all_reviewers_past_legacy_budget(cfg):  # type: ignore[no-untyped-def]
+    # All reservations must proceed even when their estimates exceed the old cap.
     cfg = cfg.model_copy(deep=True)
     for alias in cfg.models.aliases.values():
         alias.cost_in_per_1m_cents = 500
@@ -198,14 +193,11 @@ async def test_parallel_budget_reservations_and_completed_usage_survive_failure(
     caller = StructuredCaller(cfg, concurrent_chat)
     runtime = object.__new__(RawRuntime)
     runtime._caller = caller
-    from agentlab.core.llm.retry import ParallelFailure
     from agentlab.core.schemas import Verdict
     inputs = {role: AgentInput(run_id=run.id, iteration=1, goal="g") for role in cfg.reviewer_roles}
-    with pytest.raises(ParallelFailure) as failure:
-        await runtime.run_parallel(inputs, Verdict, ctx)
-    assert isinstance(failure.value.cause, BudgetExceeded)
-    assert len(failure.value.results) == 1
-    assert run.tokens_in == 100 and run.tokens_out == 10 and guard._reserved == 0
+    results = await runtime.run_parallel(inputs, Verdict, ctx)
+    assert len(results) == len(inputs)
+    assert run.tokens_in == 100 * len(inputs) and run.tokens_out == 10 * len(inputs) and guard._reserved == 0
 
 
 async def test_retry_configuration_can_disable_retries(cfg):  # type: ignore[no-untyped-def]
@@ -260,18 +252,18 @@ def test_chunks_never_exceed_size():
     assert chunks[-1].endswith("c")
 
 
-async def test_project_planner_budget_stops_before_any_request(cfg, tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
+async def test_project_planner_ignores_legacy_budget(cfg, tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     svc = build_services(Settings(store_backend="memory", config_dir=CONFIG_DIR, data_dir=tmp_path, _env_file=None))
-    request = AsyncMock(return_value=Completion('{"phases":[]}', 100, 10))
+    request = AsyncMock(return_value=Completion('{"phases":[{"title":"Implement","steps":["fix add"]}]}', 100, 10))
     runtime = object.__new__(RawRuntime)
     runtime._caller = StructuredCaller(cfg, request)
     monkeypatch.setattr(type(svc), "runtime", lambda *args: runtime)
     with TestClient(create_app(svc)) as client:
         response = client.post("/projects", json={"name": "p", "goal": "g", "workspace": str(tmp_path), "budget_cents": .001})
-        assert response.status_code == 409
-        assert client.get("/projects").json() == []
-        assert client.get("/project-planning").json()[0]["cost_cents"] == 0
-    request.assert_not_awaited()
+        assert response.status_code == 200, response.text
+        assert len(client.get("/projects").json()) == 1
+        assert client.get("/project-planning").json()[0]["cost_cents"] > 0
+    request.assert_awaited()
 
 
 async def test_paid_empty_response_usage_survives_retry_policy_failure(cfg):  # type: ignore[no-untyped-def]

@@ -58,7 +58,7 @@ def test_opposing_soft_comments_do_not_block_signoff():
     assert arbitrate([verdict("a", a), verdict("b", b)], .7).action == ArbiterAction.SIGNOFF
 
 
-async def test_paid_plan_is_saved_before_next_budget_pause(cfg, tmp_path):  # type: ignore[no-untyped-def]
+async def test_paid_plan_is_saved_when_cost_exceeds_legacy_budget(cfg, tmp_path):  # type: ignore[no-untyped-def]
     driver = await make_driver(cfg, tmp_path)
     base = driver.runtime.run_agent
     calls = []
@@ -69,15 +69,10 @@ async def test_paid_plan_is_saved_before_next_budget_pause(cfg, tmp_path):  # ty
         return result
     driver.runtime.run_agent = costly
     run = await driver.run(driver.create("fix add", budget_cents=40).id)
-    assert run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "budget_exceeded"
+    assert run.paused_reason == "signoff"
     assert driver.store.artifacts(run.id, "plan")
-    assert calls == ["planner"]
-    approval = driver.store.pending_approval(run.id)
-    assert approval.on_approve == RunStatus.CODING
-    assert approval.payload["required_budget_cents"] > run.cost_cents
-    driver.decide(run.id, "approve", budget_cents=approval.payload["required_budget_cents"])
-    await driver.run(run.id)
-    assert calls == ["planner", "coder"]
+    assert calls[0] == "planner" and calls.count("planner") == 1
+    assert "coder" in calls and run.cost_cents > run.budget_cents
 
 
 async def test_partial_paid_reviews_are_reused_and_required_covers_remaining_batch(cfg, tmp_path):  # type: ignore[no-untyped-def]
@@ -174,7 +169,7 @@ async def test_snapshot_git_has_timeout_and_diff_runs_off_event_loop(tmp_path, m
     assert seen and seen[0] != loop_thread
 
 
-async def test_review_batch_preflight_requires_all_three_requests(cfg, tmp_path):  # type: ignore[no-untyped-def]
+async def test_review_batch_runs_all_three_requests_past_legacy_budget(cfg, tmp_path):  # type: ignore[no-untyped-def]
     cfg = cfg.model_copy(deep=True)
     for alias in cfg.models.aliases.values():
         alias.cost_in_per_1m_cents = 500
@@ -188,10 +183,6 @@ async def test_review_batch_preflight_requires_all_three_requests(cfg, tmp_path)
         role=r, output=Verdict(reviewer_id=r, verdict="APPROVE"), alias="strong", model="test", usage=Usage())
         for r in cfg.reviewer_roles])
     driver.runtime.run_parallel = parallel
-    with pytest.raises(BudgetExceeded) as error:
-        await driver._agents(run, cfg.reviewer_roles, inp, Verdict)
-    parallel.assert_not_called()
-    run.budget_cents = error.value.required_budget_cents
     assert len(await driver._agents(run, cfg.reviewer_roles, inp, Verdict)) == 3
     parallel.assert_awaited_once()
 

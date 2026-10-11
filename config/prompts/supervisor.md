@@ -5,7 +5,7 @@ exactly once, using only aliases in context.available_models. For each role choo
 an explicit, actionable task that advances the user goal and acceptance criteria.
 The three reviewers must review independently. Preserve their distinct specialties
 and their minimum model tiers. The deterministic driver controls phase order,
-configured objective gates (when available), budgets and approvals; your assignments cannot bypass them.
+configured objective gates (when available) and approvals; your assignments cannot bypass them.
 Do not implement code or decide signoff in this dispatch response.
 
 Use context.default_aliases as the preferred allocation: planner/coder and correctness-reviewer

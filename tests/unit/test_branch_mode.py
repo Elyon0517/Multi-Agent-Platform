@@ -73,11 +73,10 @@ async def test_direct_completion_survives_a_budget_pause_and_driver_restore(tmp_
     repo = _repo(tmp_path / "repo")
     driver = svc.driver(repo, "fake", "python")
     driver.recovery_options["complete_in_place"] = True
-    run = await driver.run((await driver.create_async("fix add", budget_cents=0.01)).id)
-    assert run.paused_reason == "budget_exceeded"
+    run = await driver.create_async("fix add", budget_cents=0.01)
+    driver._escalate(run, "budget_exceeded", {}, on_approve=RunStatus.PLANNING)
     restored = svc.restore_driver(run.id)
     assert restored.recovery_options["complete_in_place"] is True
-    restored.decide(run.id, "approve", budget_unlimited=True)
     completed = await restored.run(run.id)
     assert completed.status == RunStatus.DONE
     assert svc.store.get_run(run.id).status == RunStatus.DONE

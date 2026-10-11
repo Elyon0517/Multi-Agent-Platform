@@ -31,6 +31,26 @@ def root_runtime(cfg, completions):
     return runtime
 
 
+def test_same_repo_new_conversations_ignore_legacy_turn_and_project_caps(tmp_path: Path):
+    svc = services(tmp_path)
+    svc.cfg.budget.ask.max_turn_cents = 0.001
+    project = svc.projects.create("calc", "fix add", str(seed_demo_workspace(tmp_path / "ws")))
+    turn = RootTurn(intent="answer", reply="已检查代码")
+    # Paid usage exceeds both the old per-turn cap and the old project cap.
+    root = root_runtime(svc.cfg, [Completion(turn.model_dump_json(), 2_000_000, 100) for _ in range(3)])
+    svc.runtime = lambda name=None, cfg=None: root
+    with TestClient(create_app(svc)) as client:
+        first = client.post(f"/projects/{project.id}/threads", json={"title": "first"}).json()
+        second = client.post(f"/projects/{project.id}/threads", json={"title": "second"}).json()
+        for thread in (first, first, second):
+            response = client.post(f"/projects/{project.id}/threads/{thread['id']}/messages", json={"text": "检查代码"})
+            assert response.status_code == 200, response.text
+            assert response.json()["turn"]["reply"] == turn.reply
+    records = svc.store.records("root_turn")
+    assert len(records) == 3
+    assert all(r["status"] == "completed" and r["cost_cents"] > 0.001 for r in records)
+
+
 @pytest.mark.parametrize("case", ["entry", "document", "weather", "task", "inspect"])
 def test_five_discovery_conversations(tmp_path: Path, case: str):
     svc = services(tmp_path)
