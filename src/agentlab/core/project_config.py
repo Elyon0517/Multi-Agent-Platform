@@ -22,6 +22,9 @@ class ProjectSettings(Strict):
     max_iter: int = Field(default=5, ge=1, le=50)
     retrieval: Literal["off", "keyword", "hybrid"] = "hybrid"
     retrieval_k: int = Field(default=6, ge=1, le=20)
+    # Project checks (e.g. "npm run typecheck", "npm test") the coder can run in its worktree via gate_run.
+    # They run on this machine with the project's own toolchain; empty means the project has no Gate.
+    check_commands: list[str] = Field(default_factory=list, max_length=10)
 
 
 def worker_roles(cfg: AppConfig) -> set[str]:
