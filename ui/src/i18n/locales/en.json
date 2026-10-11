@@ -1592,7 +1592,10 @@
     "coderSaid": "Coder said",
     "stopRun": "Stop",
     "stopRunTitle": "Stop the running task in this conversation",
-    "stopAndDeleteConversation": "This conversation has a task that is running or waiting. Stop the task and delete the conversation?"
+    "stopAndDeleteConversation": "This conversation has a task that is running or waiting. Stop the task and delete the conversation?",
+    "workspaceMode": "Where agents edit code",
+    "workspaceModeBranch": "Your repository, on a run branch (see changes live in your IDE)",
+    "workspaceModeWorktree": "An isolated copy per task, applied on signoff (parallel tasks)"
   },
   "monitor": {
     "loading": "Loading usage…",
