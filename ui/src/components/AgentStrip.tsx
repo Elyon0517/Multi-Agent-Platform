@@ -32,10 +32,7 @@ export function AgentStrip({ config }: AgentStripProps) {
   const restoring = false;
   const autoRestoring = false;
   const restoreTeam = async () => undefined;
-  // ONE restore control (bottom-right): a button whose dropdown OPENS UPWARD and
-  // lists last session's agents with per-agent dismiss. The menu is position:
-  // fixed (anchored off the button's rect) because the strip scrolls with
-  // overflow hidden — an absolute child would be clipped.
+  // Fix the restore menu above its button so the scrolling strip cannot clip it.
   const [restoreMenuOpen, setRestoreMenuOpen] = useState(false);
   const [restoreMenuPos, setRestoreMenuPos] = useState<{ right: number; bottom: number } | null>(null);
   const restoreBtnRef = useRef<HTMLSpanElement>(null);

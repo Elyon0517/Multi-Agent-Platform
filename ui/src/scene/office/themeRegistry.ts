@@ -1,16 +1,4 @@
-// Theme registry — the pluggable "office theme" contract.
-//
-// Phase 0 of the TV-show-offices feature (card tvshow-phase0-abstraction):
-// extract the ~40% of constants that were hard-coded inside OfficeFloor.tsx
-// (errand spots, coffee-economy tile coords, prop anchors, seat names, tileset
-// URLs, palette, monitor gids) into a ThemeConfig so the scene becomes
-// swappable per show. This phase ships the EXISTING office unchanged as
-// `theme: 'office'`: every value below is copied byte-for-byte from the old
-// in-file literals, so the office renders and behaves identically.
-//
-// The engine (TiledMapRenderer / BFS pathfinding / Camera / sprite animation)
-// is already fully generic and needs no change. cast.ts is read-only here
-// (uncommitted human WIP) — the office theme references its existing exports.
+// Office themes define map assets, furniture anchors, palettes and cast.
 
 import type { Texture } from 'pixi.js';
 import { colors } from '@/design/tokens';
@@ -216,15 +204,7 @@ export const OFFICE_THEME: ThemeConfig = {
   },
 };
 
-/** Brooklyn Nine-Nine — the 99th precinct (TV-show offices Phase 2, structure).
- *  The map (brooklyn99.tmj) is a precinct bullpen: Captain Holt's glass office
- *  in the back corner (`desk-ceo`), an 8-desk detective bullpen (`pc-1..8`), a
- *  briefing room (boardroom zone) + break room (cafeteria zone) with the coffee
- *  economy. PLACEHOLDER ART: the map reuses the office tileset gids, so the
- *  tilesets / monitor / palette / cast below reuse the office theme verbatim —
- *  Pam's license-clean B99 tileset + cast likenesses (§C/§D) drop into those
- *  same seams later. Only the layout-bound anchors (seats, café, coffee, props,
- *  errands) are authored to brooklyn99.tmj's own coordinates. */
+/** Brooklyn Nine-Nine layout, currently using the office tileset and cast. */
 export const BROOKLYN99_THEME: ThemeConfig = {
   id: 'brooklyn99',
   mapRaw: brooklyn99MapRaw,

@@ -1,11 +1,4 @@
-// Procedural portraits for The Office cast.
-//
-// These are fully custom-drawn busts (NOT recolored LimeZu sprites): each
-// character is an explicit recipe layering skin → clothing → face → facial hair
-// → hairstyle → glasses on an 18×28 canvas. This gives real control over each
-// person's hairstyle shape, garment cut/color, and facial hair so they read as
-// the specific show character. The in-scene walking sprites still use the LimeZu
-// recolor in cast.ts; this module only powers the static portraits in the UI.
+// Procedural cast portraits composed on an 18×28 canvas.
 
 import type { OfficeCharacterName } from './cast';
 
@@ -265,10 +258,7 @@ function drawFacial(buf: Buf, kind: Facial, color: RGB): void {
   }
 }
 
-// ─── glasses ─────────────────────────────────────────────────────────────────
-// Clear prescription glasses (NOT sunglasses): a thin rim that frames each eye
-// without covering it. The lens interior keeps the eye/skin already drawn, plus
-// a small white glint so the lens reads as transparent glass.
+// Transparent prescription lenses preserve the eye and skin beneath the rim.
 function drawGlasses(buf: Buf): void {
   const frame: RGB = [60, 54, 62];
   const glint: RGB = [236, 240, 246];

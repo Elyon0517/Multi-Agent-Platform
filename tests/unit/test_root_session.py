@@ -154,7 +154,7 @@ async def test_tools_stay_available_budgeted_and_replayed(cfg):
         "root", AgentInput(run_id=run.id, iteration=0, goal="inspect"), RootTurn, ctx
     )
     assert result.output.reply == "Collected evidence"
-    # Only the budget bounds tool use; tools are still offered after many calls.
+    # Tools remain available after many calls.
     assert "tools" in calls.call_args.kwargs
     assert execute.await_count == 8 and len(records) == 16
     assert checks.count(0) == 8

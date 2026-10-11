@@ -118,7 +118,6 @@ export function App() {
     <div className={`app-layout${layout.sidebarCollapsed ? ' sidebar-collapsed' : ''}`} style={{ display: 'grid', gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) 6px ${layout.consoleWidth}px`, columnGap: 0, height: '100vh', padding: 8, boxSizing: 'border-box' }}>
       <ProjectSidebar collapsed={layout.sidebarCollapsed} onCollapsedChange={(sidebarCollapsed) => updateLayout({ sidebarCollapsed })} />
       <main className="workspace-main" style={{ minWidth: 0, margin: '0 0 0 8px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignContent: layout.officeMinimized ? 'start' : undefined, gridTemplateRows: `auto ${layout.officeMinimized ? 'auto' : 'minmax(0, 1fr)'} auto${detail?.pending_approval ? ' auto' : ''}`, gap: 8, minHeight: 0 }}>
-        {/* Work starts in the Root conversation; the header only holds global toggles. */}
         <header style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px',
           background: 'var(--cth-cream-200)', boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)' }}>
           <h1 style={{ margin: 0, fontFamily: 'var(--cth-font-display)', fontSize: 11 }}>Multi-Agent Platform</h1>

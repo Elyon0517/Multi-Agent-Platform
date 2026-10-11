@@ -746,8 +746,6 @@ class Driver:
                     max(run.cost_cents + remaining, failure.required_budget_cents or 0),
                 )
             raise failure
-        # Deliver paid outputs even if actual usage exceeded the estimate.
-        # The next stage checks its entire batch before making any paid calls.
         return [self._completed_agents[cache_key(r)] for r in roles]
 
     def _assignment(self, role: str) -> Any:

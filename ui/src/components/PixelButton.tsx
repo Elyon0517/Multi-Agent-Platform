@@ -30,19 +30,7 @@ export function PixelButton({
   const [pressed, setPressed] = useState(false);
   const [hover, setHover] = useState(false);
 
-  // DISABLED TEXT IS ITS OWN COLOR, not the variant's.
-  //
-  // Every variant swaps its FILL to `--cth-cream-300` when disabled, but the
-  // variants used to keep their enabled text token — and `primary`'s is
-  // `--cth-cream-50`, the INVERSE foreground picked to sit on an ink-900 button.
-  // On the cream-300 disabled fill that pairing collapses: in dark mode it is
-  // #1A191E text on #37363E (~1.4:1, effectively invisible), and in light mode a
-  // near-white #FFFDF5 on tan, which is barely better. That is why a disabled
-  // Send or Dispatch reads as an empty box.
-  //
-  // `--cth-ink-500` is the one foreground that works against cream-300 in BOTH
-  // themes, because both tokens flip together — and a muted label is what a
-  // disabled control should look like anyway.
+  // Disabled variants share a muted foreground that contrasts with cream-300.
   const disabledText = 'var(--cth-ink-500)';
 
   const palette = (() => {
@@ -89,15 +77,7 @@ export function PixelButton({
       onMouseEnter={() => setHover(true)}
       disabled={disabled}
       style={{
-        // Centre content HERE rather than trusting each call site.
-        //
-        // A <button> with a fixed height centres bare text on its own, but a
-        // child that is itself `inline-flex` (which every icon+label call site
-        // uses, to sit the glyph beside the word) aligns on ITS baseline
-        // instead. So a row of buttons where some labels were wrapped and some
-        // were bare text — `edit` beside `IDE` and `terminal` — sat at visibly
-        // different heights. Fixing it per call site fixes today's row and not
-        // the next one someone writes.
+        // Center bare text and wrapped icon labels consistently.
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -107,18 +87,13 @@ export function PixelButton({
         // Kill descender-driven drift: with the height fixed above, an inherited
         // line-height only moves the text off centre.
         lineHeight: 1,
-        // A button never shrinks below its own label. The default flex-shrink is
-        // 1, and with `whiteSpace: nowrap` below, a squeezed button keeps drawing
-        // its full-width text out of a narrowed box — so in a tight row the
-        // labels paint straight over whatever sits to their left. That is not a
-        // clipped button, it is two controls on top of each other.
+        // Prevent nowrap labels from overflowing a flex-shrunk button.
         flexShrink: 0,
         height: heightBySize[size],
         padding: padBySize[size],
         background: palette.fill,
         color: palette.text,
         border: 'none',
-        // v0.3.4: 1px hairline + 1px lift — the 2px chrome read as heavy boxes
         boxShadow: pressed && !disabled
           ? `inset 0 0 0 1px ${palette.border}`
           : `inset 0 0 0 1px ${palette.border}, 0 1px 0 ${palette.shadow}`,
@@ -128,12 +103,7 @@ export function PixelButton({
         cursor: disabled ? 'not-allowed' : 'pointer',
         width: fullWidth ? '100%' : 'auto',
         userSelect: 'none',
-        // Height is fixed by the size variant above, so a label that wraps does
-        // not make the button taller — the extra line simply prints through the
-        // bottom border. Every label here is a short phrase ("Check for updates",
-        // "reset & start over"), so wrapping is always a layout bug rather than a
-        // wanted behaviour. Callers that genuinely want a multi-line button can
-        // still override, since `style` spreads after this.
+        // Fixed-height buttons require single-line labels; callers may override via style.
         whiteSpace: 'nowrap',
         ...style
       }}

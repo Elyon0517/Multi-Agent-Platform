@@ -12,7 +12,6 @@ def backfill_usage(connection: Connection, base: str) -> None:
         text(f"SELECT 1 FROM {marker} WHERE kind='migration' AND key='usage_monitor_backfill'")
     ).first():
         return
-    # Read registered project schemas without changing search_path or their data.
     bind = connection
     quote = bind.dialect.identifier_preparer.quote
     registry = f"{quote(base)}.project_schema"

@@ -1,10 +1,5 @@
-// The Office cast — roster metadata + sprite frames.
-//
-// Both the static portraits (cards / picker) and the in-scene walking sprites are
-// now fully custom-drawn from the same per-character recipes in portraitArt.ts:
-// the scene sprite reuses the portrait's exact head/face/clothing and adds legs,
-// so an agent on the office floor looks identical to its card. The LimeZu base
-// sheets are no longer used for the cast. See assets/ATTRIBUTION.md.
+// Cast metadata and procedural frames share the recipes in portraitArt.ts.
+// See assets/ATTRIBUTION.md.
 
 import { Texture } from 'pixi.js';
 import { paintPortrait, sceneFrameBufs, SCENE_W, SCENE_H } from './portraitArt';
@@ -87,10 +82,7 @@ export async function getCastFrames(name: OfficeCharacterName): Promise<Texture[
   return frames;
 }
 
-/**
- * Paint a character's static portrait for cards / the picker (delegates to the
- * custom procedural composer in portraitArt.ts).
- */
+/** Paint a static cast portrait. */
 export async function paintCastPortrait(
   ctx: CanvasRenderingContext2D,
   name: OfficeCharacterName,

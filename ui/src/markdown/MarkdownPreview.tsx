@@ -1,18 +1,5 @@
-/**
- * Rendered markdown view (v0.3.4) — the shared preview used by the IDE's
- * split/preview modes, the fullscreen file overlay, and (via those) the
- * terminal ⌘-click flow. The `card` variant renders agent-written markdown
- * inside another surface: the ASK ME question and the task detail's Q&A trail.
- *
- * SECURITY: agent-generated markdown is untrusted. react-markdown WITHOUT
- * rehype-raw renders to React elements only — no HTML sink exists, raw HTML in
- * the source is shown as text, and the default urlTransform already drops
- * javascript: URIs. Keep it that way: never add rehype-raw here.
- *
- * Links never navigate the window: http(s)/mailto go through the main-process
- * opener; relative *.md links surface through onOpenMarkdownLink so the host
- * (IDE tab / overlay) opens them in context; everything else is inert.
- */
+/** Shared document and card preview. Keep raw HTML disabled for untrusted markdown.
+ * External links use the bridge; relative markdown links use onOpenMarkdownLink. */
 import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,11 +9,7 @@ import { remarkSoftBreaks } from './remarkSoftBreaks';
 import { rehypeAutoDir } from './rehypeAutoDir';
 import { useRtl } from '@/i18n/useDirection';
 
-/** How the rendered markdown sits in its host.
- *  - `document` (default): a page — its own type scale, 72ch measure, page padding.
- *  - `card`: markdown INSIDE another surface (an ASK ME question, a Q&A entry).
- *    Inherits the host's font and size, drops the page chrome, and keeps a single
- *    newline as a line break the way the plain-text block it replaced did. */
+/** Documents use page styling; cards inherit host styling and preserve newlines. */
 export type MarkdownVariant = 'document' | 'card';
 
 // Hoisted: a fresh array on every render would make react-markdown re-run the
@@ -58,14 +41,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   source, baseRel, root, onOpenMarkdownLink, variant = 'document'
 }: MarkdownPreviewProps) {
   const card = variant === 'card';
-  // Per-block direction, gated on the APP LANGUAGE rather than on the text.
-  //
-  // The plugin stamps `dir="auto"`, which resolves from each block's first
-  // strong character — so ungated it fires for an English user the moment an
-  // agent quotes a line of Arabic, and mirrors a block of their UI over
-  // something they never turned on. Keying it to the chosen language instead
-  // means an English user's markdown renders through exactly the pipeline it
-  // rendered through before this existed, whatever the agent writes into it.
+  // Enable per-block direction only when the selected app language is RTL.
   const rtl = useRtl();
   return (
     <div className={card ? 'cth-md-preview cth-md-card' : 'cth-md-preview'}>
@@ -95,11 +71,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
               </a>
             );
           },
-          // Images. LOCAL ones render for real (bytes via the root-confined fs
-          // IPC → blob URL); remote ones stay a placeholder chip. Until now
-          // every image was a chip, which meant an agent's report saying "see
-          // the screenshot below" showed a pill reading "🖼 screenshot" and the
-          // evidence was unviewable anywhere in the app.
+          // Local images load through the workspace bridge; remote images use placeholders.
           img: ({ alt, src }) => {
             const s = typeof src === 'string' ? src : undefined;
             const rel = root ? resolveLocalImageRel(baseRel, s) : null;

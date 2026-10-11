@@ -1,21 +1,4 @@
-/**
- * Treat a single newline as a line break.
- *
- * CommonMark folds a soft break into a space, so a question written as
- *
- *     Do X first.
- *     Then tell me about Y.
- *
- * renders as one run-on line. That is correct for a document, and wrong for a
- * card that used to be a `white-space: pre-wrap` block — the ASK ME question
- * and the task detail's Q&A trail both read as messages, not as prose files.
- * So the card variant of MarkdownPreview runs this and the document variant
- * does not.
- *
- * The walk only rewrites `text` nodes. Fenced and indented code are `code`
- * nodes carrying a raw `value` with no children, and inline code is
- * `inlineCode` — neither is touched, so newlines inside code survive as-is.
- */
+/** Preserve message newlines in card previews; leave code nodes unchanged. */
 
 interface MdNode {
   type: string;

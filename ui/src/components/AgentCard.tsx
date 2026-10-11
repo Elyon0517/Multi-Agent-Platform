@@ -47,11 +47,6 @@ export interface AgentCardProps {
 
 const fmtK = (n: number): string => `${Math.round(n / 1000)}k`;
 
-/**
- * v0.3.4 compact redesign: one identity row (name + status), one context line
- * (action while working, repo while idle — both in the tooltip), one note row,
- * and a slim gauge pinned to the bottom edge. Nothing overlaps anything.
- */
 export function AgentCard({
   name, character, accent, status, ptyId, project, action, progress = 0,
   contextTokens, contextLimit, selected, isGod, onClick, onRename,
@@ -61,24 +56,9 @@ export function AgentCard({
   const [hover, setHover] = useState(false);
   const typing = false;
   void ptyId;
-  // IDENTITY and SELECTION are two different things, and conflating them is why
-  // selecting Michael appeared to do nothing.
-  //
-  // The card used to pass `isGod || selected` into PixelPanel's 'active' variant,
-  // whose frame is `inset 1px + 3px accent + 5px ink` — five pixels of border in
-  // the agent's OWN accent. Three problems in one: the selection cue changed
-  // colour per agent (the "blue halo" on a sky agent), it was invisible on god
-  // because god was framed unconditionally, and stacking the selection ring
-  // outside it made the boss card visibly fatter than its neighbours.
-  //
-  // Now: god is marked by its SURFACE (see godSurface), everyone shares the same
-  // 1px panel border, and selection is one accent-independent ring — identical on
-  // every card, god included.
+  // Root identity uses the surface; selection uses a shared ring.
 
-  // The selected card wears an ink ring OUTSIDE its border. ink-900 rather than
-  // an accent so the cue is identical on every agent, and it flips with the
-  // theme (near-black on cream, near-white on the dark ground), staying legible
-  // over whatever accent the card already carries.
+  // Ink keeps the selection ring legible across agent accents and themes.
   const selectionRing = selected ? '0 0 0 2px var(--cth-ink-900)' : '';
 
   // Context gauge as ONE clean fill (0..8 → 0..100%). Colour escalates as the
@@ -91,25 +71,11 @@ export function AgentCard({
     ? t('agentCard.contextTitle', { used: fmtK(contextTokens), limit: fmtK(contextLimit), pct: Math.round((contextTokens / contextLimit) * 100) })
     : t('agentCard.contextGaugeTitle');
 
-  // ONE card size for every agent. God used to be 216x86 against everyone
-  // else's 196x76, so the dock never lined up — and once the selection ring was
-  // added outside its 5px accent frame, the boss card grew a visibly thicker
-  // edge than any other. Distinction now comes from the card's SURFACE, not from
-  // making its box bigger or its border heavier.
-  // 196 was too tight once god's row carried NAME + BOSS + status: the name
-  // truncated to "MIC…" — the one word on the card that must never be the thing
-  // that gets cut. Widened for every card so the dock stays uniform, with enough
-  // slack that Talk's info mark (which only appears when the OpenAI key is
-  // missing) has somewhere to sit rather than pushing the row apart.
+  // Use one card size for all agents, with room for name, status and controls.
   const width = 220;
   const height = 78;
   const lift = (isGod ? -2 : 0) - (hover ? 1 : 0) - (selected ? 1 : 0);
-  /** God's distinction: a tinted surface plus a thin accent border all the way
-   *  around — NOT the 3px rule that used to sit on the top edge alone. That rule
-   *  read as a stray yellow bar rather than as part of the card, and an edge
-   *  treatment that only exists on one side always looks like a mistake or a
-   *  progress bar. Same 1px geometry as every other card, so the box is
-   *  unchanged and the selection ring still means exactly one thing everywhere. */
+  /** Root uses a tinted surface and the same border geometry as other cards. */
   const godSurface: React.CSSProperties = isGod
     ? {
         background: `var(--cth-${accent}-light)`,
@@ -242,11 +208,7 @@ export function AgentCard({
             {/* God: voice on its own compact row. Workers: the private note row.
                 Both sit ABOVE the gauge, so it is never covered. */}
             {isGod ? (
-              // Talk grows an info mark when the OpenAI key is missing, so this
-              // row can hold three things instead of two. `overflow: hidden` is
-              // the guard: the toggle's label shrinks first (it has minWidth:0),
-              // and if it still does not fit, the row clips INSIDE the card
-              // instead of spilling over its border.
+              // Let the label shrink, then clip overflow within the card.
               <div
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,

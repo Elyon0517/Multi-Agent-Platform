@@ -2,12 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/store';
 import { TaskDetail, parseTasks, type HiveTask } from './TasksKanban';
 
-/**
- * App-wide host for the task detail: whoever calls store.openTaskDetail(id) —
- * a kanban card, the sticky note on an agent's strip card, a floor prop —
- * gets the SAME big overlay rendered over the office floor. Keeps its own
- * 5s ledger poll so an open detail stays fresh while the god edits cards.
- */
+/** Shared task detail overlay, refreshed from the ledger every five seconds. */
 
 const POLL_MS = 5000;
 
@@ -20,9 +15,7 @@ export function TaskDetailOverlay() {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
-    // parseTasks NORMALIZES (the ledger is a hand-written file; cards may lack
-    // dependsOn/priority/etc.) — a raw card without dependsOn crashed the
-    // detail once. Never feed TaskDetail unparsed ledger entries.
+    // Normalize ledger entries before passing them to TaskDetail.
     try { setTasks(parseTasks(await window.cth.hiveTasks())); } catch { /* keep last good */ }
   }, []);
 
@@ -40,12 +33,7 @@ export function TaskDetailOverlay() {
   const nameFor = (id?: string): string | undefined =>
     id ? (agents.find((a) => a.id === id)?.name ?? restorable.find((a) => a.id === id)?.name ?? id) : undefined;
 
-  // Moving a card writes ONE field. Operate on the RAW ledger (the same pattern
-  // as TasksKanban.dismissTask), never on the display-parsed state: parseTasks
-  // NORMALIZES, so re-serializing it turns a hand-written `priority: "high"`
-  // into the number 3 and grafts `dependsOn: []` onto a card that spells the key
-  // `deps`. Those are real values, so they survive the merge in hive.writeTasks
-  // and land on disk — a status change quietly rewriting the god's cards.
+  // Patch the raw ledger: serializing normalized display data would rewrite unrelated fields.
   const move = async (status: HiveTask['status']) => {
     const next = tasks.map((t) => (t.id === task.id ? { ...t, status } : t));
     setTasks(next); // optimistic

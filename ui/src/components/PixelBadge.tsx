@@ -3,13 +3,8 @@ import { useTranslation } from 'react-i18next';
 
 export type StatusKind =
   | 'idle' | 'thinking' | 'working' | 'waiting' | 'blocked' | 'success' | 'ghost'
-  // #5C — richer states driven by real events: PreCompact/PostCompact hooks and
-  // the Lane A circuit breaker (#6) respectively.
   | 'compacting' | 'looping'
-  // Not an agent state at all — the USER has unsubmitted text on that agent's
-  // prompt, which holds its queue. Never stored on the agent (the pty parser
-  // would overwrite it); derived at render, see `hasTerminalDraft`. Without it
-  // a held queue looked identical to an idle agent doing nothing.
+  // Typing reflects an unsent user draft, derived at render time.
   | 'typing';
 
 export interface PixelBadgeProps {
@@ -31,9 +26,7 @@ const colorByStatus: Record<StatusKind, string> = {
   typing:     'var(--cth-status-typing)'
 };
 
-// i18n key per status. "blocked" is reserved for the god agent waiting on YOU,
-// so it reads as "needs you"; sub-agents waiting on god/another agent are
-// "waiting", which is honest about who they're actually stalled on.
+// Blocked means waiting on the user; waiting means waiting on another agent.
 const labelKeyByStatus: Record<StatusKind, string> = {
   idle:     'badge.idle',
   thinking: 'badge.thinking',
@@ -44,8 +37,6 @@ const labelKeyByStatus: Record<StatusKind, string> = {
   ghost:    'badge.ghost',
   compacting: 'badge.compacting',
   looping:    'badge.looping',
-  // Reads as "you are typing", not "the agent is typing" — it is your text
-  // sitting on the prompt, and it is why nothing is being delivered.
   typing:     'badge.typing'
 };
 
@@ -58,8 +49,7 @@ export function PixelBadge({ status, label, style }: PixelBadgeProps) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        // Same reason as PixelButton: a status chip that shrinks spills its text
-        // under the controls beside it instead of holding its own width.
+        // Keep the chip wide enough for its label.
         flexShrink: 0,
         gap: 6,
         padding: '2px 8px 0',

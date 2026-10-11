@@ -1,9 +1,4 @@
-// Build the memory-graph model from existing hive data — no new IPC needed.
-// Inputs come straight from the preload bridge / store:
-//   - agents:   useStore(s => s.agents)
-//   - log:      window.cth.hiveLog(200)   (we read kind:'message' entries)
-//   - memories: window.cth.hiveMemory(id) per agent (only when topics are on)
-// See MEMORY_GRAPH_SPEC.md §3–§5.
+// Build agent, message and optional topic layers from bridge data.
 
 import type { AccentColorName } from '@/design/tokens';
 import type { StatusKind } from '@/components/PixelBadge';

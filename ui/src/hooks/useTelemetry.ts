@@ -1,17 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-/**
- * Renderer-side consumers of the live telemetry stream (#7B).
- *
- * The main-process collector (telemetry.ts) pushes normalized, PII-free events
- * on `telemetry:event` and breaker state on `control:breakerState`. These hooks
- * subscribe + backfill from the cold-start snapshot, and shape the data for the
- * fleet grid (`useFleetTelemetry`) and the per-agent span waterfall
- * (`useAgentSpans`).
- *
- * Types mirror the LOCKED contract in src/main/telemetry.ts + src/preload (kept
- * in sync by hand, matching the codebase's local-redeclare pattern).
- */
+/** Subscribe to bridge telemetry and backfill snapshots on mount. */
 
 export interface AgentUsageSample {
   agentId: string;
@@ -61,7 +50,7 @@ export function cacheFraction(s: AgentUsageSample): number {
 
 /** Per-agent rolling token deltas (for the sparkline) plus a simple tokens/min. */
 interface Rate {
-  deltas: number[]; // most recent first-N token deltas between pushes
+  deltas: number[]; // recent token deltas, oldest first
   firstTs: number;
   firstTotal: number;
   lastTs: number;

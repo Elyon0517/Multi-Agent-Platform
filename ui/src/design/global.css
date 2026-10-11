@@ -186,12 +186,8 @@ canvas, img, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
   * { animation-duration: 0s !important; transition-duration: 0s !important; }
 }
 
-/* xterm: disable font ligatures.
- * Some browsers (e.g. Firefox 130+) treat sequences like "ff"/"ft"/"fi" as
- * ligatures, which breaks xterm's per-char width measuring: an "f" gets measured
- * too narrow and renders with a trailing gap ("f or" instead of "for"). Forcing
- * ligatures off on both the measure container and the rendered rows keeps the
- * monospace grid correct. See xtermjs/xterm.js#5156. */
+/* Disable ligatures in xterm measurement and rendering to preserve cell widths.
+ * See xtermjs/xterm.js#5156. */
 .xterm,
 .xterm-rows,
 .xterm-width-cache-measure-container {

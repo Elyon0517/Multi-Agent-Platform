@@ -1,14 +1,6 @@
 import { useEffect, useState } from 'react';
 
-/**
- * Reveal `text` character by character.
- * `seed` resets the animation when it changes — pass a timestamp so identical
- * strings re-stream when the agent emits the same line twice.
- *
- * @param text  The full string to reveal.
- * @param seed  Any value; changing it restarts the typewriter.
- * @param cps   Characters per second. Default 90.
- */
+/** Reveal text at cps characters per second; changing seed restarts the animation. */
 export function useTypewriter(text: string, seed: unknown, cps = 90): {
   shown: string;
   done: boolean;
