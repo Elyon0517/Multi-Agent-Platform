@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, type Project, type Conversation } from '@/api/client';
+import { api, type Project, type Conversation, type RunDetail } from '@/api/client';
+import { ApprovalBar } from './ApprovalBar';
 import { useStore } from '@/store/store';
 import { PixelButton } from '@/components/PixelButton';
 import { Icon } from '@/components/Icon';
@@ -22,9 +23,13 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: { collapsed: bo
     api.projects().then(p => { if (alive) setProjects(p); }).catch(e => { if (alive) setError(String(e)); });
     return () => { alive = false; };
   }, [activeProjectId, runs]);
+  // Clear the list only when the project changes; refreshes (run events, switching conversations) update it in
+  // place, otherwise the list flashes empty and the expanded project looks like it failed to open.
+  const loadedScope = useRef<string | null>(null);
   useEffect(() => {
     let alive = true;
-    setThreads([]); setError(null);
+    if (loadedScope.current !== scope) { setThreads([]); loadedScope.current = scope; }
+    setError(null);
     const reload = () => {
       void api.threads(scope).then(ts => { if (alive) { setThreads(ts); if (scope === 'global') setGlobalThreads(ts); } }).catch(e => { if (alive) setError(String(e)); });
       if (scope !== 'global') void api.threads('global').then(ts => { if (alive) setGlobalThreads(ts); }).catch(e => { if (alive) setError(String(e)); });
@@ -64,7 +69,16 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: { collapsed: bo
     if (!window.confirm(t('lab.deleteConversationConfirm', { title: conversationTitle(thread) }))) return;
     setError(null);
     try {
-      await api.deleteThread(projectId ?? 'global', thread.id);
+      try {
+        await api.deleteThread(projectId ?? 'global', thread.id);
+      } catch (e) {
+        // A task still running or waiting in this conversation: offer to stop it, then delete.
+        if (!String(e).includes('unfinished run') || !window.confirm(t('lab.stopAndDeleteConversation'))) throw e;
+        const unfinished = (await api.runs(projectId ?? undefined))
+          .filter((r) => r.thread_id === thread.id && r.status !== 'DONE' && r.status !== 'CANCELLED');
+        await Promise.all(unfinished.map((r) => api.cancelRun(r.id)));
+        await api.deleteThread(projectId ?? 'global', thread.id);
+      }
       setThreads((old) => old.filter((x) => x.id !== thread.id));
       setGlobalThreads((old) => old.filter((x) => x.id !== thread.id));
       if (useStore.getState().activeThreadId === thread.id) setActiveThread(null);
@@ -137,11 +151,12 @@ export function ConversationView() {
   const [busy, setBusy] = useState(false);
   const [delta, setDelta] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [approvals, setApprovals] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [toolBusy, setToolBusy] = useState(false);
   const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
   const [runStatus, setRunStatus] = useState<Record<string, string>>({});
+  const [runDetails, setRunDetails] = useState<Record<string, RunDetail>>({});
+  const [refreshTick, setRefreshTick] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
@@ -155,7 +170,7 @@ export function ConversationView() {
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }, [draft]);
   useEffect(() => {
-    setThread(null); setDraft(''); setDelta(''); setBusy(false); setError(null); setApprovals({}); setPending(null);
+    setThread(null); setDraft(''); setDelta(''); setBusy(false); setError(null); setPending(null);
     stickToBottom.current = true;
     if (!activeThreadId) return;
     let alive = true;
@@ -179,12 +194,12 @@ export function ConversationView() {
     const ids = [...new Set(thread.messages.filter((m) => m.run_id).map((m) => m.run_id!))];
     void Promise.all(ids.map(async (id) => {
       const detail = await api.run(id);
-      return [id, detail.pending_approval?.id ?? '', detail.run.status] as const;
+      return [id, detail.run.status, detail] as const;
     })).then((items) => {
       if (!alive) return;
-      setApprovals(Object.fromEntries(items.map(([id, approval]) => [id, approval])));
-      setRunStatus(Object.fromEntries(items.map(([id, , status]) => [id, status])));
-      const active = items.filter(([, , status]) => status !== 'DONE' && status !== 'CANCELLED').map(([id]) => id);
+      setRunDetails(Object.fromEntries(items.map(([id, , detail]) => [id, detail])));
+      setRunStatus(Object.fromEntries(items.map(([id, status]) => [id, status])));
+      const active = items.filter(([, status]) => status !== 'DONE' && status !== 'CANCELLED').map(([id]) => id);
       setActiveRunIds(active);
       // Follow the conversation's running task so the office and agent strip show its live events, even when
       // the task was started elsewhere (another tab, the API or a project step).
@@ -199,7 +214,7 @@ export function ConversationView() {
       }
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [thread]);
+  }, [thread, refreshTick]);
   // Follow new content only while the reader is already at the bottom; opening a conversation always jumps there.
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -229,13 +244,6 @@ export function ConversationView() {
       }
     } catch (e) { if (current()) { setError(String(e)); setDraft(text); } }
     finally { if (current()) { useStore.getState().setRootBusy(false); setBusy(false); setDelta(''); setPending(null); } }
-  };
-  const decideRun = (runId: string, decision: 'approve' | 'reject' | 'abort') => {
-    const feedback = decision === 'reject' ? window.prompt('Feedback') : undefined;
-    if (decision === 'reject' && feedback === null) return;
-    void api.decide(runId, decision, feedback ?? undefined).then(() => {
-      if (current()) setApprovals((old) => ({ ...old, [runId]: '' }));
-    }).catch((e) => { if (current()) setError(String(e)); });
   };
   const stopRuns = () => {
     setStopping(true); setError(null);
@@ -287,13 +295,6 @@ export function ConversationView() {
                     <button type="button" disabled={toolBusy} onClick={() => decideTool(String(m.payload.approval_id), 'deny')}>{t('lab.denyTool')}</button>
                   </div>
                 )}
-                {m.kind === 'approval' && m.run_id && approvals[m.run_id] && m.payload?.approval_id === approvals[m.run_id] && (
-                  <div className="chat-actions">
-                    <button type="button" className="primary" onClick={() => decideRun(m.run_id!, 'approve')}>{t('lab.approve')}</button>
-                    <button type="button" onClick={() => decideRun(m.run_id!, 'reject')}>{t('lab.reject')}</button>
-                    <button type="button" onClick={() => decideRun(m.run_id!, 'abort')}>{t('lab.abort')}</button>
-                  </div>
-                )}
               </article>
             );
           })}
@@ -312,6 +313,14 @@ export function ConversationView() {
           )}
         </div>
       </div>
+      {/* Decisions the team is waiting for sit right above the composer, like Claude / Codex permission prompts. */}
+      {Object.values(runDetails).filter((d) => d.pending_approval).map((d) => (
+        <div key={d.pending_approval!.id} className="chat-decision">
+          <div className="chat-decision-title">{t('lab.run')} · {d.run.goal.slice(0, 120)}</div>
+          <ApprovalBar runId={d.run.id} approval={d.pending_approval!} detail={d}
+            onDecided={() => setRefreshTick((n) => n + 1)} />
+        </div>
+      ))}
       {activeThreadId && (
         <form className="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>
           <textarea ref={composer} aria-label="Message root" rows={3} value={draft} maxLength={20000} disabled={busy}

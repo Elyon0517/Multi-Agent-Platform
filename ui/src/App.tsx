@@ -8,11 +8,9 @@ import { PixelPanel } from '@/components/PixelPanel';
 import { PixelButton } from '@/components/PixelButton';
 import { TasksKanban } from '@/components/TasksKanban';
 import { TaskDetailOverlay } from '@/components/TaskDetailOverlay';
-import { AskMeTab } from '@/components/AskMeTab';
 import { AgentStrip } from '@/components/AgentStrip';
 import { RunTimeline } from '@/views/RunTimeline';
 import { VerdictBoard } from '@/views/VerdictBoard';
-import { ApprovalBar } from '@/views/ApprovalBar';
 import { AgentDetail } from '@/views/AgentDetail';
 import { ActivityView } from '@/views/ActivityView';
 import { KnowledgeView } from '@/views/KnowledgeView';
@@ -32,7 +30,7 @@ import { ProjectSidebar, ConversationView } from '@/views/ProjectSidebar';
 const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'chat', label: 'conversation' },
   { key: 'runs', label: 'runs' }, { key: 'project', label: 'project' }, { key: 'tasks', label: 'tasks' },
-  { key: 'human', label: 'askMe' }, { key: 'memory', label: 'memory' },
+  { key: 'memory', label: 'memory' },
   { key: 'activity', label: 'activity' }, { key: 'monitor', label: 'monitor' }, { key: 'settings', label: 'settings' },
 ];
 
@@ -127,7 +125,6 @@ export function App() {
           {error && <div style={{ flexBasis: '100%' }}><Status error={error} /></div>}
         </header>
         <OfficeMonitor minimized={layout.officeMinimized} onMinimizedChange={(officeMinimized) => updateLayout({ officeMinimized })} />
-        {detail?.run.id === activeRunId && detail?.pending_approval && <ApprovalBar key={detail.pending_approval.id} runId={detail.run.id} approval={detail.pending_approval} detail={detail} />}
         <AgentStrip />
       </main>
       <ConsoleSplitter width={layout.consoleWidth} leftWidth={sidebarWidth} onChange={(consoleWidth) => updateLayout({ consoleWidth })} />
@@ -172,7 +169,6 @@ export function App() {
           )}
           {tab === 'project' && <ProjectView onRunStarted={(id) => void openRun(id)} />}
           {tab === 'tasks' && <TasksKanban />}
-          {tab === 'human' && <AskMeTab />}
           {tab === 'memory' && <KnowledgeView key={activeProjectId ?? 'global'} />}
           {tab === 'activity' && <ActivityView />}
           {tab === 'monitor' && <MonitorView />}

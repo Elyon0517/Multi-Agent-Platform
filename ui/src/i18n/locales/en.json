@@ -1591,7 +1591,8 @@
     "checkCommandsHint": "One per line, e.g. npm run typecheck. The coder runs them in its own worktree (gate_run) and signoff requires them to pass. Leave empty for no automated checks.",
     "coderSaid": "Coder said",
     "stopRun": "Stop",
-    "stopRunTitle": "Stop the running task in this conversation"
+    "stopRunTitle": "Stop the running task in this conversation",
+    "stopAndDeleteConversation": "This conversation has a task that is running or waiting. Stop the task and delete the conversation?"
   },
   "monitor": {
     "loading": "Loading usage…",
