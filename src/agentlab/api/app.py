@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 from collections.abc import AsyncIterator
@@ -54,6 +55,10 @@ class PickedFolder(BaseModel):
     path: str | None
 
 
+class ToolDecisionBody(BaseModel):
+    decision: Literal["allow", "deny"]
+
+
 class RosterEntry(BaseModel):
     role: str
     kind: Literal["worker", "reviewer", "deterministic"]
@@ -75,7 +80,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
     svc = svc or build_services()
     drivers: dict[str, Driver] = {}
     tasks: set[asyncio.Task[Run]] = set()
-    app = FastAPI(title="Agent Converge", version="0.1.0")
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        await svc.mcp.close()
+
+    app = FastAPI(title="Agent Converge", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -289,6 +299,49 @@ def create_app(svc: Services | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(404, "conversation not found in this project") from exc
         return {"deleted": True}
+
+    @app.get("/mcp/status")
+    def mcp_status() -> list[dict[str, Any]]:
+        return svc.mcp.status()
+
+    @app.post("/projects/{project_id}/threads/{thread_id}/tool-approvals/{approval_id}")
+    async def decide_tool(project_id: str | None, thread_id: str, approval_id: str,
+                          body: ToolDecisionBody) -> dict[str, str]:
+        """Run (or refuse) an external tool Root asked for; the outcome is posted to the conversation."""
+        from agentlab.adapters.mcp import describe
+        from agentlab.core.conversation import Message
+        from agentlab.core.schemas import Event, EventType
+        from agentlab.core.session.store import append_message
+
+        with svc.store.lock_run("tool-approval:" + approval_id):
+            record = next((r for r in svc.store.records("mcp_approval") if r.get("id") == approval_id), None)
+            if not record or record["thread_id"] != thread_id or record.get("project_id") != project_id:
+                raise HTTPException(404, "approval not found in this conversation")
+            if record["status"] != "pending":
+                raise HTTPException(409, f"already {record['status']}")
+            if body.decision == "deny":
+                record["status"], text = "denied", f"Rejected `{record['tool']}`; it was not run."
+            else:
+                tool = next((t for t in await svc.mcp.tools("root") if t.qualified == record["tool"]), None)
+                if tool is None:
+                    raise HTTPException(503, "the tool's MCP server is not available")
+                try:
+                    result = await svc.mcp.call(tool, record["args"])
+                    record["status"] = "failed" if result.get("error") else "done"
+                    text = f"Ran `{tool.qualified}`:\n```\n{describe(result)[:4000]}\n```"
+                except Exception as exc:
+                    record["status"], text = "failed", f"`{tool.qualified}` failed: {type(exc).__name__}"
+            svc.store.put_record("mcp_approval", approval_id, record)
+            message = append_message(svc.store, thread_id, project_id, Message(
+                author="system", kind="tool_result", text=text, payload={"approval_id": approval_id},
+            ))
+        svc.bus.publish(Event(run_id="thread:" + thread_id, type=EventType.MESSAGE_CREATED, actor="root",
+                              payload={"message": message.model_dump(mode="json")}))
+        return {"status": record["status"]}
+
+    @app.post("/threads/{thread_id}/tool-approvals/{approval_id}")
+    async def decide_global_tool(thread_id: str, approval_id: str, body: ToolDecisionBody) -> dict[str, str]:
+        return await decide_tool(None, thread_id, approval_id, body)
 
     @app.delete("/threads/{thread_id}")
     def delete_global_thread(thread_id: str) -> dict[str, bool]:

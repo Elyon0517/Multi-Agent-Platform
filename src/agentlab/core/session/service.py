@@ -111,9 +111,17 @@ class SessionService:
                 )
             )
 
+        external = {tool.qualified: tool for tool in await svc.mcp.tools("root")}
+        specs.extend(tool.spec for tool in external.values())
+
         web_sources: list[Source] = []
 
         async def execute(name: str, args: dict[str, Any]) -> Any:
+            if name in external:
+                tool = external[name]
+                if tool.read_only:
+                    return await svc.mcp.call(tool, args)
+                return request_tool_approval(svc, project_id, thread_id, tool.qualified, args)
             if name == "web_search" and search_enabled:
                 if set(args) != {"query"} or not isinstance(args["query"], str):
                     raise ValueError("invalid search arguments")
@@ -232,3 +240,27 @@ class SessionService:
             )
             if ws:
                 ws.close()
+
+
+def request_tool_approval(
+    svc: Services, project_id: str | None, thread_id: str, tool: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    """A tool that changes outside state waits for the user: post an approval card instead of running it."""
+    from agentlab.adapters.mcp import describe
+    from agentlab.core.schemas import Event, EventType
+
+    approval_id = new_id()
+    svc.store.put_record("mcp_approval", approval_id, {
+        "id": approval_id, "thread_id": thread_id, "project_id": project_id, "tool": tool, "args": args,
+        "status": "pending",
+    })
+    message = append_message(svc.store, thread_id, project_id, Message(
+        author="assistant", kind="tool_approval", text=f"Root wants to run `{tool}`:\n```json\n{describe(args)}\n```",
+        payload={"approval_id": approval_id, "tool": tool},
+    ))
+    svc.bus.publish(Event(run_id="thread:" + thread_id, type=EventType.MESSAGE_CREATED, actor="root",
+                          payload={"message": message.model_dump(mode="json")}))
+    return {
+        "status": "approval_required", "approval_id": approval_id,
+        "note": "Not executed. The user approves or rejects it in the conversation; say what you asked for and why.",
+    }

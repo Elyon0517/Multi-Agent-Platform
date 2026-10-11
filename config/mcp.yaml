@@ -1,0 +1,17 @@
+# External tool servers (Model Context Protocol), started on first use.
+# Tools the server marks read-only (readOnlyHint) or listed in read_only_tools run without asking;
+# any other tool changes outside state and needs approval in the conversation first.
+# `roles` decides who sees a server: Root gets read-only tools plus approved writes, the planner read-only only.
+# ${VAR} is read from .env or the environment; GITHUB_PERSONAL_ACCESS_TOKEN falls back to `gh auth token`.
+servers:
+  github:
+    command: docker
+    args: [run, -i, --rm, -e, GITHUB_PERSONAL_ACCESS_TOKEN, ghcr.io/github/github-mcp-server]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN}
+    roles: [root, planner]
+  fetch:
+    command: uvx
+    args: [mcp-server-fetch]
+    roles: [root, planner]
+    read_only_tools: [fetch]
