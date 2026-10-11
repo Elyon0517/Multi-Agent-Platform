@@ -97,9 +97,9 @@ async def test_workspace_rejects_a_second_unfinished_run(tmp_path: Path) -> None
     await first.workspace.ensure_repo()
     run = await first.create_async("first")
     second = svc.driver(ws, "fake", "python")
-    with pytest.raises(RunBusy, match="unfinished run"):
+    with pytest.raises(RunBusy, match="another task is running"):
         await second.create_async("second")
-    with pytest.raises(RunBusy, match="unfinished run"):
+    with pytest.raises(RunBusy, match="another task is running"):
         second.create("second via CLI")
     assert len(svc.store.list_runs()) == 1
     assert svc.store.get_run(run.id).goal == "first"
@@ -166,9 +166,17 @@ def test_project_step_run_gets_a_conversation_and_terminal_message(tmp_path: Pat
         assert response.status_code == 200, response.text
         run = response.json()
         assert run["thread_id"]
-        # Runs in one project no longer block each other: each gets its own worktree.
+        # A run waiting for a decision does not block a new one in the same repository.
+        for _ in range(100):
+            if client.get(f'/runs/{run["id"]}').json()["run"]["status"] == "WAITING_HUMAN":
+                break
+            time.sleep(0.1)
         second = client.post("/runs", json={"goal": "second", "project_id": project.id, "runtime": "fake"})
-        assert second.status_code == 200 and second.json()["workspace"] != run["workspace"]
+        assert second.status_code == 200 and second.json()["workspace"] == run["workspace"]
+        # While the second task executes, approving the first would collide in the same files: refused clearly.
+        blocked = client.post(f'/runs/{run["id"]}/decision', json={"decision": "approve"})
+        assert blocked.status_code == 409 and "another task is running" in blocked.text
+        assert client.post(f'/runs/{second.json()["id"]}/cancel').json()["status"] == "CANCELLED"
         threads = client.get(f"/projects/{project.id}/threads").json()
         first = next(t for t in threads if t["id"] == run["thread_id"])
         assert first["messages"][0]["run_id"] == run["id"]

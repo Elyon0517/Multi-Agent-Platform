@@ -152,8 +152,8 @@ def test_global_upload_project_plan_and_run_feed_memory_and_progress(tmp_path: P
 
         run = c.post("/runs", json={"goal": "Python calc add", "runtime": "fake", "language": "python",
                                     "project_id": project["id"], "step_id": step["id"]}).json()
-        # The run works in its own worktree; the project repository is only touched on signoff.
-        assert Path(run["workspace"]).parent == (tmp_path / "worktrees").resolve()
+        # Branch mode: the run edits the project repository directly.
+        assert Path(run["workspace"]) == workspace.resolve()
         assert c.get(f"/projects/{project['id']}").json()["phases"][0]["steps"][0]["status"] == "doing"
         for _ in range(100):
             if c.get(f"/runs/{run['id']}").json()["run"]["status"] == "WAITING_HUMAN":

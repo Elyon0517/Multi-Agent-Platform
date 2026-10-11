@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agentlab.bootstrap import MissingGatewayConfig, Services
 from agentlab.core.loop.driver import Driver
+from agentlab.core.loop.states import ACTIVE
 from agentlab.core.ports import RunBusy, execution_error_reason
 from agentlab.core.schemas import Run, new_id
 from agentlab.demo import seed_demo_workspace
@@ -69,8 +70,18 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
     if not body.goal.strip() or len(body.goal) > 20000:
         raise HTTPException(422, "goal must contain 1 to 20000 characters")
     run_id = new_id()
-    # Each run works in its own worktree, so runs in one repository never block or overwrite each other.
-    isolation = await _isolate(svc, Path(body.workspace), run_id) if body.workspace else None
+    settings = svc.projects.get(body.project_id).settings if body.project_id else None
+    isolation = None
+    if body.workspace and settings and settings.workspace_mode == "worktree":
+        # Opt-in: an isolated copy per run, applied back on signoff, so parallel runs never collide.
+        isolation = await _isolate(svc, Path(body.workspace), run_id)
+    elif body.workspace:
+        # Default: edit the user's repository directly so changes show up in their IDE as they happen.
+        # Refuse before switching branches, so a busy workspace is left exactly as it was.
+        root = str(Path(body.workspace).resolve())
+        if any(r.workspace == root and r.status in ACTIVE for r in svc.store.list_runs()):
+            raise RunBusy("another task is running in this workspace; stop it or wait until it pauses")
+        await _on_run_branch(Path(body.workspace), run_id)
     ws = (
         Path(isolation["path"]) if isolation
         else Path(body.workspace) if body.workspace
@@ -141,6 +152,22 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
         except (KeyError, StopIteration) as e:
             raise HTTPException(404, "project or step not found") from e
     return run, driver
+
+
+async def _on_run_branch(workspace: Path, run_id: str) -> str | None:
+    from agentlab.adapters.workspace import GitWorkspace
+    from agentlab.adapters.worktree import prepare_branch
+
+    repo = GitWorkspace(workspace)
+    try:
+        await repo.ensure_repo()
+        return await asyncio.to_thread(prepare_branch, repo.root, run_id)
+    except Exception as exc:
+        reason = execution_error_reason(exc)
+        status = 422 if reason in {"workspace_unreadable", "workspace_escape", "workspace_root_required"} else 503
+        raise HTTPException(status, {"reason": reason, "error_type": type(exc).__name__}) from exc
+    finally:
+        repo.close()
 
 
 async def _isolate(svc: Services, workspace: Path, run_id: str) -> dict[str, str] | None:

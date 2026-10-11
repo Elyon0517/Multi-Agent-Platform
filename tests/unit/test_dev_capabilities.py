@@ -64,11 +64,7 @@ def test_stop_cancels_a_run_that_is_executing(tmp_path: Path) -> None:
         stopped = client.post(f"/runs/{run['id']}/cancel")
         assert stopped.status_code == 200 and stopped.json()["status"] == "CANCELLED"
         assert client.post(f"/runs/{run['id']}/cancel").json()["status"] == "CANCELLED"  # idempotent
-        for _ in range(100):
-            if not Path(run["workspace"]).exists():
-                break
-            time.sleep(0.05)
-        assert not Path(run["workspace"]).exists()
+        assert Path(run["workspace"]) == repo.resolve()  # branch mode: the run worked in the repository
 
 
 def test_project_check_commands_run_in_the_worktree_with_linked_dependencies(tmp_path: Path) -> None:
@@ -77,7 +73,7 @@ def test_project_check_commands_run_in_the_worktree_with_linked_dependencies(tmp
     (repo / "node_modules" / "pkg").mkdir(parents=True)
     check = f"{sys.executable} -c \"import pathlib; assert pathlib.Path('node_modules/pkg').is_dir(); print('checked')\""
     project = svc.projects.create("p", "fix add", str(repo))
-    project.settings = ProjectSettings(check_commands=[check])
+    project.settings = ProjectSettings(check_commands=[check], workspace_mode="worktree")
     svc.projects.save(project)
     with TestClient(create_app(svc)) as client:
         run = client.post("/runs", json={"goal": "fix add", "project_id": project.id, "runtime": "fake"}).json()
