@@ -138,7 +138,10 @@ class Driver:
     async def run(self, run_id: str) -> Run:
         with self.store.lock_run(run_id), self.store.lock_run("workspace:" + str(self.workspace.root)):
             self._reload_checkpoint(run_id)
-            return await self._run(run_id)
+            run = await self._run(run_id)
+        # Bookkeeping after a pause or the end (a summary may call a model for many seconds) runs once the
+        # locks are released, so an approval can be decided the moment it appears.
+        return await self._after_run(run)
 
     async def _run(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)
@@ -168,6 +171,9 @@ class Driver:
                 )
                 log.error("run %s paused in %s: %s", run.id, run.status, type(exc).__name__)
             self.store.save_run(run)
+        return run
+
+    async def _after_run(self, run: Run) -> Run:
         if run.status == RunStatus.WAITING_HUMAN:
             on_waiting = getattr(self.hooks, "on_waiting", None)
             if on_waiting:

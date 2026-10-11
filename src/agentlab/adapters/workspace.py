@@ -22,6 +22,15 @@ class WorkspaceNotFound(FileNotFoundError):
     kind = "not_found"
 
 
+class SourceUnavailable(ValueError):
+    """An ordinary read failure (a directory, a large or binary file). The agent gets the error and can try
+    another path; unlike WorkspaceEscape it is not a boundary violation and must not pause the run."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
 class PersistentDirectory:
     def __init__(self, path: Path) -> None:
         self.name = str(path.resolve())
@@ -334,11 +343,22 @@ class GitWorkspace:
         path = self._resolve(rel)
         if not path.exists() and not (self.root / rel).is_symlink():
             raise WorkspaceNotFound(f"source file not found: {rel}")
-        if (self.root / rel).is_symlink() or not path.is_file() or path.stat().st_size > 100_000:
+        if (self.root / rel).is_symlink():
             raise WorkspaceEscape("unreadable source")
-        text = self.read(rel)
-        if "\0" in text or self._secret_text(text):
-            raise WorkspaceEscape("secret or binary content")
+        if path.is_dir():
+            raise SourceUnavailable("is_directory: read a file inside it, or use an empty path to list files")
+        if not path.is_file():
+            raise SourceUnavailable("not_a_regular_file")
+        if path.stat().st_size > 100_000:
+            raise SourceUnavailable("file_too_large")
+        try:
+            text = self.read(rel)
+        except UnicodeDecodeError as exc:
+            raise SourceUnavailable("binary_file") from exc
+        if "\0" in text:
+            raise SourceUnavailable("binary_file")
+        if self._secret_text(text):
+            raise WorkspaceEscape("secret content")
         return text[:12000]
 
     async def inspect_git(self, command: str, ref: str = "", path: str = "") -> str:
