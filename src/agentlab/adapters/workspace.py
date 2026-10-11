@@ -54,6 +54,8 @@ class GitWorkspace:
         )
         self._object_env: dict[str, str] | None = None
         self._present_repositories: set[str] = set()
+        # Set when this workspace is a per-run worktree of the user's repository (see adapters/worktree.py).
+        self.isolation: dict[str, str] | None = None
 
     def _resolve(self, rel: str) -> Path:
         path = (self.root / rel).resolve()
@@ -87,6 +89,20 @@ class GitWorkspace:
     def close(self) -> None:
         self._snapshot_dir.cleanup()
 
+    def integrate_back(self) -> None:
+        """Apply an isolated run's changes to the user's repository; raises WorktreeConflict."""
+        if self.isolation:
+            from agentlab.adapters.worktree import integrate
+
+            integrate(self.isolation)
+
+    def release(self) -> None:
+        """Remove an isolated run's worktree and branch once the run has ended."""
+        if self.isolation:
+            from agentlab.adapters.worktree import remove
+
+            remove(self.isolation)
+
     def export_state(self) -> dict[str, object]:
         return {
             "root": str(self.root),
@@ -95,6 +111,7 @@ class GitWorkspace:
             "baseline_meta": self._baseline_meta,
             "edited_paths": sorted(self._edited_paths),
             "present_repositories": sorted(self._present_repositories),
+            "isolation": self.isolation,
         }
 
     def restore_state(self, state: dict[str, object]) -> None:
@@ -104,6 +121,7 @@ class GitWorkspace:
         self._baseline_meta = {str(k): (str(v[0]), str(v[1])) for k, v in dict(state["baseline_meta"]).items()}  # type: ignore[call-overload]
         self._edited_paths = set(state["edited_paths"])  # type: ignore[call-overload]
         self._present_repositories = set(state["present_repositories"])  # type: ignore[call-overload]
+        self.isolation = state.get("isolation")  # type: ignore[assignment]
         self._git_bytes("cat-file", "-e", self._baseline_tree)
 
     def _snapshot_env(self) -> dict[str, str]:

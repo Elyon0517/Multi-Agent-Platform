@@ -253,9 +253,6 @@ async def play(client: httpx.AsyncClient, tag: str, manual: bool) -> str:
     )
     created.raise_for_status()
     run_id = created.json()["id"]
-    if tag == "S1":  # boundary: a second run on a busy workspace must be refused, not started
-        busy = await client.post("/runs", json={"goal": "[S1] duplicate", "workspace": str(workspace)})
-        print(f"   check: second run on the same workspace → HTTP {busy.status_code} (expect 409)")
     seen: set[str] = set()
     deadline = time.monotonic() + 240 / state["speed"]
     while time.monotonic() < deadline:

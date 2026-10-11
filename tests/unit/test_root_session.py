@@ -195,8 +195,9 @@ def test_global_chat_and_busy_workspace_reply(tmp_path):
         thread = client.post(f"/projects/{project.id}/threads", json={"title": "busy"}).json()
         svc.store.create_run(Run(project_id=project.id, workspace=str(ws), goal="existing"))
         result = client.post(f"/projects/{project.id}/threads/{thread['id']}/messages", json={"text": "fix add"}).json()
-        assert result["run"] is None and "worktree" in result["message"]["text"]
-        assert len(svc.store.list_runs()) == 1
+        # An unfinished run in the same repository no longer blocks a new task.
+        assert result["run"] is not None and result["run"]["workspace"] != str(ws.resolve())
+        assert len(svc.store.list_runs()) == 2
         # A foreign project cannot read or post to this conversation.
         foreign = svc.projects.create("foreign", "fix", str(seed_demo_workspace(tmp_path / "foreign")))
         assert (
