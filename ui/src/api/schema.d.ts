@@ -1511,7 +1511,7 @@ export interface components {
             budget_cents: number;
             /**
              * Budget Unlimited
-             * @default false
+             * @default true
              */
             budget_unlimited: boolean;
             /**

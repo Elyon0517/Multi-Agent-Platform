@@ -245,3 +245,5 @@ notices: [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md).
 If this project helps you, please consider giving it a star ⭐
 
 </div>
+
+Model spending is tracked without budget caps for conversations, runs, project planning, and summaries. Legacy budget settings remain accepted for compatibility but do not limit execution.

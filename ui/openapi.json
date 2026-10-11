@@ -4150,7 +4150,7 @@
           "budget_unlimited": {
             "type": "boolean",
             "title": "Budget Unlimited",
-            "default": false
+            "default": true
           },
           "cost_cents": {
             "type": "number",

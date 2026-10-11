@@ -9,7 +9,7 @@ export function RunTimeline({ detail }: { detail: RunDetail }) {
   return (
     <PixelPanel title={t('lab.runTitle', { id: run.id, status: run.status })}>
       <p style={{ margin: '0 0 8px' }}>
-        {run.goal} · {run.cost_cents.toFixed(2)} / {run.budget_unlimited ? '∞' : run.budget_cents.toFixed(0)}c · {t('lab.tokens')} {run.tokens_in + run.tokens_out}
+        {run.goal} · {run.cost_cents.toFixed(2)}c · {t('lab.tokens')} {run.tokens_in + run.tokens_out}
         {run.paused_reason && <strong> · {t('lab.paused')}: {run.paused_reason}</strong>}
       </p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--cth-font-mono)', fontSize: 11 }}>

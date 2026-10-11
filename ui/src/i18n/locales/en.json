@@ -1598,7 +1598,8 @@
     "workspaceModeWorktree": "An isolated copy per task, applied on signoff (parallel tasks)",
     "deliveryComplete": "Task completed",
     "deliveryNotice": "Changes are available in your working tree. Check the delivery report for remaining findings.",
-    "acknowledgeDelivery": "Got it"
+    "acknowledgeDelivery": "Got it",
+    "costTooltip": "Cost {{cost}} cents"
   },
   "monitor": {
     "loading": "Loading usage…",
@@ -1641,7 +1642,7 @@
     },
     "budget_exceeded": {
       "title": "Budget used up",
-      "body": "The run reached its budget. Enter a higher budget below and Approve to continue. Abort to stop here."
+      "body": "Budget limits have been removed. Approve to continue this older task."
     },
     "max_iter_exceeded": {
       "title": "Iteration limit reached",

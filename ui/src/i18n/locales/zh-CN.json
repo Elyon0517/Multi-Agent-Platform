@@ -1598,7 +1598,8 @@
     "workspaceModeWorktree": "每个任务一个隔离副本，终审后应用（适合并行任务）",
     "deliveryComplete": "任务已完成",
     "deliveryNotice": "修改已在当前工作区。剩余评审意见请查看交付报告。",
-    "acknowledgeDelivery": "确认"
+    "acknowledgeDelivery": "确认",
+    "costTooltip": "费用 {{cost}} 美分"
   },
   "monitor": {
     "loading": "正在加载用量…",
@@ -1641,7 +1642,7 @@
     },
     "budget_exceeded": {
       "title": "预算已用完",
-      "body": "这个任务的预算已经用完。在下方填入更高的预算后点批准继续。中止：到此为止。"
+      "body": "预算限制已移除。点击批准即可继续这个旧任务。"
     },
     "max_iter_exceeded": {
       "title": "达到迭代上限",

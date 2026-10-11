@@ -134,13 +134,10 @@ async def test_signoff_survives_restart(database_url, tmp_path):
 
 async def test_budget_and_abort_survive_restart(database_url, tmp_path):
     svc, d = await driver_for(database_url, tmp_path)
-    r = await d.run(d.create("fix add", budget_cents=0.01).id)
-    assert r.paused_reason == "budget_exceeded"
+    r = d.create("fix add", budget_cents=0.01)
+    d._escalate(r, "budget_exceeded", {"required_budget_cents": 500}, on_approve=RunStatus.PLANNING)
     restored = services(database_url, tmp_path).restore_driver(r.id)
-    required = svc.store.pending_approval(r.id).payload["required_budget_cents"]
-    with pytest.raises(ValueError):
-        restored.decide(r.id, "approve")
-    restored.decide(r.id, "approve", budget_cents=max(500, required))
+    restored.decide(r.id, "approve")
     r = await restored.run(r.id)
     assert r.paused_reason == "signoff"
     again = services(database_url, tmp_path).restore_driver(r.id)

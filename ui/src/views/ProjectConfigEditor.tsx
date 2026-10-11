@@ -119,16 +119,6 @@ export function ProjectConfigEditor({
             />
           </div>
         ))}
-      <Field id={`${prefix}-project-budget`} label={t('lab.budgetCents')}>
-        <input
-          id={`${prefix}-project-budget`}
-          type="number"
-          min="1"
-          style={inputStyle}
-          value={value.budget_cents}
-          onChange={(e) => update({ budget_cents: Number(e.target.value) })}
-        />
-      </Field>
       <Field id={`${prefix}-project-max-iter`} label={t('lab.maximumIterations')}>
         <input
           id={`${prefix}-project-max-iter`}

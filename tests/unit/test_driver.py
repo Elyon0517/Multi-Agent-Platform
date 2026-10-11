@@ -67,15 +67,12 @@ async def test_max_iter_escalates(cfg: AppConfig, tmp_path: Path) -> None:
     assert run.paused_reason == "max_iter_exceeded" and len(d.store.iterations(run.id)) == 3
 
 
-async def test_budget_pauses_and_resumes(cfg: AppConfig, tmp_path: Path) -> None:
+async def test_legacy_budget_does_not_pause_run(cfg: AppConfig, tmp_path: Path) -> None:
     d = await make_driver(cfg, tmp_path)
-    run = await d.run(d.create("fix add", budget_cents=0.15).id)
-    assert run.paused_reason == "budget_exceeded"
-    paused_at = d.store.pending_approval(run.id).on_approve  # type: ignore[union-attr]
-    run = d.decide(run.id, "approve", budget_cents=200)
-    assert run.status == paused_at
-    run = await d.run(run.id)
-    assert run.status == RunStatus.WAITING_HUMAN and run.paused_reason == "signoff"
+    run = await d.run(d.create("fix add", budget_cents=0.001, budget_unlimited=False).id)
+    assert run.paused_reason == "signoff"
+    assert run.cost_cents > run.budget_cents and run.budget_unlimited
+    assert not any(e.type == EventType.BUDGET_WARNING for e in d.store.events(run.id))
 
 
 async def test_reject_feeds_back_to_coder(cfg: AppConfig, tmp_path: Path) -> None:

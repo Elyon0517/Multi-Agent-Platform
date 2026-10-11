@@ -143,6 +143,11 @@ class Driver:
 
     async def _run(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)
+        run.budget_unlimited = True
+        approval = self.store.pending_approval(run_id)
+        if run.status == S.WAITING_HUMAN and approval and approval.reason == "budget_exceeded":
+            with self._atomic():
+                run = self._decide(run_id, "approve", by="system")
         unknown = [
             a for a in self.store.records("attempt") if a.get("run_id") == run_id and a.get("status") == "in_flight"
         ]
@@ -259,15 +264,6 @@ class Driver:
         if decision == "approve":
             if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
                 raise ValueError("feedback is required to resolve reviewer disagreement")
-            unlimited = run.budget_unlimited if budget_unlimited is None else budget_unlimited
-            if approval.reason == "budget_exceeded" and not unlimited:
-                required = approval.payload.get("required_budget_cents")
-                if (
-                    budget_cents is None
-                    or budget_cents <= run.budget_cents
-                    or (required is not None and budget_cents < float(required))
-                ):
-                    raise ValueError("increase budget to at least the required amount before resuming")
             if approval.reason == "max_iter_exceeded" and (max_iter is None or max_iter <= run.max_iter):
                 raise ValueError("increase max_iter before resuming")
             if approval.on_approve == S.DONE and approval.reason != "signoff":
@@ -284,8 +280,7 @@ class Driver:
         ):
             self.runtime = self.runtime_factory()  # reread gateway credentials when resuming
         run.budget_cents = budget_cents if budget_cents is not None else run.budget_cents
-        if budget_unlimited is not None:
-            run.budget_unlimited = budget_unlimited
+        run.budget_unlimited = True
         run.max_iter = max_iter if max_iter is not None else run.max_iter
         reject_state = S.CODING if self._latest_text(run, "plan") else S.PLANNING
         status_by_decision = {"approve": approval.on_approve, "reject": reject_state, "abort": S.CANCELLED}

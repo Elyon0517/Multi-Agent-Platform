@@ -16,7 +16,6 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
 }) {
   const { t } = useTranslation();
   const [feedback, setFeedback] = useState('');
-  const [budget, setBudget] = useState('');
   const [maxIter, setMaxIter] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,7 +26,6 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
     const decision = label === t('lab.approve') ? 'approve' : label === t('lab.abort') ? 'abort' : 'reject';
     try {
       await api.decide(runId, decision, feedback || undefined, {
-        budget_cents: budget ? Number(budget) : undefined,
         max_iter: maxIter ? Number(maxIter) : undefined,
       });
       onDecided?.();
@@ -78,11 +76,6 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
       {approval.reason === 'interrupted_call' && <p>{t('lab.interruptedCall')}</p>}
       {approval.reason !== 'signoff' && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <Field id="resume-budget" label={t('lab.resumeBudget')}
-            hint={approval.payload.required_budget_cents ? t('lab.requiredBudget', { value: approval.payload.required_budget_cents }) : undefined}>
-            <input id="resume-budget" type="number" min="0.01" step="0.01" style={inputStyle}
-              value={budget} onChange={(e) => setBudget(e.target.value)} />
-          </Field>
           <Field id="resume-max-iter" label={t('lab.resumeMaxIter')}>
             <input id="resume-max-iter" type="number" min="1" max="50" step="1" style={inputStyle}
               value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
