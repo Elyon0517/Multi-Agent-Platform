@@ -77,7 +77,7 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
         isolation = await _isolate(svc, Path(body.workspace), run_id)
     elif body.workspace:
         # Default: edit the user's repository directly so changes show up in their IDE as they happen.
-        # Refuse before switching branches, so a busy workspace is left exactly as it was.
+        # Refuse overlapping active runs, so simultaneous writers cannot race.
         root = str(Path(body.workspace).resolve())
         if any(r.workspace == root and r.status in ACTIVE for r in svc.store.list_runs()):
             raise RunBusy("another task is running in this workspace; stop it or wait until it pauses")
@@ -98,6 +98,7 @@ async def _create_run_service(svc: Services, body: CreateRun, *, record_user: bo
     try:
         driver = svc.driver(ws, body.runtime, body.language, body.project_id)
         driver.workspace.isolation = isolation  # type: ignore[attr-defined]
+        driver.recovery_options["complete_in_place"] = bool(body.workspace) and isolation is None
         if conversation:
             driver.recovery_options["conversation"] = [m.model_dump(mode="json") for m in conversation.messages[-20:]]
     except MissingGatewayConfig as e:

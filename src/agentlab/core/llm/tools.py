@@ -40,7 +40,12 @@ class WorkerTools:
         text = {"type": "string"}
         specs = {
             "workspace_read": tool_spec(
-                "workspace_read", "Read source path; empty path lists available context files", {"path": text}
+                "workspace_read",
+                "Read source path; empty path lists files. "
+                "Optional 1-based line_start/line_end read long files in chunks. "
+                "Dependency directories such as node_modules are excluded; use project source or API documentation.",
+                {"path": text, "line_start": {"type": "integer", "minimum": 1},
+                 "line_end": {"type": "integer", "minimum": 1}}
             ),
             "workspace_write": tool_spec(
                 "workspace_write", "Replace a workspace file with complete content", {"path": text, "content": text}
@@ -51,6 +56,7 @@ class WorkerTools:
                 "workspace_search", "Search source text in the workspace; returns path, line and text", {"query": text}
             ),
         }
+        specs["workspace_read"]["function"]["parameters"]["required"] = ["path"]
         # git_read grants every read-only Git inspection, including other branches and commits.
         git = {
             "git_status": tool_spec("git_status", "Read working tree status", {}),
@@ -86,13 +92,22 @@ class WorkerTools:
         if name not in granted:
             raise ValueError("tool not granted")
         props = granted[name]["function"]["parameters"]["properties"]
-        if set(args) != set(props) or any(not isinstance(v, str) for v in args.values()):
+        if name == "workspace_read":
+            if "path" not in args or set(args) - set(props) or not isinstance(args["path"], str):
+                raise ValueError("invalid tool arguments")
+            for key in ("line_start", "line_end"):
+                if key in args and (type(args[key]) is not int or args[key] < 1):
+                    raise ValueError("invalid line range")
+            if args.get("line_end", args.get("line_start", 1)) < args.get("line_start", 1):
+                raise ValueError("invalid line range")
+        elif set(args) != set(props) or any(not isinstance(v, str) for v in args.values()):
             raise ValueError("invalid tool arguments")
         if name == "workspace_read":
             if not args["path"]:
                 return sorted(await self.workspace.context_files())
             reader = getattr(self.workspace, "read_source", self.workspace.read)
-            return {"path": args["path"], "text": reader(args["path"])}
+            ranges = {key: args[key] for key in ("line_start", "line_end") if key in args}
+            return {"path": args["path"], "text": reader(args["path"], **ranges)}
         if name == "workspace_write":
             return {"paths": self.workspace.apply_edits([FileEdit(**args)])}
         if name.startswith("git_"):

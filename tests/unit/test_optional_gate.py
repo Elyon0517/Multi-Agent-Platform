@@ -98,9 +98,12 @@ def test_go_project_api_auto_detects_no_gate_and_labels_signoff(tmp_path):
         identifier = response.json()["id"]
         for _ in range(100):
             detail = client.get(f"/runs/{identifier}").json()
-            if detail["pending_approval"]:
+            if detail["run"]["status"] == "DONE":
                 break
             time.sleep(0.01)
-        assert detail["pending_approval"]["reason"] == "signoff"
-        assert detail["pending_approval"]["payload"]["automated_checks"] == "not_run"
+        assert detail["run"]["status"] == "DONE"
+        assert detail["pending_approval"] is None
+        approval = next(e for e in svc.store.events(identifier) if e.type == "approval.requested")
+        assert approval.payload["reason"] == "signoff"
+        assert approval.payload["payload"]["automated_checks"] == "not_run"
         assert not detail["gate_reports"]

@@ -44,22 +44,13 @@ def _commit(path: Path, message: str) -> str:
     return _git(path, "rev-parse", "HEAD").stdout.decode().strip()
 
 
-# Long-lived branches an agent run never edits directly; it switches to its own branch first.
-PROTECTED_BRANCHES = ("main", "master")
-
-
 def prepare_branch(repo: Path, run_id: str) -> str | None:
-    """Branch mode: work in the user's repository. Off main/master, switch to agentlab/<run> (uncommitted
-    changes come along); on any other branch, stay. Returns the branch the run works on."""
+    """Direct mode: keep the user's current branch and checkout, including main/master or detached HEAD.
+
+    No checkout, commit or push is performed. run_id is retained for API compatibility.
+    """
     current = _git(repo, "rev-parse", "--abbrev-ref", "HEAD", check=False)
-    if current.returncode != 0:
-        return None  # no commit yet
-    name = current.stdout.decode().strip()
-    if name not in PROTECTED_BRANCHES and name != "HEAD":
-        return name
-    branch = f"agentlab/{run_id}"
-    _git(repo, "checkout", "-q", "-b", branch)
-    return branch
+    return current.stdout.decode().strip() if current.returncode == 0 else None
 
 
 def create(repo: Path, path: Path, run_id: str) -> dict[str, str]:

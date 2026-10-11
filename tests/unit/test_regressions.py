@@ -78,6 +78,18 @@ async def test_budget_approval_requires_an_increase_and_auto_approve_stops(cfg, 
     assert driver.decide(run.id, "reject").status == RunStatus.PLANNING
 
 
+async def test_budget_pause_can_resume_with_explicit_unlimited_setting(cfg, tmp_path):  # type: ignore[no-untyped-def]
+    driver = await make_driver(cfg, tmp_path)
+    run = await driver.run(driver.create("fix add", budget_cents=0.01).id)
+    assert run.paused_reason == "budget_exceeded"
+    resumed = driver.decide(run.id, "approve", budget_unlimited=True)
+    assert resumed.budget_unlimited
+    assert driver.store.get_run(run.id).budget_unlimited
+    completed = await driver.run(run.id)
+    assert completed.paused_reason == "signoff"
+    assert completed.cost_cents > completed.budget_cents
+
+
 async def test_non_signoff_approval_never_marks_done(cfg, tmp_path):  # type: ignore[no-untyped-def]
     def stuck(_):  # type: ignore[no-untyped-def]
         return CoderOutput(edits=[FileEdit(path="calc.py", content="def add(a,b):\n    return 0\n")])

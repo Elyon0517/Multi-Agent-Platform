@@ -167,6 +167,8 @@ container. Other languages run without a Gate and are marked as untested at sign
 6. **⚙ Agent configuration** (console header) edits the current project's dispatch mode, models, budget and
    retrieval, with YAML export and import for version control.
 
+By default, agents edit the selected repository checkout on its current branch, including main/master, so changes are visible immediately in your IDE. Runs do not commit or push in this mode. Select worktree mode explicitly to isolate parallel runs; that mode uses private bookkeeping commits and applies changes back on signoff.
+
 Useful CLI commands:
 
 ```bash

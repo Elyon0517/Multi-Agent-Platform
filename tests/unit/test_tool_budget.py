@@ -8,7 +8,7 @@ from agentlab.core.conversation import RootTurn
 from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.llm.tools import tool_spec
 from agentlab.core.ports import RunContext
-from agentlab.core.schemas import AgentInput, Run
+from agentlab.core.schemas import AgentInput, Run, Usage
 from tests.unit.test_memory_project import _svc
 
 
@@ -48,3 +48,18 @@ async def test_runaway_tool_loop_stops_at_the_budget(tmp_path: Path):
             _ctx(run, BudgetGuard(run, 0.8, lambda _: None), execute),
         )
     assert chat.await_count < 10_000
+
+
+def test_unlimited_budget_keeps_usage_without_checks_or_warnings(tmp_path: Path):
+    run = Run(goal="finish", workspace=str(tmp_path), budget_cents=1, budget_unlimited=True)
+    warnings = []
+    guard = BudgetGuard(run, 0.8, warnings.append)
+    guard.reserve(1_000_000)
+    guard.record(Usage(cost_cents=10, tokens_in=20, tokens_out=5))
+    guard.check(1_000_000)
+    assert (run.cost_cents, run.tokens_in, run.tokens_out) == (10, 20, 5)
+    assert not warnings
+    guard.release(1_000_000)
+    run.budget_unlimited = False
+    with pytest.raises(BudgetExceeded):
+        guard.check()

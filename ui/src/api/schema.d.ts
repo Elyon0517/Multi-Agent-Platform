@@ -904,6 +904,8 @@ export interface components {
             feedback?: string | null;
             /** Budget Cents */
             budget_cents?: number | null;
+            /** Budget Unlimited */
+            budget_unlimited?: boolean | null;
             /** Max Iter */
             max_iter?: number | null;
         };
@@ -1507,6 +1509,11 @@ export interface components {
              * @default 500
              */
             budget_cents: number;
+            /**
+             * Budget Unlimited
+             * @default false
+             */
+            budget_unlimited: boolean;
             /**
              * Cost Cents
              * @default 0

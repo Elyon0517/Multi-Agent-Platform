@@ -226,10 +226,11 @@ class Driver:
         by: str = "human",
         budget_cents: float | None = None,
         max_iter: int | None = None,
+        budget_unlimited: bool | None = None,
     ) -> Run:
         with self.store.lock_run(run_id), self._atomic():
             self._reload_checkpoint(run_id)
-            return self._decide(run_id, decision, feedback, by, budget_cents, max_iter)
+            return self._decide(run_id, decision, feedback, by, budget_cents, max_iter, budget_unlimited)
 
     def _decide(
         self,
@@ -239,6 +240,7 @@ class Driver:
         by: str = "human",
         budget_cents: float | None = None,
         max_iter: int | None = None,
+        budget_unlimited: bool | None = None,
     ) -> Run:
         run = self.store.get_run(run_id)
         approval = self.store.pending_approval(run_id)
@@ -257,7 +259,8 @@ class Driver:
         if decision == "approve":
             if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
                 raise ValueError("feedback is required to resolve reviewer disagreement")
-            if approval.reason == "budget_exceeded":
+            unlimited = run.budget_unlimited if budget_unlimited is None else budget_unlimited
+            if approval.reason == "budget_exceeded" and not unlimited:
                 required = approval.payload.get("required_budget_cents")
                 if (
                     budget_cents is None
@@ -281,6 +284,8 @@ class Driver:
         ):
             self.runtime = self.runtime_factory()  # reread gateway credentials when resuming
         run.budget_cents = budget_cents if budget_cents is not None else run.budget_cents
+        if budget_unlimited is not None:
+            run.budget_unlimited = budget_unlimited
         run.max_iter = max_iter if max_iter is not None else run.max_iter
         reject_state = S.CODING if self._latest_text(run, "plan") else S.PLANNING
         status_by_decision = {"approve": approval.on_approve, "reject": reject_state, "abort": S.CANCELLED}
@@ -490,6 +495,13 @@ class Driver:
             "diff_ref": self._latest(run, "diff").content_ref,
             "automated_checks": "passed" if self.gate is not None else "not_run",
         }, on_approve=S.DONE, report=report)
+        # Current-checkout runs have already delivered their edits. Completion needs
+        # only a notification, not permission to apply changes that are already present.
+        if self.recovery_options.get("complete_in_place", False):
+            with self._atomic():
+                completed = self._decide(run.id, "approve", by="system")
+                run.status = completed.status
+                run.paused_reason = completed.paused_reason
 
     async def _agent(self, run: Run, role: str, inp: AgentInput, out: type[T]) -> AgentResult[T]:
         return (await self._agents(run, [role], inp, out))[0]

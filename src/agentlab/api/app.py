@@ -44,6 +44,7 @@ class DecideBody(BaseModel):
     decision: Decision
     feedback: str | None = None
     budget_cents: float | None = None
+    budget_unlimited: bool | None = None
     max_iter: int | None = None
 
 
@@ -447,7 +448,8 @@ def create_app(svc: Services | None = None) -> FastAPI:
                 raise HTTPException(409, f"recovery failed: {type(exc).__name__}") from exc
         try:
             run = driver.decide(
-                run_id, body.decision, body.feedback, budget_cents=body.budget_cents, max_iter=body.max_iter
+                run_id, body.decision, body.feedback, budget_cents=body.budget_cents, max_iter=body.max_iter,
+                budget_unlimited=body.budget_unlimited,
             )
         except (ValueError, MissingGatewayConfig, RunBusy) as e:
             raise HTTPException(409, str(e)) from e

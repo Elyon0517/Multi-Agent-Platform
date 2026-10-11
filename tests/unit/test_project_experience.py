@@ -166,27 +166,20 @@ def test_project_step_run_gets_a_conversation_and_terminal_message(tmp_path: Pat
         assert response.status_code == 200, response.text
         run = response.json()
         assert run["thread_id"]
-        # A run waiting for a decision does not block a new one in the same repository.
+        # Direct editing completes without a human decision and frees the checkout.
         for _ in range(100):
-            if client.get(f'/runs/{run["id"]}').json()["run"]["status"] == "WAITING_HUMAN":
+            detail = client.get(f'/runs/{run["id"]}').json()
+            if detail["run"]["status"] == "DONE":
                 break
             time.sleep(0.1)
+        assert detail["run"]["status"] == "DONE"
+        assert detail["pending_approval"] is None
         second = client.post("/runs", json={"goal": "second", "project_id": project.id, "runtime": "fake"})
         assert second.status_code == 200 and second.json()["workspace"] == run["workspace"]
-        # While the second task executes, approving the first would collide in the same files: refused clearly.
-        blocked = client.post(f'/runs/{run["id"]}/decision', json={"decision": "approve"})
-        assert blocked.status_code == 409 and "another task is running" in blocked.text
         assert client.post(f'/runs/{second.json()["id"]}/cancel').json()["status"] == "CANCELLED"
         threads = client.get(f"/projects/{project.id}/threads").json()
         first = next(t for t in threads if t["id"] == run["thread_id"])
         assert first["messages"][0]["run_id"] == run["id"]
-        for _ in range(100):
-            detail = client.get(f'/runs/{run["id"]}').json()
-            if detail["run"]["status"] == "WAITING_HUMAN":
-                break
-            time.sleep(0.1)
-        assert detail["pending_approval"]["reason"] == "signoff"
-        assert client.post(f'/runs/{run["id"]}/decision', json={"decision": "approve"}).status_code == 200
         for _ in range(100):
             threads = client.get(f"/projects/{project.id}/threads").json()
             messages = next(t for t in threads if t["id"] == run["thread_id"])["messages"]

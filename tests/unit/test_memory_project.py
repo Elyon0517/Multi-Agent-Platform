@@ -156,10 +156,10 @@ def test_global_upload_project_plan_and_run_feed_memory_and_progress(tmp_path: P
         assert Path(run["workspace"]) == workspace.resolve()
         assert c.get(f"/projects/{project['id']}").json()["phases"][0]["steps"][0]["status"] == "doing"
         for _ in range(100):
-            if c.get(f"/runs/{run['id']}").json()["run"]["status"] == "WAITING_HUMAN":
+            if c.get(f"/runs/{run['id']}").json()["run"]["status"] == "DONE":
                 break
             time.sleep(0.1)
-        c.post(f"/runs/{run['id']}/decision", json={"decision": "approve"})
+        assert c.get(f"/runs/{run['id']}").json()["pending_approval"] is None
         for _ in range(50):
             p = c.get(f"/projects/{project['id']}").json()
             if p["phases"][0]["steps"][0]["status"] == "done":

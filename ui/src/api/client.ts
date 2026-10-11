@@ -110,6 +110,7 @@ export const api = {
   roster: (projectId?: string, runId?: string) => json<RosterEntry[]>(`/roster?${new URLSearchParams({ ...(projectId ? { project_id: projectId } : {}), ...(runId ? { run_id: runId } : {}) })}`),
   runs: (projectId?: string) => json<Run[]>(`/runs${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   run: (id: string) => json<RunDetail>(`/runs/${id}`),
+  runHistory: (id: string) => json<LabEvent[]>(`/runs/${id}/events/history`),
   createRun: (body: CreateRunBody) => post<Run>('/runs', body),
   cancelRun: (id: string) => post<Run>(`/runs/${encodeURIComponent(id)}/cancel`, {}),
   decide: (id: string, decision: 'approve' | 'reject' | 'abort', feedback?: string,
