@@ -3794,6 +3794,15 @@
             "type": "array",
             "maxItems": 10,
             "title": "Check Commands"
+          },
+          "workspace_mode": {
+            "type": "string",
+            "enum": [
+              "branch",
+              "worktree"
+            ],
+            "title": "Workspace Mode",
+            "default": "branch"
           }
         },
         "additionalProperties": false,
@@ -3869,6 +3878,15 @@
             "type": "array",
             "maxItems": 10,
             "title": "Check Commands"
+          },
+          "workspace_mode": {
+            "type": "string",
+            "enum": [
+              "branch",
+              "worktree"
+            ],
+            "title": "Workspace Mode",
+            "default": "branch"
           }
         },
         "additionalProperties": false,
@@ -3882,7 +3900,8 @@
           "max_iter",
           "retrieval",
           "retrieval_k",
-          "check_commands"
+          "check_commands",
+          "workspace_mode"
         ],
         "title": "ProjectSettings"
       },
