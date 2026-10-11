@@ -101,7 +101,6 @@ class StructuredCaller:
         schema = output_type.model_json_schema()
         repairs = 0
         while repairs <= self._cfg.retry.structured_output_repair.max_repairs:
-            # No call-count cap: the budget guard (checked before every attempt and tool) bounds the loop.
             available_tools = ctx.tool_specs
             prompt_chars = (
                 len(system.encode())

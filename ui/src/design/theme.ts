@@ -1,16 +1,4 @@
-/**
- * App-wide theme (v0.3.4) — ONE light/dark switch for the whole UI, not just
- * the terminal.
- *
- * The entire renderer is styled through the `--cth-*` tokens, so dark mode is
- * a token swap: this module stamps `data-cth-theme` on <html> and tokens.css
- * carries the dark overrides. The xterm palette (PtyTerminalView) and the
- * per-agent Claude session theme (config.terminalTheme, applied on spawn)
- * follow the same state, so terminals and TUIs match the chrome.
- *
- * Shared subscribable module (same pattern as terminalFontSize): components
- * read it with `useAppTheme()`; the ONE toggle lives in the title bar.
- */
+/** Shared light/dark theme, applied through data-cth-theme and CSS tokens. */
 import { useSyncExternalStore } from 'react';
 
 export type AppTheme = 'light' | 'dark';

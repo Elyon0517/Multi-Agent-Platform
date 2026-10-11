@@ -1,13 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useAgentSpans, useFleetTelemetry, totalTokens, cacheFraction } from '@/hooks/useTelemetry';
 
-/**
- * Per-agent tool-call timeline (#7B.2) — a horizontal waterfall of tool spans
- * from live `tool_result` telemetry. Each bar is one tool call, width ∝ its
- * duration, mint=success / coral=failure. A header band shows cumulative cost
- * with the cache-vs-fresh split made visible (fixes cost bug #1.1.3). This is
- * the headline upgrade over the old bare tool-count proxy.
- */
+/** Tool span timeline with duration, outcome and cumulative usage. */
 export function ToolWaterfall({ agentId }: { agentId: string }) {
   const { t } = useTranslation();
   const spans = useAgentSpans(agentId);

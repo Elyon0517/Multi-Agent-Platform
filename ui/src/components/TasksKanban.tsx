@@ -8,9 +8,7 @@ import { useStore } from '@/store/store';
 import { MarkdownPreview } from '@/markdown/MarkdownPreview';
 import { useRtl } from '@/i18n/useDirection';
 
-/** A card on the task kanban. Mirrors HiveTask in the main/preload process —
- *  re-declared locally so the renderer doesn't reach into the preload package
- *  (same convention as store/config.ts). */
+/** Task shape exposed by the bridge. */
 export interface HumanQA {
   q: string;
   a?: string;
@@ -63,20 +61,14 @@ const COLUMNS: { key: Status; labelKey: string; accent: string }[] = [
 
 const POLL_MS = 5000;
 
-/** Deterministic fallback id derived from a task's content (djb2 → base36).
- *  Used for tasks lacking a valid string id so re-parsing tasks.json on every
- *  5s poll yields the SAME id — no React key churn / card remount. Unlike
- *  shortId() (random, for brand-new tasks), this never changes across polls. */
+/** Stable content-derived fallback id avoids remounting cards on each poll. */
 function stableId(seed: string): string {
   let h = 5381;
   for (let i = 0; i < seed.length; i++) h = (((h << 5) + h) ^ seed.charCodeAt(i)) | 0;
   return `t-${(h >>> 0).toString(36)}`;
 }
 
-/** Normalize whatever hive:tasks returns into a typed task array. The god
- *  writes this file by hand — every field except the shape itself is optional
- *  in practice, so EVERY consumer must go through this (exported for the
- *  detail overlay; a raw card without dependsOn once crashed it). */
+/** Normalize optional ledger fields for every task display. */
 export function parseTasks(raw: unknown): HiveTask[] {
   const list = (raw && typeof raw === 'object' && Array.isArray((raw as { tasks?: unknown }).tasks))
     ? (raw as { tasks: unknown[] }).tasks
@@ -111,20 +103,11 @@ export function parseTasks(raw: unknown): HiveTask[] {
     }));
 }
 
-/**
- * Task kanban over hive/tasks.json — a READ surface. Polls every 5s; cards
- * carry just the title and open the app-wide detail overlay on click. The god
- * is the ledger's writer: new work enters via the dispatch box (mailed to the
- * god), never by the human inserting cards the orchestrator never heard about.
- */
+/** Poll the task ledger and open task details when a card is selected. */
 export function TasksKanban() {
   const { t } = useTranslation();
   const agents = useStore((s) => s.agents);
   const [tasks, setTasks] = useState<HiveTask[]>([]);
-  // Detail view: cards show just the title — clicking one opens the full
-  // breakdown as an APP-WIDE overlay over the office floor (see
-  // TaskDetailOverlay) — the content grows (contracts, deps, human Q&A), so it
-  // gets the big stage instead of the narrow side panel.
   const openTaskDetail = useStore((s) => s.openTaskDetail);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -132,10 +115,7 @@ export function TasksKanban() {
     try { setTasks(parseTasks(await window.cth.hiveTasks())); } catch { /* keep last good */ }
   }, []);
 
-  // Dismiss a card off the board (human-initiated). The kanban is otherwise the
-  // god's to write, but a person can clear a card they no longer want tracked.
-  // Main removes the named id from its latest on-disk ledger, so a webhook or
-  // god card added since this renderer's last poll cannot be lost.
+  // Delete by id against the latest ledger so concurrent additions survive.
   const dismissTask = useCallback(async (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id)); // optimistic
     try {
@@ -220,11 +200,7 @@ export function TasksKanban() {
   );
 }
 
-// ─── Card ────────────────────────────────────────────────────────────────────
-// Deliberately minimal — a colored status edge, the task id, the title, a
-// whisper of an assignee. Everything else (the full contract, deps, controls)
-// lives in the detail view a click away: a kanban card can carry little more
-// than a title.
+// Task card
 
 function TaskCard({ task, accent, assigneeName, onOpen, onDismiss }: {
   task: HiveTask;
@@ -297,14 +273,7 @@ function TaskCard({ task, accent, assigneeName, onOpen, onDismiss }: {
   );
 }
 
-// ─── Detail view ─────────────────────────────────────────────────────────────
-// The full breakdown of one task: status, assignee, priority, the complete
-// description (the god writes 4-part dispatch contracts in there — preserved
-// line by line), dependencies resolved to their titles, the human Q&A trail,
-// and the move/assign controls that used to crowd every card. Rendered as an
-// APP-WIDE overlay (over the office floor) — this content grows, so it gets
-// the big stage instead of the narrow side panel. Exported for App's
-// TaskDetailOverlay; opened via the store's openTaskDetail from anywhere.
+// Task detail
 
 export function TaskDetail({ task, all, assigneeName, onMove, onAssign, onClose }: {
   task: HiveTask;
@@ -317,8 +286,7 @@ export function TaskDetail({ task, all, assigneeName, onMove, onAssign, onClose 
   const { t } = useTranslation();
   const rtl = useRtl();
   const col = COLUMNS.find((c) => c.key === task.status) ?? COLUMNS[0];
-  // Belt + suspenders: parseTasks normalizes these, but the ledger is a
-  // hand-written file — never trust a card's shape at the point of use.
+  // Guard optional fields even when called without normalization.
   const deps = (task.dependsOn ?? [])
     .map((id) => all.find((t) => t.id === id))
     .filter((t): t is HiveTask => !!t);

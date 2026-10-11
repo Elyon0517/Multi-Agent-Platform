@@ -1,23 +1,4 @@
-/**
- * Surviving a lost WebGL context.
- *
- * Chromium caps how many WebGL contexts one renderer process may hold (~16) and,
- * when a new one pushes past the cap, it EVICTS THE OLDEST — logging only
- * "WARNING: Too many active WebGL contexts. Oldest context will be lost."
- *
- * The office floor's context is created at app startup, so it is always the
- * oldest one alive. Every terminal xterm opens takes another context
- * (@xterm/addon-webgl), so on a busy floor — enough agents, or a second window —
- * the office is the first thing evicted. Pixi does not notice: no exception, no
- * rejected promise, no failure banner. The canvas simply stops drawing and the
- * office goes blank until the app is restarted. That is the blank-office bug.
- *
- * xterm already handles this by falling back to its DOM renderer. Pixi has no
- * such fallback, so the scene has to be rebuilt instead. This module is only the
- * event wiring, kept separate from OfficeFloor so the recovery policy — cancel
- * the event, debounce, cap the retries, give up loudly — is testable against a
- * plain EventTarget with no browser, no GPU and no Pixi.
- */
+/** Rebuild the Pixi scene after WebGL context loss, with bounded delayed retries. */
 
 export interface GlRecoveryOptions {
   /** Rebuild attempts before we stop fighting for a context. */
@@ -54,9 +35,7 @@ export function installContextLossRecovery(
   let live = true;
 
   const onLost = (e: Event) => {
-    // WITHOUT preventDefault the browser will never hand the context back — the
-    // canvas is dead for good. This one line is the difference between a
-    // recoverable scene and a permanently blank one.
+    // preventDefault allows the browser to restore the context.
     e.preventDefault();
     if (!live) return;
     if (rebuilds >= max) {
@@ -77,35 +56,8 @@ export function installContextLossRecovery(
   };
 }
 
-/* ─── Failing to GET a context in the first place ──────────────────────────────
- *
- * The recovery above only starts listening once `app.init()` has resolved, so it
- * cannot help when the REBUILD it schedules cannot get a context either. That is
- * what happens when the GPU process dies rather than when a context is evicted:
- * the floor loses its context, the rebuild fires 1500ms later, and Chromium is
- * still bringing the GPU process back. getContext() returns null and Pixi turns
- * that into
- *
- *   Error: This browser does not support WebGL. Try using the canvas renderer
- *
- * which OfficeFloor then painted onto the floor as a wall of minified frames.
- * The message is a lie about the cause — the browser supports WebGL fine, the
- * GPU process just is not there yet — so treating it as fatal leaves the floor
- * dead until the whole app is restarted, over a condition that clears itself in
- * a second or two.
- *
- * REPRODUCED on v0.4.5 (Windows, Intel UHD, Electron 32) by killing the app's
- * --type=gpu-process out from under a live floor: the eviction path logs its
- * rebuild, and the rebuild's init() throws the error above.
- *
- * Note the two are NOT the same failure. Eviction pressure alone does not get
- * here: a getContext() call that pushes past Chromium's ~16-context cap evicts
- * somebody else and SUCCEEDS, so the floor's rebuild always wins its slot back.
- * It takes an absent GPU process for the request itself to fail.
- *
- * Kept as a pure classifier + planner so the policy is testable without a
- * browser, a GPU or Pixi — same as the loss path.
- */
+/* Context creation can fail while the GPU process restarts. Retry init failures
+ * separately: context-loss listeners only exist after app.init() succeeds. */
 
 /** Retries before we accept that the floor cannot have a context right now.
  *  Three at 1500ms covers a GPU process restart with room to spare. */

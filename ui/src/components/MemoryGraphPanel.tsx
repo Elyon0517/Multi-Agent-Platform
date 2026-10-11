@@ -14,12 +14,7 @@ import {
 } from './memoryGraph/buildGraph';
 import { forceLayout, type Positions } from './memoryGraph/forceLayout';
 
-/** The memory-graph tab: hive agents as nodes, messages as edges, an optional
- *  topic layer from each agent's memory file. SVG-rendered (DESIGN.md neo-pixel:
- *  square nodes, hard offset shadows, VT323/Pixelify). See MEMORY_GRAPH_SPEC.md.
- *
- *  All data comes from the existing preload bridge: store.agents + hiveLog +
- *  hiveMemory. No new IPC. Click an agent to jump to its memory; hover to peek. */
+/** Agent and message graph with optional topics extracted from memory files. */
 export function MemoryGraphPanel({
   godId,
   onJumpToMemory

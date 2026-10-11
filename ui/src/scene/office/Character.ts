@@ -66,14 +66,7 @@ const NAME_TAG_PAD_X = 2;
 const NAME_TAG_PAD_Y = 1;
 const NAME_TAG_RADIUS = 2;
 const NAME_TAG_PLATE_ALPHA = 0.82;
-/** Nameplates sort ABOVE every avatar (whose zIndex is its world y, bounded by
- *  the map height in px) and below the thought bubbles at 100000. Riding the
- *  sprite container instead would have been cheaper, but it put a name at the
- *  mercy of whoever stands one tile south: avatars are 34.56px tall in a 32px
- *  tile, so vertical neighbours ALWAYS overlap, and any name past ~5 characters
- *  is wider than the 19.44px sprite it labels. Two adjacent tags rendered as
- *  interleaved glyphs — legible as neither name. Lifted and plated, the front
- *  one wins cleanly instead. */
+/** Sort nameplates above avatars and below thought bubbles to avoid interleaved text. */
 const NAME_TAG_Z = 50000;
 
 interface CharacterOptions {
@@ -182,12 +175,7 @@ export class Character {
       this.mapRenderer.height * this.mapRenderer.tileSize
     );
 
-    // Nameplate: world-positioned just BELOW the feet, never above, so it can
-    // never collide with the thought bubble, which only ever floats upward
-    // from the head. `fontFamily: 'monospace'` is the generic on purpose —
-    // every other in-world Pixi label (ThoughtBubble, ToolBubble) uses it, and
-    // a nameplate in a different face from the bubble right above it reads as
-    // a bug. Deliberately not `type.mono`; move all three together or none.
+    // Place nameplates below the feet; keep their font consistent with other Pixi labels.
     this.nameTag = new Container();
     this.nameTag.zIndex = NAME_TAG_Z;
     this.nameTag.eventMode = 'none';
@@ -541,9 +529,7 @@ export class Character {
 
   // ── The boss's cigar ───────────────────────────────────────────────────────
 
-  /** Light a cigar for `seconds`: a glowing stub in hand and smoke puffs
-   *  drifting up. Pure boss energy; pair it with a window for plausible
-   *  deniability. `onDone` fires when it's been smoked down. */
+  /** Show a cigar for seconds, then call onDone. */
   startSmoking(seconds: number, onDone?: () => void): void {
     this.smokeT = 0;
     this.smokeDur = seconds;

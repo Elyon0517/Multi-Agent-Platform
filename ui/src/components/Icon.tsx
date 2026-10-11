@@ -39,14 +39,7 @@ const paths: Record<IconName, IconDef> = {
     accentColor: 'var(--cth-sky)',
     ink:   'M8 3h2v2h2v2h2v2h-2v2h-2v2H8v-2h2V9H2V7h8V5H8V3z'
   },
-  // Notebook + pen. Two earlier tries were solid pixel-art pencils and both read
-  // as a blob at 16px; this sits next to `code` and `terminal` in the same row,
-  // so it is drawn the way they are — hairline outlines, one colour, two whole
-  // objects with a clear gap between them rather than one overlapping the other.
-  // Notepad with the pen laid ACROSS its top-right corner, not parked beside it.
-  // The pen breaks the pad's outline where it crosses, and that broken edge is
-  // the whole trick — two shapes sharing one ink colour only read as "over" if
-  // the lower one visibly stops. Same hairline weight as code/terminal/git.
+  // Break the pad outline where the pen crosses to show the overlap.
   edit: {
     accentColor: 'var(--cth-lilac)',
     ink:   'M13 1h2v1h-2zM1 2h10v1h-10zM12 2h2v1h-2zM1 3h1v1h-1zM11 3h2v1h-2zM1 4h1v1h-1zM10 4h2v1h-2zM1 5h1v1h-1zM9 5h2v1h-2zM1 6h1v1h-1zM3 6h5v1h-5zM9 6h1v1h-1zM1 7h1v1h-1zM10 7h1v1h-1zM1 8h1v1h-1zM10 8h1v1h-1zM1 9h1v1h-1zM3 9h5v1h-5zM10 9h1v1h-1zM1 10h1v1h-1zM10 10h1v1h-1zM1 11h1v1h-1zM10 11h1v1h-1zM1 12h1v1h-1zM3 12h5v1h-5zM10 12h1v1h-1zM1 13h1v1h-1zM10 13h1v1h-1zM1 14h1v1h-1zM10 14h1v1h-1zM1 15h10v1h-10z'
@@ -79,10 +72,6 @@ const paths: Record<IconName, IconDef> = {
     accentColor: 'var(--cth-mint)',
     ink:   'M1 2h14v12H1V2zm1 1v10h12V3H2zm1 2h1v1h1v1h1v1H5v1H4v1H3V9h1V8h1V7H4V6H3V5zm5 5h4v1H8v-1z'
   },
-  // The branch graph, which is what git's own mark is: a trunk with two commit
-  // nodes and one branch arcing off into a third. Drawn at the same hairline
-  // weight as `code` and `terminal` so a row of them reads as one set — a
-  // solid-filled mark next to those two looks like a different icon family.
   git: {
     accentColor: 'var(--cth-coral)',
     ink:   'M5 1h3v1h-3zM4 2h1v1h-1zM8 2h1v1h-1zM4 3h1v1h-1zM8 3h1v1h-1zM5 4h3v1h-3zM6 5h1v1h-1zM6 6h1v1h-1zM9 6h3v1h-3zM6 7h1v1h-1zM8 7h1v1h-1zM12 7h1v1h-1zM6 8h3v1h-3zM12 8h1v1h-1zM6 9h1v1h-1zM9 9h3v1h-3zM6 10h1v1h-1zM5 11h3v1h-3zM4 12h1v1h-1zM8 12h1v1h-1zM4 13h1v1h-1zM8 13h1v1h-1zM5 14h3v1h-3z'
@@ -128,20 +117,12 @@ const paths: Record<IconName, IconDef> = {
     accentColor: 'var(--cth-coral)',
     ink:   'M6 2h4v7H6V2z M4 9h1v2H4z M11 9h1v2h-1z M4 11h8v1H4z M7 12h2v2H7z M5 14h6v1H5z'
   },
-  // Filled disc with the 'i' knocked OUT of it — the dot and stem are separate
-  // subpaths cut by fill-rule: evenodd, same trick as the gear's hub hole. A
-  // knocked-out glyph stays legible at 16px where a 1px-stroked outline would
-  // shimmer against the pixel grid.
+  // Evenodd cuts the information glyph out of the disc.
   info: {
     accentColor: 'var(--cth-sky)',
     ink:   'M5 1h6v1h2v1h1v2h1v6h-1v2h-1v1h-2v1H5v-1H3v-1H2v-2H1V5h1V3h1V2h2V1z M7 4h2v2H7z M7 7h2v5H7z'
   },
-  // Panel outline with the left column filled — the standard sidebar-toggle
-  // glyph. Three subpaths under fill-rule: evenodd — frame, hollow interior,
-  // then the left column, which lands on an ODD crossing count and so fills back
-  // in. Deliberately NOT `minimize`/`expand`: those sit in the same toolbar
-  // meaning "exit fullscreen", and two size-ish arrows side by side read as the
-  // same control twice.
+  // Evenodd fills the sidebar column inside the hollow panel frame.
   sidebar: {
     accentColor: 'var(--cth-ink-300)',
     ink:   'M1 3h14v10H1z M2 4h12v8H2z M2 4h4v8H2z'

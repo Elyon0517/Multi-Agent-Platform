@@ -1,13 +1,4 @@
-// Topic extraction for the memory graph — pure, dependency-free, client-side.
-//
-// Agent memory.md files are structured markdown: dated `## <date> — <title>`
-// section headers, `**bold**` key terms, bullet lists. We pull candidate topic
-// phrases from headings + bold spans, normalise them, and keep only the ones
-// mentioned by >= 2 distinct agents (shared knowledge is the interesting signal;
-// an agent's solo notes aren't a hive-wide "topic"). See MEMORY_GRAPH_SPEC.md §5.
-//
-// This is deliberately heuristic, not semantic — MemPalace (searchMemory) owns
-// the semantic side and returns ranked snippets per query, not an enumerable set.
+// Extract shared topics from headings and bold phrases mentioned by at least two agents.
 
 export interface Topic {
   /** stable node id, e.g. "topic:landing page redesign" */

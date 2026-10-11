@@ -1,11 +1,5 @@
-// Tiny deterministic force-directed layout — Fruchterman–Reingold with mild
-// centre gravity. No dependency (d3-force isn't in node_modules and the project
-// keeps deps lean); for < 100 nodes a fixed-iteration integrator is plenty.
-// See MEMORY_GRAPH_SPEC.md §6.
-//
-// Deterministic: nodes are seeded on a phyllotaxis spiral by index (no Math.random),
-// so the graph doesn't reshuffle between polls. Pinned nodes (dragged) stay fixed
-// and the rest relax around them.
+// Deterministic Fruchterman–Reingold layout with centre gravity.
+// Seed nodes on a spiral; dragged nodes remain pinned between updates.
 
 export interface LayoutNode {
   id: string;

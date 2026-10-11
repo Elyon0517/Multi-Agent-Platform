@@ -9,23 +9,7 @@ import { compareByNewestAsk } from './askMeOrder';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';
 
-/**
- * ASK ME — first-class human feedback through the task system.
- *
- * Tasks the god can only move with the human's input sit here. An entry isn't
- * necessarily a question — it can be a TO-DO only the human can perform
- * (create an account, approve a purchase, provide credentials, test on a real
- * device). Each card shows the open ask, a place to respond (an answer, or a
- * "done, here's the result" confirmation), and the CASCADE of downstream
- * tasks stuck waiting on this one — so "why isn't X done?" reads as "ah,
- * because I still owe something here."
- *
- * Sending an answer does two things:
- *   1. writes it into the card's humanQA entry in hive/tasks.json (the
- *      decision is documented ON the task, forever), and
- *   2. mails the god so it picks the answer up, unblocks the card, and the
- *      work continues — no separate HumanQuestion.md side-channel anymore.
- */
+/** Open human questions and their dependents; answers update the task and notify Root. */
 
 const POLL_MS = 5000;
 
@@ -71,13 +55,7 @@ export function AskMeTab() {
   const nameFor = (id?: string): string | undefined =>
     id ? (agents.find((a) => a.id === id)?.name ?? restorable.find((a) => a.id === id)?.name ?? id) : undefined;
 
-  // Newest ask at the top, oldest at the bottom. Before this the board had no
-  // comparator at all, so a question's position was an accident of where its
-  // card sat in tasks.json. `filter` already returns a fresh array, so sorting
-  // in place never touches the store's own ordering. The ask each card is
-  // ranked by comes from openQuestion() — the same predicate waitsOnHuman uses
-  // — and only this OUTER list is sorted; a card's humanQA history stays
-  // chronological (see askMeOrder.ts).
+  // Sort cards by newest open question, preserving answer history order.
   const waiting = tasks
     .filter(waitsOnHuman)
     .sort((a, b) => compareByNewestAsk(openQuestion(a), openQuestion(b)));
@@ -133,11 +111,7 @@ export function AskMeTab() {
     setSending(null);
   };
 
-  // Dismiss the open ask off the ASK ME board WITHOUT answering it. We mark the
-  // open humanQA entry `dismissedAt` (no fabricated answer) so openQuestion()
-  // stops returning it and the card leaves this view — the question itself stays
-  // on the card, so the Q&A history is never dropped (protocol). The task stays
-  // blocked on the kanban; the god can re-ask by appending a fresh humanQA entry.
+  // Dismiss the ask while preserving history and the task's blocked status.
   const dismiss = async (task: HiveTask) => {
     const open = openQuestion(task);
     if (!open || sending === task.id) return;
@@ -163,9 +137,6 @@ export function AskMeTab() {
   };
 
   return (
-    // Body text is set in the mono face (VT323) — the same readable font the
-    // memory viewer uses. Pixelify Sans (font-ui) is too chunky for prose like
-    // questions and answers. Display/badge bits keep their explicit faces.
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--cth-paper-200)', padding: 10, display: 'flex', flexDirection: 'column', gap: 10, fontFamily: 'var(--cth-font-mono)' }}>
       {waiting.length === 0 && (
         <div style={{ textAlign: 'center', padding: '24px 12px', color: 'var(--cth-ink-500)', fontSize: 12 }}>

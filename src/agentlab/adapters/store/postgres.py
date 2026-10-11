@@ -178,7 +178,6 @@ class PostgresStore:
         if table == "approval":
             report = data.pop("report", None)
             if report is not None:
-                # Store the typed report in the existing durable approval JSON payload.
                 data["payload"] = {**data["payload"], "_signoff_report": report}
         self._upsert(table, data)
 

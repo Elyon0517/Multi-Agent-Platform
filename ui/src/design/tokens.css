@@ -15,10 +15,7 @@
   --cth-ink-300: #A899B5;
   --cth-ink-100: #D9CFE0;
 
-  /* Accents — v0.3.4 recalibration: same hues, professional saturation.
-     The originals (#FFD93D, #FF6B6B, …) were full-saturation arcade tones that
-     read as noise at UI density; these sit in the calmer band that products
-     like Linear/Radix use — recognizable color, no glare. */
+  /* Accents */
   --cth-coral: #D96A62;       --cth-coral-light: #F3D3CD;
   --cth-mint:  #5CA97A;       --cth-mint-light:  #D2E7DA;
   --cth-sky:   #4F9FAF;       --cth-sky-light:   #CFE5E9;
@@ -26,7 +23,7 @@
   --cth-lilac: #9482D3;       --cth-lilac-light: #E0DAF2;
   --cth-peach: #D99168;       --cth-peach-light: #F3DACA;
 
-  /* Status — same recalibration; hue meanings unchanged */
+  /* Status */
   --cth-status-idle:     #A199AB;
   --cth-status-thinking: #4F9FAF;
   --cth-status-working:  #DCAB3C;
@@ -34,8 +31,8 @@
   --cth-status-blocked:  #D96A62;
   --cth-status-success:  #5CA97A;
   --cth-status-ghost:    #D9D3DE;
-  --cth-status-compacting: #8F7CC7; /* #5C — mid-/compact, "boxing up context" */
-  --cth-status-looping:    #D6903F; /* #5C — circuit-breaker armed (runaway) */
+  --cth-status-compacting: #8F7CC7; /* context compaction */
+  --cth-status-looping:    #D6903F; /* circuit breaker */
   --cth-status-typing:     #C89838; /* unsent text on the prompt — queue is held */
 
   /* Spacing */
@@ -49,17 +46,14 @@
   --cth-space-7: 48px;
   --cth-space-8: 64px;
 
-  /* Type — v0.3.4: Press Start 2P stays as the BRAND face for small caps
-     labels; everything the user actually reads is Inter (UI) and JetBrains
-     Mono (code/terminal). Pixelify/VT323 were the main readability drag. */
+  /* Typography */
   /* Press Start 2P is latin-only by design. CJK and Arabic text in a display
      slot falls through to a system face rather than to generic monospace. */
   --cth-font-display: "Press Start 2P", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Geeza Pro", "Noto Naskh Arabic", "Segoe UI Historic", monospace;
   --cth-font-ui:      "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Geeza Pro", "Noto Naskh Arabic", "Segoe UI Historic", sans-serif;
   --cth-font-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "PingFang SC", "Microsoft YaHei", "Noto Sans Mono CJK SC", "Noto Sans CJK SC", "Geeza Pro", "Noto Naskh Arabic", "Segoe UI Historic", monospace;
 
-  /* Type scale — v0.3.4: one step tighter (Inter reads larger than Pixelify
-     at equal px, and the controls were oversized) */
+  /* Type scale */
   --cth-text-display-lg: 16px;
   --cth-text-display-md: 12px;
   --cth-text-display-sm: 8px;
@@ -78,17 +72,12 @@
   --cth-lh-body-sm:    18px;
   --cth-lh-mono:       20px;
 
-  /* Hard drop shadow — no blur, softer than before */
+  /* Hard drop shadow */
   --cth-shadow-hard: 3px 3px 0 rgba(26, 19, 32, 0.14);
 
-  /* Panel borders — v0.3.4: single hairlines. The old three-layer package
-     boxed every surface in thick chrome; structure now comes from surface
-     contrast, not outlines. Dialogs keep one slightly stronger line. */
+  /* Panel borders */
   --cth-panel-border:          inset 0 0 0 1px var(--cth-ink-300);
-  /* Text that sits ON an accent fill (a selected tab, a filled chip). The
-     accents are LIGHT surfaces in BOTH themes, so this is dark in both — using
-     ink-900 here inverts with the theme and paints near-white on a pale accent,
-     which is the one place the theme switch actively hurts legibility. */
+  /* Keep text dark on accent fills in both themes. */
   --cth-on-accent: #1A1320;
 
   --cth-panel-border-inset:    inset 0 0 0 1px var(--cth-ink-100);
@@ -96,32 +85,7 @@
   --cth-panel-border-dialog:   inset 0 0 0 1px var(--cth-ink-500);
 }
 
-/* ── Dark theme ──────────────────────────────────────────────────────────────
-   One token swap darkens the WHOLE app. Shades of black with a near-white text
-   ramp, tuned for READABILITY first and measured rather than eyeballed. Stamped
-   by design/theme.ts as data-cth-theme on <html>; the terminal palette and
-   per-agent Claude session themes follow the same switch.
-
-   THE BUG THIS FIXES. Text was never the problem — ink-900 measured 11-14:1 and
-   ink-700 8-9.6:1 against every surface. `ink-300` was, at 1.73-2.09:1. That
-   token is not decoration: it is this app's entire structural language, used
-   187 times and 93 of those as `inset 0 0 0 1px` — the border on every button,
-   input, panel, card and chip. Below ~3:1 a 1px line is not perceivable, so in
-   dark mode the edges defining every control simply were not there, and the UI
-   read as flat washes of grey. ink-300 is now 3.12-3.59:1 and ink-100 stays
-   deliberately quieter (1.47-1.69:1) for dividers that should recede.
-
-   NOT BLACK, AND NOT WHITE. A first pass took the ground to #0E0E11 and text to
-   #EDECEA, which measured beautifully and read as harsh: near-black behind
-   near-white is maximum contrast, and maximum contrast is not the same as
-   comfortable. The ground now sits at luminance 0.009-0.020 (visibly lifted off
-   black, still unambiguously a dark theme) and text at 0.71 rather than 0.84 —
-   a warm off-white. Everything still clears its floor with room to spare.
-
-   Every value below is verified against WCAG contrast for the five surfaces it
-   can appear on: body text >= 4.5, structural borders >= 3.0. Accents are held
-   to a narrow luminance band (0.36-0.44) so no single hue fluoresces against
-   the black and colour never becomes the thing carrying the layout. */
+/* Dark theme. Preserve readable text and structural borders across surfaces. */
 :root[data-cth-theme='dark'] {
   /* Base surfaces — a graded elevation ramp, darkest where light mode was
      lightest. Neutral with a whisper of the brand's violet warmth. */
@@ -161,8 +125,7 @@
   --cth-status-waiting:  #8095DC;
   --cth-status-blocked:  #DF8078;
   --cth-status-success:  #6FB88B;
-  /* The quietest status, but still a MARK the user must be able to find — at
-     the old #3D3C44 it measured 1.54:1 on the new ground and simply vanished. */
+  /* Ghost status remains visible against dark surfaces. */
   --cth-status-ghost:    #6C6A76;
   --cth-status-compacting: #9D8BD2;
   --cth-status-looping:    #D69A55;

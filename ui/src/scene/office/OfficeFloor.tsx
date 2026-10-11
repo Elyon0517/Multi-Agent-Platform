@@ -19,10 +19,7 @@ import {
 } from './glRecovery';
 import type { Tile, Facing, ErrandKind, ErrandSpot } from './themeRegistry';
 
-// The map, tileset atlases, desk-claim order, errand spots, coffee-economy
-// tiles, prop anchors, monitor gids and palette all come from the active
-// ThemeConfig now (see themeRegistry.ts / themeLoader.ts). Phase 0 ships the
-// existing office unchanged as `theme: 'office'`.
+// Scene assets and anchors come from the active ThemeConfig.
 
 /** A cafeteria break in progress for one agent — set by the coffee-break
  *  director, cleared when the agent leaves or gets pulled back to work. */
@@ -79,10 +76,7 @@ interface Runtime {
   busySince?: number;
 }
 
-/** Only a busy stretch at least this long earns a cheer on finishing. Short
- *  turns (an inbox nudge, a heartbeat reply) end quietly — otherwise idle
- *  agents "celebrate" every few minutes over nothing, and the "done!" bubble
- *  reads like real work completed when none did. */
+/** Minimum busy time before showing a completion cheer. */
 const CHEER_MIN_BUSY_MS = 60_000;
 
 /** What an avatar mutters per errand, picked at random. i18n keys into
@@ -153,30 +147,8 @@ export function OfficeFloor() {
   // tears down and rebuilds the whole scene on the new map/cast (see deps below).
   const officeTheme = useStore((s) => s.officeTheme);
 
-  // Is the floor actually on screen? A fullscreen terminal or file editor covers
-  // it completely, and a hidden window shows nothing at all — but the Pixi ticker
-  // went on running the whole scene regardless: every character, thought cloud,
-  // coffee run and envelope animating, and the renderer drawing every frame, into
-  // pixels nobody can see. On a floor of twenty agents that is the app's single
-  // largest continuous cost, and users who live in the fullscreen terminal (the
-  // normal way to work with one agent) paid it 100% of the time.
-  //
-  // Stop the ticker instead of unmounting: the WebGL context, textures and the
-  // whole scene graph stay alive, so coming back out of fullscreen is instant
-  // rather than a full theme reload.
-  //
-  // A paused floor resumes where it left off. Two things make that true, and it is
-  // worth being precise because the obvious claim — "nothing here reads wall-clock
-  // time" — is FALSE: Date.now() is read for the aura/coffee timers and for the
-  // busy/cheer thresholds. The first sits inside onTick, so a stopped ticker freezes
-  // it along with everything else. The second runs in applyState, a store
-  // subscription that keeps firing while paused — but it only mutates sprite state
-  // that is redrawn on resume, so the worst case is a cosmetic cheer reflecting
-  // genuinely-elapsed busy time, invisible while hidden anyway.
-  //
-  // The frame delta is safe by construction: Pixi clamps elapsedMS to minFPS on
-  // start(), so a floor paused for an hour advances a few frames on resume rather
-  // than teleporting every character across the map.
+  // Pause the ticker while hidden, retaining the scene and textures for quick resume.
+  // Store updates continue; Pixi clamps the frame delta when the ticker restarts.
   const fullscreenAgentId = useStore((s) => s.fullscreenAgentId);
   const ideOpen = useStore((s) => s.ideOpen);
   const [docHidden, setDocHidden] = useState(() => document.hidden);
@@ -219,12 +191,7 @@ export function OfficeFloor() {
         background: hexNum(theme.palette.background),
         antialias: false,
         roundPixels: true,
-        // resolution: 1 let the OS/browser upscale the canvas on scaled and
-        // HiDPI displays (125–150% is the Windows laptop default), blurring
-        // everything — worst of all the bubble text, which is small to begin
-        // with. Render at the real device pixel density instead, floored at 2
-        // so the half-scale-supersampled bubble text stays legible even at
-        // 100% scaling. autoDensity keeps the canvas CSS size in logical px.
+        // Supersample at least 2× for legible bubble text; autoDensity preserves CSS sizing.
         resolution: Math.max(window.devicePixelRatio || 1, 2),
         autoDensity: true,
         width: host.clientWidth || 800,
@@ -234,11 +201,7 @@ export function OfficeFloor() {
       while (host.firstChild) host.removeChild(host.firstChild);
       host.appendChild(app.canvas);
 
-      // This canvas holds the OLDEST WebGL context in the process (it is built at
-      // startup), so it is the one Chromium evicts once enough xterm terminals —
-      // each of which takes a context via @xterm/addon-webgl — are open. Pixi
-      // reports nothing when that happens: the floor just goes blank forever.
-      // Rebuild instead. See glRecovery.ts.
+      // Rebuild on WebGL context loss; see glRecovery.ts.
       (app as any).__glRecovery = installContextLossRecovery(app.canvas, {
         onRebuild: () => { if (mountIdRef.current === mountId) setGlGeneration((n) => n + 1); },
         onGiveUp: () => {
@@ -268,10 +231,7 @@ export function OfficeFloor() {
       camera.setViewSize(app.screen.width, app.screen.height);
       camera.fitToScreen();
 
-      // ─── The boss's wall calendar → TRIGGERS ───────────────────────────────
-      // A little tear-off month page hangs on the CEO office wall. Clicking it
-      // selects Michael (the god) and opens the Command Center's TRIGGERS tab —
-      // everything that wakes the hive without you, schedules first among them.
+      // Wall calendar opens the triggers tab.
       const calTs = mapRenderer.tileSize;
       const calG = new Graphics();
       calG.eventMode = 'static';
@@ -357,11 +317,7 @@ export function OfficeFloor() {
         return null;
       };
 
-      // Face a seated agent toward their desk (the adjacent non-walkable
-      // furniture). Standard desks put the monitor to the north and the chair to
-      // the south, so the agent faces 'up' and we see their back — like a real
-      // worker. Only a desk directly to the SOUTH (face 'down') puts furniture in
-      // front of them, which is the one case the leg-crop tucks legs under.
+      // Face the adjacent desk; crop legs when the furniture is in front.
       const facingForSeat = (t: Tile): 'up' | 'down' | 'left' | 'right' => {
         if (!mapRenderer.isWalkable(t.x, t.y - 1)) return 'up';
         if (!mapRenderer.isWalkable(t.x, t.y + 1)) return 'down';
@@ -370,11 +326,7 @@ export function OfficeFloor() {
         return 'up'; // open-floor overflow seat — no desk, just face away
       };
 
-      // ─── Cafeteria: purposeful coffee breaks ───────────────────────────────
-      // Idle / finished agents occasionally stroll to the break area, sit at a
-      // café table (or stand at the coffee machine / vending machine), emit an
-      // in-character one-liner, then head back. Two agents at the same table
-      // trade a two-beat quip. This is what makes "lingering" feel purposeful.
+      // Coffee breaks pair idle agents for short conversations.
       interface CafeSpot { tile: Tile; facing: Facing; spot: BreakSpot; seated: boolean; partner: number; }
       const cafeSpots: CafeSpot[] = [];
 
@@ -407,12 +359,7 @@ export function OfficeFloor() {
       const agentById = (id: string): Agent | undefined =>
         useStore.getState().agents.find((a) => a.id === id);
 
-      // ─── The coffee economy: sideboard → machine → desk → sink → sideboard ─
-      // A finite stock of mugs lives on a sideboard next to the kitchen counter.
-      // Brewing requires a mug in hand (a clean one off the rack, or your own
-      // brought back from the desk for a lazy refill); washing at the counter
-      // sink puts a mug back into the clean stock. If every mug is parked on a
-      // desk somewhere, the rack runs dry — and the floor feels it.
+      // Mug cycle: rack → machine → desk → sink → rack. Stock is finite.
       const TRAY_TILE: Tile = theme.coffee.trayTile;        // the sideboard (counter piece)
       const TRAY_STAND: Tile = theme.coffee.trayStand;
       const MACHINE_STAND: Tile = theme.coffee.machineStand; // below the counter machine
@@ -594,10 +541,7 @@ export function OfficeFloor() {
         rt.character.showThought(pickSoloLine(character, spot.spot, seed));
       };
 
-      // If the newcomer's table-mate is already lingering (and neither is mid-
-      // conversation), start a multi-beat exchange. The newcomer is the
-      // initiator and owns the script; the partner just gets marked engaged.
-      // Returns true if a chat was started.
+      // The newcomer owns the conversation script; mark its partner engaged.
       const maybePairChat = (id: string, rt: Runtime, spotIdx: number): boolean => {
         const spot = cafeSpots[spotIdx];
         if (spot.partner < 0 || !rt.brk) return false;
@@ -629,12 +573,7 @@ export function OfficeFloor() {
         rt.brk = undefined;
       };
 
-      // End a break gracefully: free the seat, drop the bubble — and settle the
-      // coffee question. An agent that brought its used desk mug along either
-      // just REFILLS it at the machine (the lazy path) or properly WASHES it at
-      // the sink and racks it back on the sideboard. An agent without a mug
-      // fetches a clean one off the rack first — no mug, no coffee: if the rack
-      // ran dry the run ends in a sulk instead of a brew.
+      // Release the seat and bubble, then refill or wash the mug before returning home.
       const endBreak = (id: string, rt: Runtime): void => {
         const arrived = rt.brk?.phase === 'lingering';
         releaseBreak(rt);
@@ -764,10 +703,7 @@ export function OfficeFloor() {
         startBreak(agent.id, rt);
       };
 
-      // ─── Idle errands: small purposeful busywork for a quiet floor ─────────
-      // Plants get watered, windows opened for a breeze, the dispenser poured,
-      // the fridge inspected, the shelf browsed, scrap paper binned. Every spot
-      // has a stand tile + facing; `fx` anchors a little ambient animation.
+      // Errand spots provide a stand tile, facing direction and animation anchor.
       const ERRAND_SPOTS: ErrandSpot[] = theme.errandSpots;
       const errandTaken: (string | null)[] = new Array(ERRAND_SPOTS.length).fill(null);
       // Lazily-created ambient fx layer per active errand spot.
@@ -907,11 +843,7 @@ export function OfficeFloor() {
         });
       };
 
-      // ─── The boss aura: performative excellence in Michael's presence ──────
-      // When the god's avatar wanders close to a worker, the worker bursts
-      // into suck-up mode — including REAL stats ("already shipped N tasks,
-      // Michael. raise?" with N from the actual ledger). What they say once
-      // he's out of earshot is a different story (see emitQuip's gossip).
+      // Nearby workers react to Root, using completion counts from the ledger.
       const lastSuckUp = new Map<string, number>();
       let doneByAssignee = new Map<string, number>();
       let statsAge = 999;
@@ -984,14 +916,7 @@ export function OfficeFloor() {
           }
         }
       };
-      // ─── The office task boards: hive/tasks.json pinned to the wall ────────
-      // TWO cork boards hang side by side on the wall band above the open-plan
-      // desks: BLOCKERS (red) on the left, TODO (yellow) on the right — each
-      // with a colored header strip. A worker who picks a task up (doing +
-      // assignee) literally TAKES THE NOTE ALONG: it leaves the boards and
-      // sticks to that worker's desk instead. Finished tasks archive as a green
-      // stack on the little table at the end. Clicking any of it selects
-      // Michael and opens the Command Center's tasks tab.
+      // Show blocked and pending tasks on boards, active tasks on desks, and finished tasks in the archive.
       const BOARD_TILE: Tile = theme.anchors.boards;
       // The ensemble (two boards + archive table) is 82px wide; the wall run
       // between the two doorways spans tiles 6..12 (112px) — center it.
@@ -1085,11 +1010,7 @@ export function OfficeFloor() {
       };
       drawTaskBoard([]);
 
-      // ─── The office clock: clicking it is CLOCKING OUT ─────────────────────
-      // The wall clock beside Michael's window doubles as the quit entry:
-      // a click runs the real close flow (window.close() → the main process
-      // intercepts while agents run → the "Quitting now?" dialog with its
-      // closing-time option). The office clock literally opens quitting time.
+      // Wall clock opens the close flow.
       const clockG = new Graphics();
       clockG.eventMode = 'static';
       clockG.cursor = 'pointer';
@@ -1102,12 +1023,7 @@ export function OfficeFloor() {
       });
       charLayer.addChild(clockG);
 
-      // ─── The ASK ME board: tasks waiting on the HUMAN, first class ─────────
-      // Hangs on the right wall run (between the second doorway and the war
-      // room): one lilac note per open question the god parked for the human.
-      // It pulses while anything waits — clicking it opens the Command Center's
-      // ASK ME tab, where the human reads the questions, answers, and the
-      // answers flow back to the god (documented on the card itself).
+      // The ASK ME board pulses for open questions and opens their tab.
       const askG = new Graphics();
       askG.eventMode = 'static';
       askG.cursor = 'pointer';
@@ -1149,14 +1065,8 @@ export function OfficeFloor() {
       };
       drawAskBoard(0);
 
-      // ─── Board choreography: every ledger move is ACTED on the floor ───────
-      // Michael walks over and pins fresh cards; an assigned worker walks to
-      // the TODO board, takes its note and carries it home; finishing carries
-      // the note to the archive table; a card going blocked gets walked to the
-      // red board. While a move is in flight, the boards keep showing the OLD
-      // state for that card — the redraw lands exactly when the actor acts.
-      // Un-choreographable diffs (no actor on the floor, bulk edits, restarts)
-      // simply redraw — animation is sugar, the ledger stays the truth.
+      // Keep the old board state during a move; update when the actor arrives.
+      // If a move cannot be animated, redraw directly from the ledger.
       interface LedgerTask extends BoardTask { id: string }
       interface BoardMove {
         kind: 'pin' | 'take' | 'archive';
@@ -1380,11 +1290,7 @@ export function OfficeFloor() {
         });
         character.show(charLayer);
         const rt: Runtime = { character, seatIndex, waitTile, charName };
-        // Standard desks paint the 2×2 PC monitor two rows above the seat —
-        // give those a DeskScreen (lights up while seated) and a cup spot
-        // beside the monitor, exactly where the tileset's baked-in mug used
-        // to sit before we cleared it (desks start clean now; cups only exist
-        // where an agent actually carried one).
+        // Add a dynamic screen and cup spot beside each standard desk monitor.
         if (mapRenderer.gidAt('furniture-above', seatTile.x, seatTile.y - 2) === theme.monitor.offTopLeftGid) {
           const top = { x: seatTile.x, y: seatTile.y - 2 };
           rt.screen = new DeskScreen(mapRenderer, top, theme.monitor);
@@ -1429,11 +1335,7 @@ export function OfficeFloor() {
           || rt.prevCarrying !== agent.carrying
           || rt.prevPrompt !== agent.lastPrompt;
         if (!changed) return;
-        // Finishing real work (working/thinking/compacting → done) earns a
-        // little celebration before the avatar goes back to roaming — but only
-        // after a SUBSTANTIAL busy stretch (see CHEER_MIN_BUSY_MS): an inbox
-        // nudge or heartbeat reply that flips busy for a few seconds ends
-        // quietly instead of "celebrating" every few minutes over nothing.
+        // Cheer only after a busy stretch lasting CHEER_MIN_BUSY_MS.
         const wasBusy = rt.prevStatus === 'working' || rt.prevStatus === 'thinking' || rt.prevStatus === 'compacting';
         const isBusy = agent.status === 'working' || agent.status === 'thinking' || agent.status === 'compacting';
         if (isBusy && !wasBusy) rt.busySince = Date.now();
@@ -1450,10 +1352,7 @@ export function OfficeFloor() {
         const c = rt.character;
         c.setBaseAlpha(agent.status === 'ghost' ? 0.5 : 1);
 
-        // While an agent is on a coffee break the director owns its avatar — a
-        // mere idle/success refresh must not yank it back to wandering. Any
-        // other live status (work, blocked, …) cancels the break and falls
-        // through to normal handling, sending it back to its desk / the door.
+        // Idle refreshes preserve coffee breaks; other statuses cancel them.
         if (rt.brk) {
           if (agent.status === 'idle' || agent.status === 'success') {
             c.setStatusGlyph(agent.status === 'success' ? 'success' : 'none');
@@ -1598,10 +1497,8 @@ export function OfficeFloor() {
       });
       (app as any).__unsub = unsubscribe;
 
-      // Fly an envelope from a sender's desk to each recipient when the hive
-      // routes a message. Endpoints are snapshotted at spawn, so the paper flies
-      // a clean arc even if the avatars wander mid-flight. 'human' recipients
-      // (escalations) fly to the office door.
+      // Snapshot message endpoints so wandering avatars do not change the flight path.
+      // Human recipients use the office door.
       const ts = mapRenderer.tileSize;
       const humanPos = { x: entrance.x * ts + ts / 2, y: entrance.y * ts + ts };
       const posFor = (id: string): { x: number; y: number } | null => {
@@ -1723,10 +1620,7 @@ export function OfficeFloor() {
       if (mountIdRef.current !== mountId) return;
       const plan = planInitFailure(err, initRetriesRef.current);
 
-      // Pixi could not get a context — usually the GPU process restarting under
-      // us — and reports that as "this browser does not support WebGL". Retry
-      // through the same rebuild path an eviction uses; the half-built app is
-      // torn down by this effect's cleanup when the generation bump re-runs it.
+      // Retry context creation failures; effect cleanup tears down the partial scene.
       if (plan.action === 'retry') {
         initRetriesRef.current = plan.attempt;
         console.warn(`[OfficeFloor] could not get a WebGL context (the GPU process may be restarting) — retrying, attempt ${plan.attempt}/${DEFAULT_MAX_INIT_RETRIES}`);
