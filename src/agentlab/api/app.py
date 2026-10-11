@@ -274,6 +274,26 @@ def create_app(svc: Services | None = None) -> FastAPI:
         svc.store.put_record("thread", thread.id, thread.model_dump(mode="json"))
         return thread
 
+    @app.delete("/projects/{project_id}/threads/{thread_id}")
+    def delete_thread(project_id: str | None, thread_id: str) -> dict[str, bool]:
+        try:
+            # Held while Root answers, so a conversation cannot vanish mid-turn.
+            with svc.store.lock_run("turn:" + thread_id):
+                active = [r.id for r in svc.store.list_runs()
+                          if r.thread_id == thread_id and r.status not in {"DONE", "CANCELLED"}]
+                if active:
+                    raise HTTPException(409, "conversation has an unfinished run; finish or abort it first")
+                svc.store.delete_thread(thread_id, project_id)
+        except RunBusy as exc:
+            raise HTTPException(409, "Root is answering in this conversation") from exc
+        except KeyError as exc:
+            raise HTTPException(404, "conversation not found in this project") from exc
+        return {"deleted": True}
+
+    @app.delete("/threads/{thread_id}")
+    def delete_global_thread(thread_id: str) -> dict[str, bool]:
+        return delete_thread(None, thread_id)
+
     @app.post("/threads/{thread_id}/messages", response_model=SendMessageResult)
     async def global_message(thread_id: str, body: MessageBody) -> dict[str, Any]:
         return await send_message(None, thread_id, body)

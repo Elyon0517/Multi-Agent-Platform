@@ -768,6 +768,37 @@ def test_thread_append_contract(store):
         get_thread(store, thread.id, "project-b")
 
 
+def test_thread_delete_contract(store):
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.session.store import append_message, get_thread
+
+    thread = Conversation(project_id="project-del", title="chat")
+    store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+    append_message(store, thread.id, "project-del", Message(author="user", text="hello"))
+    store.put_record("root_turn", "turn-del", {"id": "turn-del", "thread_id": thread.id, "project_id": "project-del"})
+    run = Run(goal="done", workspace="/tmp", project_id="project-del", thread_id=thread.id)
+    store.create_run(run)
+    with pytest.raises(KeyError):
+        store.delete_thread(thread.id, "other-project")
+    store.delete_thread(thread.id, "project-del")
+    with pytest.raises(KeyError):
+        get_thread(store, thread.id, "project-del")
+    assert store.get_run(run.id).thread_id is None
+    assert not [t for t in store.records("root_turn") if t.get("thread_id") == thread.id]
+
+
+def test_global_thread_delete_contract(store):
+    from agentlab.core.conversation import Conversation, Message
+    from agentlab.core.session.store import append_message, get_thread
+
+    thread = Conversation(project_id=None, title="global chat")
+    store.put_record("thread", thread.id, thread.model_dump(mode="json"))
+    append_message(store, thread.id, None, Message(author="user", text="hello"))
+    store.delete_thread(thread.id, None)
+    with pytest.raises(KeyError):
+        get_thread(store, thread.id, None)
+
+
 def test_monitor_ledger_is_shared_and_transactional(database_url):
     from agentlab.adapters.store.postgres import PostgresStore
     from agentlab.core.monitor import UsageRecorder

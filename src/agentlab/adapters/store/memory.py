@@ -148,6 +148,23 @@ class InMemoryStore:
                 "legacy-turn-" + ref_id, "legacy-planning-" + ref_id,
             ))
 
+    def delete_thread(self, thread_id: str, project_id: str | None) -> None:
+        with self.transaction():
+            row = self._records.get(("thread", thread_id))
+            if not row or row.get("project_id") != project_id:
+                raise NotFound(thread_id)
+            def owned(kind: str, key: str, data: dict[str, Any]) -> bool:
+                return (kind == "thread" and key == thread_id) or (
+                    kind == "root_turn" and data.get("thread_id") == thread_id
+                )
+
+            self._records = {
+                (kind, key): data for (kind, key), data in self._records.items() if not owned(kind, key, data)
+            }
+            for run in self._runs.values():
+                if run.thread_id == thread_id:
+                    run.thread_id = None
+
     def thread_record(self, thread_id: str, project_id: str | None) -> dict[str, Any] | None:
         row = self._records.get(("thread", thread_id))
         return copy.deepcopy(row) if row and row.get("project_id") == project_id else None
