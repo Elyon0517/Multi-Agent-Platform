@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from agentlab.adapters.events import InProcessEventBus
 from agentlab.adapters.gates.config_gate import ConfigGate, resolve_gate
+from agentlab.adapters.mcp import McpHub, load_mcp_config
 from agentlab.adapters.runtime.fake import FakeRuntime
 from agentlab.adapters.runtime.local_memory import LocalEmbedder, LocalReranker, RoutedEmbedder
 from agentlab.adapters.runtime.raw import OpenAICompatEmbedder
@@ -47,8 +48,11 @@ class Services:
     knowledge: KnowledgeService
     projects: ProjectService
     hooks: MemoryHooks = field(init=False)
+    mcp: McpHub = field(init=False)
 
     def __post_init__(self) -> None:
+        # External MCP servers start lazily on first use, so building services stays cheap.
+        self.mcp = McpHub(load_mcp_config(self.settings.config_dir), self.env.read)
         self.hooks = MemoryHooks(self.knowledge, self.projects)
         self.hooks.session_services = self
         self.bus.listeners.append(self.hooks.on_event)

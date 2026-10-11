@@ -38,3 +38,12 @@ def no_model_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("fastembed.TextEmbedding", unavailable)
     monkeypatch.setattr("fastembed.rerank.cross_encoder.TextCrossEncoder", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def no_mcp_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never start Docker or uvx MCP servers; tests that need tools install a fake hub."""
+    async def none(self: object, role: str) -> list[object]:
+        return []
+
+    monkeypatch.setattr("agentlab.adapters.mcp.McpHub.tools", none)

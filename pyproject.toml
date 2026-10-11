@@ -21,6 +21,7 @@ dependencies = [
     "pgvector>=0.3",
     "anthropic>=0.79",
     "fastembed>=0.7,<1",
+    "mcp>=2.3.0",
 ]
 
 [project.optional-dependencies]

@@ -604,6 +604,16 @@ class Driver:
             with self._atomic():
                 completed(r)
 
+        # External (MCP) tools are resolved up front because tool_factory is synchronous.
+        external: dict[str, Any] = {}
+        external_tools = getattr(self.hooks, "external_tools", None)
+        if external_tools:
+            for role in roles:
+                try:
+                    external[role] = await external_tools(role)
+                except Exception:  # missing external tools must not stop the run
+                    log.exception("external tools unavailable for %s", role)
+
         def tool_factory(role: str) -> Any:
             from agentlab.core.llm.tools import WorkerTools
 
@@ -613,7 +623,16 @@ class Driver:
                 )
 
             tools = WorkerTools(role, self.cfg.agents[role].tool_grants, self.workspace, self.gate, search)
-            return tools.specs, tools.execute
+            extra = external.get(role)
+            if not extra:
+                return tools.specs, tools.execute
+            extra_specs, extra_execute = extra
+            names = {spec["function"]["name"] for spec in extra_specs}
+
+            async def execute(name: str, args: dict[str, Any]) -> Any:
+                return await (extra_execute if name in names else tools.execute)(name, args)
+
+            return [*tools.specs, *extra_specs], execute
 
         def record_tool(payload: dict[str, Any]) -> None:
             with self._atomic():

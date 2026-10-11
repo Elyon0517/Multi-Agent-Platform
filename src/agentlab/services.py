@@ -359,6 +359,20 @@ class MemoryHooks:
             ctx["project"] = {"name": project.name, "goal": project.goal, "progress": f"{done}/{total}"}
         return ctx
 
+    async def external_tools(self, role: str) -> tuple[list[dict[str, Any]], Any] | None:
+        """Read-only MCP tools for run roles; tools that change outside state are only offered to Root."""
+        svc = self.session_services
+        if not svc:
+            return None
+        tools = {tool.qualified: tool for tool in await svc.mcp.tools(role) if tool.read_only}
+        if not tools:
+            return None
+
+        async def execute(name: str, args: dict[str, Any]) -> Any:
+            return await svc.mcp.call(tools[name], args)
+
+        return [tool.spec for tool in tools.values()], execute
+
     async def after_reviews(self, run: Run, verdicts: list[Verdict]) -> None:
         pass
 
