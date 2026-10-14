@@ -334,6 +334,23 @@ export interface paths {
         patch: operations["patch_step_projects__project_id__steps__step_id__patch"];
         trace?: never;
     };
+    "/projects/{project_id}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Image */
+        get: operations["image_projects__project_id__images_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/monitor/usage": {
         parameters: {
             query?: never;
@@ -501,11 +518,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Decide Tool
-         * @description Run (or refuse) an external tool Root asked for; the outcome is posted to the conversation.
-         */
+        /** Decide Tool */
         post: operations["decide_tool_projects__project_id__threads__thread_id__tool_approvals__approval_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/threads/{thread_id}/tool-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tool Approvals */
+        get: operations["tool_approvals_projects__project_id__threads__thread_id__tool_approvals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/threads/{thread_id}/tool-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Global Tool Approvals */
+        get: operations["global_tool_approvals_threads__thread_id__tool_approvals_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1684,13 +1732,25 @@ export interface components {
          * @enum {string}
          */
         StepStatus: "todo" | "doing" | "done" | "blocked";
+        /** ToolApprovalView */
+        ToolApprovalView: {
+            /** Id */
+            id: string;
+            /** Tool */
+            tool: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "executing" | "done" | "failed" | "denied" | "unknown_outcome" | "confirmed_done" | "closed_unknown";
+        };
         /** ToolDecisionBody */
         ToolDecisionBody: {
             /**
              * Decision
              * @enum {string}
              */
-            decision: "allow" | "deny";
+            decision: "allow" | "deny" | "confirm_done" | "close_unknown";
         };
         /** Usage */
         Usage: {
@@ -2565,6 +2625,37 @@ export interface operations {
             };
         };
     };
+    image_projects__project_id__images_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     monitor_usage_monitor_usage_get: {
         parameters: {
             query?: never;
@@ -2909,6 +3000,69 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_approvals_projects__project_id__threads__thread_id__tool_approvals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string | null;
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolApprovalView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    global_tool_approvals_threads__thread_id__tool_approvals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolApprovalView"][];
                 };
             };
             /** @description Validation Error */

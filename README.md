@@ -7,7 +7,7 @@
 Chat with a Root agent about your local repository. Questions get answered directly; coding work goes to a
 Planner → Coder → Gate → three independent reviewers → human signoff loop, visualized as a pixel office.
 
-Python 3.12+ · Node 22 · Alpha
+Python 3.12+ · Node 22.12+ · Alpha
 
 Find this useful? Give it a star ⭐
 
@@ -89,7 +89,7 @@ signoff can complete a run.
 ### Prerequisites
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
-- Node.js 22 and npm
+- Node.js 22.12+ (22.x), 24.x, or 26+ and npm
 - Docker for PostgreSQL (on macOS without Docker Desktop: `colima start --cpu 4 --memory 8`)
 - An OpenAI-compatible LLM gateway; optionally an Anthropic-compatible endpoint for Claude
 
@@ -230,6 +230,11 @@ See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full checklist and expect
 - The ADK runtime, LiteLLM virtual keys and external MCP tools are not implemented yet.
 
 See the roadmap in [`docs/DISCOVERY.md`](docs/DISCOVERY.md) §16.
+
+Workspace images in project conversations and task Markdown previews load from the selected project's directory.
+PNG, JPEG, GIF, WebP, BMP, ICO, AVIF and SVG are supported up to 10 MiB. Symlink paths and credential files are not previewed.
+Interrupted external tool calls remain unresolved until their external result is checked; confirming or closing a record never runs the tool again.
+Docker checks mask nested environment files, keys and credential directories. LocalSandbox runs directly on the host and does not provide this filesystem isolation.
 
 ## Credits
 

@@ -1,7 +1,7 @@
 // Cast metadata and procedural frames share the recipes in portraitArt.ts.
 // See assets/ATTRIBUTION.md.
 
-import { Texture } from 'pixi.js';
+import type { Texture } from 'pixi.js';
 import { paintPortrait, sceneFrameBufs, SCENE_W, SCENE_H } from './portraitArt';
 
 export type OfficeCharacterName =
@@ -49,14 +49,14 @@ export function hexToNumber(hex: string): number {
 // ─── scene frames ────────────────────────────────────────────────────────────
 const frameCache = new Map<OfficeCharacterName, Texture[][]>();
 
-function bufToTexture(buf: Uint8ClampedArray): Texture {
+function bufToTexture(buf: Uint8ClampedArray, factory: typeof Texture): Texture {
   const canvas = document.createElement('canvas');
   canvas.width = SCENE_W; canvas.height = SCENE_H;
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(SCENE_W, SCENE_H);
   img.data.set(buf);
   ctx.putImageData(img, 0, 0);
-  const tex = Texture.from(canvas);
+  const tex = factory.from(canvas);
   tex.source.scaleMode = 'nearest';
   return tex;
 }
@@ -71,9 +71,10 @@ function bufToTexture(buf: Uint8ClampedArray): Texture {
 export async function getCastFrames(name: OfficeCharacterName): Promise<Texture[][]> {
   const cached = frameCache.get(name);
   if (cached) return cached;
+  const { Texture } = await import('pixi.js');
   const { front, back } = sceneFrameBufs(name);
   const toRow = (bufs: Uint8ClampedArray[]): Texture[] => {
-    const [stand, stepL, stepR] = bufs.map(bufToTexture);
+    const [stand, stepL, stepR] = bufs.map((buf) => bufToTexture(buf, Texture));
     return [stand, stepL, stepR, stand, stand, stand, stand];
   };
   const frontRow = toRow(front);

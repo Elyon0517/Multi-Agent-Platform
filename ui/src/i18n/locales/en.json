@@ -1583,7 +1583,21 @@
     "deliveryComplete": "Task completed",
     "deliveryNotice": "Changes are available in your working tree. Check the delivery report for remaining findings.",
     "acknowledgeDelivery": "Got it",
-    "costTooltip": "Cost {{cost}} cents"
+    "costTooltip": "Cost {{cost}} cents",
+    "toolStatusLoading": "Loading tool status…",
+    "toolOutcomeUnknown": "This call was interrupted. Check its result in the external service before resolving it. It will not be retried.",
+    "toolConfirmDone": "I verified it completed",
+    "toolCloseUnknown": "Close without retrying",
+    "toolStatus": {
+      "executing": "Tool is running…",
+      "done": "Completed",
+      "failed": "Tool returned an error",
+      "denied": "Declined",
+      "confirmed_done": "Completion verified",
+      "closed_unknown": "Closed without retrying"
+    },
+    "loadingWorkspace": "Loading workspace…",
+    "loadingView": "Loading view…"
   },
   "monitor": {
     "loading": "Loading usage…",

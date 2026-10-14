@@ -115,3 +115,43 @@ time.sleep(60)
             except ProcessLookupError:
                 break
             await asyncio.sleep(0.01)
+
+
+def test_docker_masks_nested_credentials_repositories_and_aliases(tmp_path):  # type: ignore[no-untyped-def]
+    import csv
+
+    nested = tmp_path / 'services' / 'api'
+    nested.mkdir(parents=True)
+    (nested / '.env.local').write_text('TEST_KEY=private')
+    (nested / 'private.pem').write_text('private')
+    (nested / 'credentials.json').write_text('private')
+    (nested / '.env.example').write_text('TEST_KEY=')
+    git = nested / '.git'
+    git.mkdir()
+    (git / 'config').write_text('credential')
+    (tmp_path / 'source.txt').write_text('private via alias')
+    (nested / '.env.alias').symlink_to(tmp_path / 'source.txt')
+    (tmp_path / 'linked-service').symlink_to(nested, target_is_directory=True)
+    (nested / 'cycle').symlink_to(tmp_path, target_is_directory=True)
+    comma = tmp_path / 'has,comma'
+    comma.mkdir()
+    (comma / '.env').write_text('private')
+    argv = DockerSandbox('img').build_argv(['pytest'], tmp_path, None, False)
+    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == '--mount']
+    destinations = [next(v for v in next(csv.reader([m])) if v.startswith('dst=')) for m in mounts]
+    for rel in ['services/api/.env.local', 'services/api/private.pem', 'services/api/credentials.json', 'source.txt', 'has,comma/.env']:
+        assert 'dst=/workspace/' + rel in destinations
+    assert not any('.env.example' in m for m in mounts)
+    assert '/workspace/services/api/.git:ro,size=1m' in argv
+    assert len(destinations) == len(set(destinations))
+    assert not any('TEST_KEY' in arg for arg in argv)
+
+
+def test_docker_fails_closed_for_credential_symlink_escape(tmp_path):  # type: ignore[no-untyped-def]
+    import pytest
+
+    outside = tmp_path.parent / 'outside-credential'
+    outside.write_text('private')
+    (tmp_path / '.env').symlink_to(outside)
+    with pytest.raises(ValueError, match='escapes workspace'):
+        DockerSandbox('img').build_argv(['pytest'], tmp_path, None, False)

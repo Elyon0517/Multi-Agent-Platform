@@ -31,6 +31,7 @@ function dependentsTree(id: string, all: HiveTask[], seen = new Set<string>()): 
 export function AskMeTab() {
   const { t: translate } = useTranslation();
   const rtl = useRtl();
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const agents = useStore((s) => s.agents);
   const restorable = useStore((s) => s.restorableAgents);
   const [tasks, setTasks] = useState<HiveTask[]>([]);
@@ -198,7 +199,7 @@ export function AskMeTab() {
                   this card's mono face and turns a single newline into a break, so
                   a question with no markdown in it looks exactly as it did. */}
               <div dir={rtl ? 'auto' : undefined} style={{ fontSize: 15, lineHeight: '19px', color: 'var(--cth-ink-900)' }}>
-                <MarkdownPreview source={open.q} variant="card" />
+                <MarkdownPreview projectId={activeProjectId ?? undefined} source={open.q} variant="card" />
               </div>
 
               {/* answer box */}

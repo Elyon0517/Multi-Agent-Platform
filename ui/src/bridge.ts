@@ -123,7 +123,10 @@ export const labBridge = {
     return () => telemetryListeners.delete(listener);
   },
   onBreakerState: (_cb: (s: BreakerState) => void): Off => () => undefined,
-  readBinary: async (_root: string, _rel: string): Promise<BinaryResult> => ({ ok: false, error: 'unsupported' }),
+  readBinary: async (projectId: string, rel: string, signal?: AbortSignal): Promise<BinaryResult> => {
+    try { return { ok: true, ...await api.workspaceImage(projectId, rel, signal) }; }
+    catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+  },
   openExternal: async (url: string): Promise<Ok> => {
     window.open(url, '_blank', 'noopener');
     return { ok: true };

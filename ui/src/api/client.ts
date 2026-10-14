@@ -1,5 +1,8 @@
 import type { components } from './schema';
 
+export type ToolApproval = components['schemas']['ToolApprovalView'];
+export type ToolDecision = components['schemas']['ToolDecisionBody']['decision'];
+
 export type RunStatus = components['schemas']['RunStatus'];
 export type EventType = components['schemas']['EventType'];
 export type LabEvent = components['schemas']['Event'];
@@ -50,7 +53,7 @@ export function onConnectionChange(listener: ConnectionListener): () => void {
   return () => { connectionListeners.delete(listener); };
 }
 
-async function json<T>(path: string, init?: RequestInit, probe = false): Promise<T> {
+async function request(path: string, init?: RequestInit, probe = false): Promise<Response> {
   if (!reachable && !probe) throw new Error(`${init?.method ?? 'GET'} ${path}: server unreachable`);
   const isForm = init?.body instanceof FormData;
   let res: Response;
@@ -72,7 +75,47 @@ async function json<T>(path: string, init?: RequestInit, probe = false): Promise
     throw new Error(`${init?.method ?? 'GET'} ${path}: ${res.status} ${detail}`);
   }
   setReachable(true);
-  return res.json() as Promise<T>;
+  return res;
+}
+
+async function json<T>(path: string, init?: RequestInit, probe = false): Promise<T> {
+  return (await request(path, init, probe)).json() as Promise<T>;
+}
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+async function workspaceImage(projectId: string, path: string, signal?: AbortSignal) {
+  const res = await request(`/projects/${encodeURIComponent(projectId)}/images?${new URLSearchParams({ path })}`, { signal });
+  const mime = res.headers.get('content-type')?.split(';')[0] ?? '';
+  if (!mime.startsWith('image/')) {
+    await res.body?.cancel();
+    throw new Error('Response is not an image');
+  }
+  if (Number(res.headers.get('content-length') ?? 0) > MAX_IMAGE_BYTES) {
+    await res.body?.cancel();
+    throw new Error('Image larger than 10 MB');
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Empty image response');
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_IMAGE_BYTES) throw new Error('Image larger than 10 MB');
+      chunks.push(value);
+    }
+  } catch (e) {
+    await reader.cancel();
+    throw e;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return { bytes, mime, size, path };
 }
 
 /** EventSource that does not let the browser reconnect forever. On error it closes, checks health once,
@@ -158,7 +201,9 @@ export const api = {
   threads: (id: string) => json<Conversation[]>(`${id === 'global' ? '' : `/projects/${id}`}/threads`),
   createThread: (id: string, title: string) => post<Conversation>(`${id === 'global' ? '' : `/projects/${id}`}/threads`, { title }),
   pickFolder: () => post<{ path: string | null }>('/local/pick-folder', {}),
-  decideTool: (id: string, tid: string, approvalId: string, decision: 'allow' | 'deny') =>
+  workspaceImage,
+  toolApprovals: (id: string, tid: string) => json<ToolApproval[]>(`${id === 'global' ? '' : `/projects/${encodeURIComponent(id)}`}/threads/${encodeURIComponent(tid)}/tool-approvals`),
+  decideTool: (id: string, tid: string, approvalId: string, decision: ToolDecision) =>
     post<{ status: string }>(`${id === 'global' ? '' : `/projects/${encodeURIComponent(id)}`}/threads/${encodeURIComponent(tid)}/tool-approvals/${encodeURIComponent(approvalId)}`, { decision }),
   mcpStatus: () => json<Array<{ name: string; roles: string[]; running: boolean; tools: number; error: string | null }>>('/mcp/status'),
   deleteThread: (id: string, tid: string) => json<{ deleted: boolean }>(`${id === 'global' ? '' : `/projects/${encodeURIComponent(id)}`}/threads/${encodeURIComponent(tid)}`, { method: 'DELETE' }),

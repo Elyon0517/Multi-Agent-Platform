@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from agentlab.adapters.store.memory import NotFound
+from agentlab.api.images import build_image_router
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.conversation import Message, RootTurn
@@ -20,6 +21,13 @@ from agentlab.core.loop.driver import Decision, Driver
 from agentlab.core.loop.states import ACTIVE
 from agentlab.core.ports import RunBusy
 from agentlab.core.schemas import Approval, Artifact, ArtifactKind, Event, GateResult, Iteration, Run, Step
+from agentlab.core.session.tool_approvals import (
+    ToolApprovalView,
+    ToolDecision,
+    approval_views,
+    decide_tool_approval,
+    recover_tool_approvals,
+)
 from agentlab.run_service import CreateRun
 
 log = logging.getLogger(__name__)
@@ -58,7 +66,7 @@ class PickedFolder(BaseModel):
 
 
 class ToolDecisionBody(BaseModel):
-    decision: Literal["allow", "deny"]
+    decision: ToolDecision
 
 
 class RosterEntry(BaseModel):
@@ -80,6 +88,7 @@ class RunDetail(BaseModel):
 
 def create_app(svc: Services | None = None) -> FastAPI:
     svc = svc or build_services()
+    recover_tool_approvals(svc)
     drivers: dict[str, Driver] = {}
     tasks: set[asyncio.Task[Run]] = set()
     run_tasks: dict[str, asyncio.Task[Run]] = {}
@@ -96,6 +105,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(build_router(svc))
+    app.include_router(build_image_router(svc))
 
     from agentlab.core.monitor import MonitorUsage, summarize
 
@@ -313,37 +323,18 @@ def create_app(svc: Services | None = None) -> FastAPI:
     @app.post("/projects/{project_id}/threads/{thread_id}/tool-approvals/{approval_id}")
     async def decide_tool(project_id: str | None, thread_id: str, approval_id: str,
                           body: ToolDecisionBody) -> dict[str, str]:
-        """Run (or refuse) an external tool Root asked for; the outcome is posted to the conversation."""
-        from agentlab.adapters.mcp import describe
-        from agentlab.core.conversation import Message
-        from agentlab.core.schemas import Event, EventType
-        from agentlab.core.session.store import append_message
+        return await decide_tool_approval(svc, project_id, thread_id, approval_id, body.decision)
 
-        with svc.store.lock_run("tool-approval:" + approval_id):
-            record = next((r for r in svc.store.records("mcp_approval") if r.get("id") == approval_id), None)
-            if not record or record["thread_id"] != thread_id or record.get("project_id") != project_id:
-                raise HTTPException(404, "approval not found in this conversation")
-            if record["status"] != "pending":
-                raise HTTPException(409, f"already {record['status']}")
-            if body.decision == "deny":
-                record["status"], text = "denied", f"Rejected `{record['tool']}`; it was not run."
-            else:
-                tool = next((t for t in await svc.mcp.tools("root") if t.qualified == record["tool"]), None)
-                if tool is None:
-                    raise HTTPException(503, "the tool's MCP server is not available")
-                try:
-                    result = await svc.mcp.call(tool, record["args"])
-                    record["status"] = "failed" if result.get("error") else "done"
-                    text = f"Ran `{tool.qualified}`:\n```\n{describe(result)[:4000]}\n```"
-                except Exception as exc:
-                    record["status"], text = "failed", f"`{tool.qualified}` failed: {type(exc).__name__}"
-            svc.store.put_record("mcp_approval", approval_id, record)
-            message = append_message(svc.store, thread_id, project_id, Message(
-                author="system", kind="tool_result", text=text, payload={"approval_id": approval_id},
-            ))
-        svc.bus.publish(Event(run_id="thread:" + thread_id, type=EventType.MESSAGE_CREATED, actor="root",
-                              payload={"message": message.model_dump(mode="json")}))
-        return {"status": record["status"]}
+    @app.get("/projects/{project_id}/threads/{thread_id}/tool-approvals", response_model=list[ToolApprovalView])
+    def tool_approvals(project_id: str | None, thread_id: str) -> list[ToolApprovalView]:
+        try:
+            return approval_views(svc, project_id, thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, "conversation not found in this project") from exc
+
+    @app.get("/threads/{thread_id}/tool-approvals", response_model=list[ToolApprovalView])
+    def global_tool_approvals(thread_id: str) -> list[ToolApprovalView]:
+        return tool_approvals(None, thread_id)
 
     @app.post("/threads/{thread_id}/tool-approvals/{approval_id}")
     async def decide_global_tool(thread_id: str, approval_id: str, body: ToolDecisionBody) -> dict[str, str]:

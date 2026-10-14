@@ -1107,3 +1107,72 @@ def test_signoff_report_round_trips_with_approval_and_preserves_legacy_payload(s
     restored.feedback = 'please review again'
     store.save_approval(restored)
     assert store.pending_approval(run.id).report == report
+
+
+def test_external_tool_approval_recovers_durably_without_replay(store, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from agentlab.api.app import create_app
+    from agentlab.core.conversation import Conversation
+    from agentlab.core.session.service import request_tool_approval
+    from agentlab.services import ProjectService
+    from tests.unit.test_mcp_tools import WRITE, FakeHub
+    from tests.unit.test_project_experience import services
+
+    svc = services(tmp_path)
+    svc.store = store
+    svc.projects = ProjectService(store)
+    svc.mcp = hub = FakeHub()
+    thread = Conversation(project_id=None, title='approval recovery')
+    store.put_record('thread', thread.id, thread.model_dump(mode='json'))
+    request_tool_approval(svc, None, thread.id, WRITE.qualified, {})
+    record = store.records('mcp_approval')[0]
+    record['status'] = 'executing'
+    store.put_record('mcp_approval', record['id'], record)
+    with TestClient(create_app(svc)) as client:
+        url = f'/threads/{thread.id}/tool-approvals/{record["id"]}'
+        assert client.post(url, json={'decision': 'allow'}).status_code == 409
+        assert store.records('mcp_approval')[0]['status'] == 'unknown_outcome'
+        assert client.post(url, json={'decision': 'close_unknown'}).json() == {'status': 'closed_unknown'}
+    assert hub.calls == []
+    assert store.records('mcp_approval')[0]['status'] == 'closed_unknown'
+
+
+async def test_external_tool_lifecycle_lock_blocks_delete_for_both_stores(store, tmp_path):
+    from httpx import ASGITransport, AsyncClient
+
+    from agentlab.api.app import create_app
+    from agentlab.core.conversation import Conversation
+    from agentlab.core.session.service import request_tool_approval
+    from agentlab.services import ProjectService
+    from tests.unit.test_mcp_tools import WRITE, FakeHub
+    from tests.unit.test_project_experience import services
+
+    svc = services(tmp_path)
+    svc.store = store
+    svc.projects = ProjectService(store)
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    class BlockingHub(FakeHub):
+        async def call(self, tool, args):
+            assert store.records('mcp_approval')[0]['status'] == 'executing'
+            started.set()
+            await finish.wait()
+            return await super().call(tool, args)
+
+    svc.mcp = hub = BlockingHub()
+    thread = Conversation(project_id=None, title='approval lifecycle')
+    store.put_record('thread', thread.id, thread.model_dump(mode='json'))
+    request_tool_approval(svc, None, thread.id, WRITE.qualified, {})
+    record = store.records('mcp_approval')[0]
+    async with AsyncClient(transport=ASGITransport(app=create_app(svc)), base_url='http://test') as client:
+        task = asyncio.create_task(client.post(f'/threads/{thread.id}/tool-approvals/{record["id"]}', json={'decision': 'allow'}))
+        await asyncio.wait_for(started.wait(), 3)
+        try:
+            create_app(svc)  # A second application startup must not recover a live call.
+            assert store.records('mcp_approval')[0]['status'] == 'executing'
+            assert (await client.delete(f'/threads/{thread.id}')).status_code == 409
+        finally:
+            finish.set()
+        assert (await task).json() == {'status': 'done'}
+    assert len(hub.calls) == 1
