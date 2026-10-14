@@ -69,7 +69,7 @@ const SUPPORTED: readonly string[] = LANGUAGES.map((l) => l.code);
  * The orchestrator's display name, for every string that talks about it.
  *
  * The user can rename the god, and roughly forty strings mention it. Baking
- * "Michael" into the locale files would silently undo that rename everywhere at
+ * "Aster" into the locale files would silently undo that rename everywhere at
  * once — a bug this codebase has already fixed three times in the spawn path.
  * So the locales say `{{godName}}` and the live name is supplied here as an
  * i18next DEFAULT VARIABLE, which means no call site has to pass it. A call site

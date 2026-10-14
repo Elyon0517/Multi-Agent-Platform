@@ -5,9 +5,9 @@ import { Texture } from 'pixi.js';
 import { paintPortrait, sceneFrameBufs, SCENE_W, SCENE_H } from './portraitArt';
 
 export type OfficeCharacterName =
-  | 'michael' | 'jim' | 'pam' | 'dwight' | 'kevin' | 'angela'
-  | 'oscar' | 'stanley' | 'phyllis' | 'andy' | 'kelly' | 'ryan'
-  | 'toby' | 'creed' | 'meredith';
+  | 'aster' | 'byte' | 'lumen' | 'quartz' | 'moss' | 'iris'
+  | 'atlas' | 'cedar' | 'fern' | 'ember' | 'coral' | 'nova'
+  | 'sage' | 'flint' | 'river';
 
 export interface CastMember {
   name: OfficeCharacterName;
@@ -20,27 +20,27 @@ export interface CastMember {
 
 /** Selectable roster, in display order. */
 export const OFFICE_CAST: CastMember[] = [
-  { name: 'michael',  displayName: 'Michael',  shirt: '#5a6b8c', blurb: "World's best boss" },
-  { name: 'jim',      displayName: 'Jim',      shirt: '#6fa8dc', blurb: 'Salesman, prankster' },
-  { name: 'pam',      displayName: 'Pam',      shirt: '#9caf88', blurb: 'Receptionist, artist' },
-  { name: 'dwight',   displayName: 'Dwight',   shirt: '#b89b3e', blurb: 'Assistant (to the) RM' },
-  { name: 'kevin',    displayName: 'Kevin',    shirt: '#4a7ab5', blurb: 'Accounting' },
-  { name: 'angela',   displayName: 'Angela',   shirt: '#8a86a6', blurb: 'Head of accounting' },
-  { name: 'oscar',    displayName: 'Oscar',    shirt: '#7a4b6b', blurb: 'Accountant' },
-  { name: 'stanley',  displayName: 'Stanley',  shirt: '#8c5a4b', blurb: 'Sales, crossword' },
-  { name: 'phyllis',  displayName: 'Phyllis',  shirt: '#b08bbf', blurb: 'Sales' },
-  { name: 'andy',     displayName: 'Andy',     shirt: '#6fae6f', blurb: 'Cornell, a cappella' },
-  { name: 'kelly',    displayName: 'Kelly',    shirt: '#d16ba5', blurb: 'Customer service' },
-  { name: 'ryan',     displayName: 'Ryan',     shirt: '#3a3a44', blurb: 'The temp' },
-  { name: 'toby',     displayName: 'Toby',     shirt: '#9a8c5a', blurb: 'Human resources' },
-  { name: 'creed',    displayName: 'Creed',    shirt: '#6b7a4b', blurb: 'Quality assurance' },
-  { name: 'meredith', displayName: 'Meredith', shirt: '#b5544a', blurb: 'Supplier relations' },
+  { name: 'aster', displayName: 'Aster', shirt: '#4ba6a0', blurb: 'Conversation coordinator' },
+  { name: 'byte', displayName: 'Byte', shirt: '#d98168', blurb: 'Implementation explorer' },
+  { name: 'lumen', displayName: 'Lumen', shirt: '#8f86c9', blurb: 'Plan designer' },
+  { name: 'quartz', displayName: 'Quartz', shirt: '#63a8c1', blurb: 'Correctness specialist' },
+  { name: 'moss', displayName: 'Moss', shirt: '#a4b56e', blurb: 'Memory gardener' },
+  { name: 'iris', displayName: 'Iris', shirt: '#c77d9a', blurb: 'Test craftsperson' },
+  { name: 'atlas', displayName: 'Atlas', shirt: '#bd9b64', blurb: 'Architecture cartographer' },
+  { name: 'cedar', displayName: 'Cedar', shirt: '#739ac8', blurb: 'Workflow coordinator' },
+  { name: 'fern', displayName: 'Fern', shirt: '#7aac90', blurb: 'Research companion' },
+  { name: 'ember', displayName: 'Ember', shirt: '#c79570', blurb: 'Build engineer' },
+  { name: 'coral', displayName: 'Coral', shirt: '#b68bce', blurb: 'Interface designer' },
+  { name: 'nova', displayName: 'Nova', shirt: '#7faca7', blurb: 'General explorer' },
+  { name: 'sage', displayName: 'Sage', shirt: '#b8a366', blurb: 'Decision steward' },
+  { name: 'flint', displayName: 'Flint', shirt: '#7e91ac', blurb: 'Gate keeper' },
+  { name: 'river', displayName: 'River', shirt: '#c58c91', blurb: 'Documentation guide' },
 ];
 
 export const CAST_BY_NAME: Record<OfficeCharacterName, CastMember> =
   Object.fromEntries(OFFICE_CAST.map((c) => [c.name, c])) as Record<OfficeCharacterName, CastMember>;
 
-export const DEFAULT_CHARACTER: OfficeCharacterName = 'jim';
+export const DEFAULT_CHARACTER: OfficeCharacterName = 'byte';
 
 export function hexToNumber(hex: string): number {
   return parseInt(hex.replace('#', ''), 16);

@@ -14,20 +14,20 @@ export interface Seat {
 }
 
 export const SEATS: Record<string, Seat> = {
-  root: { character: 'michael', accent: 'lemon', name: 'Root', description: 'Conversation', isGod: true },
-  supervisor: { character: 'stanley', accent: 'mint', name: 'Supervisor', description: 'Task orchestration' },
-  'project-planner': { character: 'stanley', accent: 'lemon', name: 'Project Planner', description: 'Phases and steps' },
-  planner: { character: 'pam', accent: 'mint', name: 'Planner', description: 'Plans and acceptance criteria' },
-  coder: { character: 'jim', accent: 'sky', name: 'Coder', description: 'Implements the plan' },
-  'correctness-reviewer': { character: 'dwight', accent: 'coral', name: 'Correctness', description: 'Correctness review' },
-  'arch-reviewer': { character: 'oscar', accent: 'lilac', name: 'Architecture', description: 'Architecture review' },
-  'test-style-reviewer': { character: 'angela', accent: 'peach', name: 'Test & Style', description: 'Tests and style' },
-  arbiter: { character: 'toby', accent: 'lilac', name: 'Arbiter', description: 'Deterministic arbitration' },
-  summarizer: { character: 'kevin', accent: 'mint', name: 'Summarizer', description: 'Episodic memory' },
-  gate: { character: 'creed', accent: 'coral', name: 'Gate', description: 'build / type / lint / test' },
+  root: { character: 'aster', accent: 'lemon', name: 'Root', description: 'Conversation', isGod: true },
+  supervisor: { character: 'cedar', accent: 'mint', name: 'Supervisor', description: 'Task orchestration' },
+  'project-planner': { character: 'cedar', accent: 'lemon', name: 'Project Planner', description: 'Phases and steps' },
+  planner: { character: 'lumen', accent: 'mint', name: 'Planner', description: 'Plans and acceptance criteria' },
+  coder: { character: 'byte', accent: 'sky', name: 'Coder', description: 'Implements the plan' },
+  'correctness-reviewer': { character: 'quartz', accent: 'coral', name: 'Correctness', description: 'Correctness review' },
+  'arch-reviewer': { character: 'atlas', accent: 'lilac', name: 'Architecture', description: 'Architecture review' },
+  'test-style-reviewer': { character: 'iris', accent: 'peach', name: 'Test & Style', description: 'Tests and style' },
+  arbiter: { character: 'sage', accent: 'lilac', name: 'Arbiter', description: 'Deterministic arbitration' },
+  summarizer: { character: 'moss', accent: 'mint', name: 'Summarizer', description: 'Episodic memory' },
+  gate: { character: 'flint', accent: 'coral', name: 'Gate', description: 'build / type / lint / test' },
 };
 
-export const FALLBACK_SEAT: Seat = { character: 'ryan', accent: 'sky', name: '', description: '' };
+export const FALLBACK_SEAT: Seat = { character: 'nova', accent: 'sky', name: '', description: '' };
 
 export function seatFor(role: string): Seat {
   return SEATS[role] ?? { ...FALLBACK_SEAT, name: role };

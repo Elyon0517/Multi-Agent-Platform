@@ -42,16 +42,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-munder-difflin in turn vendored the office maps and tilesets from
-[shahar061/the-office](https://github.com/shahar061/the-office) (ISC).
+## the-office (ISC)
 
-## Pixel art: LimeZu "Modern Interiors" (credit required)
+`src/scene/office/TiledMapRenderer.ts`, `Camera.ts` and `SeatPool.ts` include code
+ported from [shahar061/the-office](https://github.com/shahar061/the-office).
+The maps and artwork from that repository are no longer bundled.
 
-`src/assets/tilesets/*.png` and the Tiled maps built on them (`src/assets/maps/*.tmj`) are from
-**Modern Interiors - RPG Tileset [16X16]** by **LimeZu** — https://limezu.itch.io/ — under the LimeZu Complete
-Version licence (see `src/assets/tilesets/LIMEZUASSETS-LICENSE.txt`). Credit is required. The licence forbids
-redistributing the asset itself; before Agent Converge is published as open source these files must be replaced or
-excluded (tracked in `docs/DISCOVERY.md` §19).
+```
+ISC License
+
+Copyright (c) 2026 shahar061
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+## Original workspace artwork
+
+`src/assets/tilesets/workspace.svg`, `src/assets/maps/studio.tmj`,
+`src/assets/maps/atrium.tmj` and the character recipes in
+`src/scene/office/portraitArt.ts` were authored for Agent Converge. Shapes,
+layouts and character recipes do not use third-party image inputs or likeness
+references. Permission for these original artwork files is in
+`src/assets/LICENSE.txt`; the existing renderer code retains its upstream MIT/ISC notices.
 
 ## Fonts (SIL OFL 1.1)
 
