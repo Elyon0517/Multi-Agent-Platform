@@ -283,6 +283,7 @@ export function TaskDetail({ task, all, assigneeName, onMove, onAssign, onClose 
   onAssign: () => void;
   onClose: () => void;
 }) {
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const { t } = useTranslation();
   const rtl = useRtl();
   const col = COLUMNS.find((c) => c.key === task.status) ?? COLUMNS[0];
@@ -359,7 +360,7 @@ export function TaskDetail({ task, all, assigneeName, onMove, onAssign, onClose 
                     }}>
                       <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 8, flexShrink: 0, marginTop: 2 }}>Q</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <MarkdownPreview source={e.q} variant="card" />
+                        <MarkdownPreview projectId={activeProjectId ?? undefined} source={e.q} variant="card" />
                       </div>
                     </div>
                     {e.a ? (
@@ -371,7 +372,7 @@ export function TaskDetail({ task, all, assigneeName, onMove, onAssign, onClose 
                       }}>
                         <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 8, flexShrink: 0, marginTop: 2 }}>A</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <MarkdownPreview source={e.a} variant="card" />
+                          <MarkdownPreview projectId={activeProjectId ?? undefined} source={e.a} variant="card" />
                         </div>
                       </div>
                     ) : (

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, type Project, type Conversation, type RunDetail } from '@/api/client';
+import { api, type Project, type Conversation, type RunDetail, type ToolApproval, type ToolDecision } from '@/api/client';
 import { ApprovalBar } from './ApprovalBar';
 import { useStore } from '@/store/store';
 import { PixelButton } from '@/components/PixelButton';
 import { Icon } from '@/components/Icon';
-import ReactMarkdown from 'react-markdown';
+import { MarkdownPreview } from '@/markdown/MarkdownPreview';
+import { ToolApprovalActions } from './ToolApprovalActions';
 import { Status } from './ui';
 import { conversationTitle, hasConversationContent } from './conversationNavigation';
 export function ProjectSidebar({ collapsed, onCollapsedChange }: { collapsed: boolean; onCollapsedChange: (collapsed: boolean) => void }) {
@@ -152,6 +153,8 @@ export function ConversationView() {
   const [delta, setDelta] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const [toolApprovals, setToolApprovals] = useState<Record<string, ToolApproval['status']>>({});
+  const [toolRefresh, setToolRefresh] = useState(0);
   const [toolBusy, setToolBusy] = useState(false);
   const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
   const [runStatus, setRunStatus] = useState<Record<string, string>>({});
@@ -163,6 +166,17 @@ export function ConversationView() {
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const unresolvedTools = Object.values(toolApprovals).some((status) => ['pending', 'executing', 'unknown_outcome'].includes(status));
+  useEffect(() => {
+    if (!activeThreadId) return;
+    let alive = true;
+    const reload = () => api.toolApprovals(activeProjectId ?? 'global', activeThreadId).then((approvals) => {
+      if (alive) setToolApprovals(Object.fromEntries(approvals.map((a) => [a.id, a.status])));
+    }).catch((e) => { if (alive) setError(String(e)); });
+    void reload();
+    const timer = unresolvedTools ? setInterval(() => { void reload(); }, 3000) : undefined;
+    return () => { alive = false; if (timer !== undefined) clearInterval(timer); };
+  }, [activeProjectId, activeThreadId, toolRefresh, unresolvedTools]);
   // The composer grows with its content up to a limit, then scrolls.
   useLayoutEffect(() => {
     const el = composer.current;
@@ -171,12 +185,19 @@ export function ConversationView() {
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }, [draft]);
   useEffect(() => {
+    setToolApprovals({}); setToolBusy(false);
     setThread(null); setDraft(''); setDelta(''); setBusy(false); setError(null); setPending(null);
     stickToBottom.current = true;
     if (!activeThreadId) return;
     let alive = true;
-    const reload = () => api.threads(activeProjectId ?? 'global').then((ts) => {
-      if (alive) setThread(ts.find((x) => x.id === activeThreadId) ?? null);
+    const reload = () => Promise.all([
+      api.threads(activeProjectId ?? 'global'),
+      api.toolApprovals(activeProjectId ?? 'global', activeThreadId),
+    ]).then(([ts, approvals]) => {
+      if (alive) {
+        setThread(ts.find((x) => x.id === activeThreadId) ?? null);
+        setToolApprovals(Object.fromEntries(approvals.map((a) => [a.id, a.status])));
+      }
     }).catch((e) => { if (alive) setError(String(e)); });
     void reload();
     const close = api.threadEvents(activeProjectId ?? 'global', activeThreadId, (type, payload) => {
@@ -257,11 +278,11 @@ export function ConversationView() {
       .catch((e) => { if (current()) setError(String(e)); })
       .finally(() => { if (current()) setStopping(false); });
   };
-  const decideTool = (approvalId: string, decision: 'allow' | 'deny') => {
+  const decideTool = (approvalId: string, decision: ToolDecision) => {
     setToolBusy(true); setError(null);
     void api.decideTool(activeProjectId ?? 'global', activeThreadId!, approvalId, decision)
       .catch((e) => { if (current()) setError(String(e)); })
-      .finally(() => { if (current()) setToolBusy(false); });
+      .finally(() => { if (current()) { setToolBusy(false); setToolRefresh((x) => x + 1); } });
   };
   return (
     <section aria-label={t('lab.conversation')} className="chat">
@@ -272,15 +293,14 @@ export function ConversationView() {
         <div className="chat-column">
           {thread?.messages.map((m) => {
             const run = m.run_id ? runs.find((r) => r.id === m.run_id) : undefined;
-            const toolApproval = m.kind === 'tool_approval' && typeof m.payload?.approval_id === 'string'
-              && !thread.messages.some((r) => r.kind === 'tool_result' && r.payload?.approval_id === m.payload?.approval_id);
+            const toolApproval = m.kind === 'tool_approval' && typeof m.payload?.approval_id === 'string';
             if (m.author === 'user') {
               return <article key={m.id} className="chat-msg user"><div className="chat-bubble">{m.text}</div></article>;
             }
             return (
               <article key={m.id} className={`chat-msg ${m.author === 'system' || m.kind === 'summary' || m.kind === 'tool_result' ? 'note' : 'assistant'}`}>
                 {m.author === 'assistant' && m.kind !== 'summary' && <div className="chat-author">Root</div>}
-                <div className="chat-md"><ReactMarkdown>{m.text}</ReactMarkdown></div>
+                <div className="chat-md"><MarkdownPreview source={m.text} variant="card" projectId={activeProjectId ?? undefined} /></div>
                 {!!m.sources?.length && (
                   <div className="chat-sources">
                     {m.sources.map((source) => source.kind === 'web' && /^https?:\/\//.test(source.ref)
@@ -295,10 +315,8 @@ export function ConversationView() {
                   </button>
                 )}
                 {toolApproval && (
-                  <div className="chat-actions">
-                    <button type="button" className="primary" disabled={toolBusy} onClick={() => decideTool(String(m.payload.approval_id), 'allow')}>{t('lab.allowTool')}</button>
-                    <button type="button" disabled={toolBusy} onClick={() => decideTool(String(m.payload.approval_id), 'deny')}>{t('lab.denyTool')}</button>
-                  </div>
+                  <ToolApprovalActions status={toolApprovals[String(m.payload.approval_id)]} busy={toolBusy}
+                    onDecision={(decision) => decideTool(String(m.payload.approval_id), decision)} />
                 )}
               </article>
             );
@@ -308,7 +326,7 @@ export function ConversationView() {
           )}
           {delta && (
             <article className="chat-msg assistant" aria-live="polite">
-              <div className="chat-author">Root</div><div className="chat-md"><ReactMarkdown>{delta}</ReactMarkdown></div>
+              <div className="chat-author">Root</div><div className="chat-md"><MarkdownPreview source={delta} variant="card" projectId={activeProjectId ?? undefined} /></div>
             </article>
           )}
           {busy && !delta && (

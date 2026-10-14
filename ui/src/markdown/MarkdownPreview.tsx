@@ -27,10 +27,8 @@ export interface MarkdownPreviewProps {
   source: string;
   /** Repo-relative path of the file being previewed (for resolving relative links). */
   baseRel?: string;
-  /** Absolute workspace root. Supplying it turns LOCAL images from placeholder
-   *  chips into actual pictures (read through the root-confined fs IPC); without
-   *  it every image stays a chip, because there is nothing to resolve against. */
-  root?: string;
+  /** Registered project ID; image reads are confined to that project's workspace. */
+  projectId?: string;
   /** Open a sibling markdown file (repo-relative path) in the host's context. */
   onOpenMarkdownLink?: (rel: string) => void;
   /** Page vs in-card rendering. Defaults to `document`. */
@@ -38,7 +36,7 @@ export interface MarkdownPreviewProps {
 }
 
 export const MarkdownPreview = memo(function MarkdownPreview({
-  source, baseRel, root, onOpenMarkdownLink, variant = 'document'
+  source, baseRel, projectId, onOpenMarkdownLink, variant = 'document'
 }: MarkdownPreviewProps) {
   const card = variant === 'card';
   // Enable per-block direction only when the selected app language is RTL.
@@ -74,9 +72,9 @@ export const MarkdownPreview = memo(function MarkdownPreview({
           // Local images load through the workspace bridge; remote images use placeholders.
           img: ({ alt, src }) => {
             const s = typeof src === 'string' ? src : undefined;
-            const rel = root ? resolveLocalImageRel(baseRel, s) : null;
-            if (!root || !rel) return <ImageChip alt={alt} src={s} />;
-            return <MdImage root={root} rel={rel} alt={alt} src={s} />;
+            const rel = projectId ? resolveLocalImageRel(baseRel, s) : null;
+            if (!projectId || !rel) return <ImageChip alt={alt} src={s} />;
+            return <MdImage key={`${projectId}:${rel}`} projectId={projectId} rel={rel} alt={alt} src={s} />;
           }
         }}
       >
@@ -99,8 +97,8 @@ function ImageChip({ alt, src, note }: { alt?: string; src?: string; note?: stri
 /** A local image inside rendered markdown. Falls back to the chip on any
  *  failure so a stale path in a report degrades to the old behaviour instead of
  *  a broken-image glyph. Blob lifetime (create AND revoke) belongs to the hook. */
-function MdImage({ root, rel, alt, src }: { root: string; rel: string; alt?: string; src?: string }) {
-  const img = useWorkspaceImage(root, rel);
+function MdImage({ projectId, rel, alt, src }: { projectId: string; rel: string; alt?: string; src?: string }) {
+  const img = useWorkspaceImage(projectId, rel);
   const [decodeFailed, setDecodeFailed] = useState(false);
   if (img.status === 'loading') return <ImageChip alt={alt} src={src} note="loading" />;
   if (img.status === 'error') return <ImageChip alt={alt} src={src} note={img.error} />;

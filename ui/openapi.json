@@ -1036,6 +1036,49 @@
         }
       }
     },
+    "/projects/{project_id}/images": {
+      "get": {
+        "summary": "Image",
+        "operationId": "image_projects__project_id__images_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/monitor/usage": {
       "get": {
         "summary": "Monitor Usage",
@@ -1475,7 +1518,6 @@
     "/projects/{project_id}/threads/{thread_id}/tool-approvals/{approval_id}": {
       "post": {
         "summary": "Decide Tool",
-        "description": "Run (or refuse) an external tool Root asked for; the outcome is posted to the conversation.",
         "operationId": "decide_tool_projects__project_id__threads__thread_id__tool_approvals__approval_id__post",
         "parameters": [
           {
@@ -1534,6 +1576,108 @@
                     "type": "string"
                   },
                   "title": "Response Decide Tool Projects  Project Id  Threads  Thread Id  Tool Approvals  Approval Id  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/threads/{thread_id}/tool-approvals": {
+      "get": {
+        "summary": "Tool Approvals",
+        "operationId": "tool_approvals_projects__project_id__threads__thread_id__tool_approvals_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ToolApprovalView"
+                  },
+                  "title": "Response Tool Approvals Projects  Project Id  Threads  Thread Id  Tool Approvals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/threads/{thread_id}/tool-approvals": {
+      "get": {
+        "summary": "Global Tool Approvals",
+        "operationId": "global_tool_approvals_threads__thread_id__tool_approvals_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ToolApprovalView"
+                  },
+                  "title": "Response Global Tool Approvals Threads  Thread Id  Tool Approvals Get"
                 }
               }
             }
@@ -4585,13 +4729,48 @@
         ],
         "title": "StepStatus"
       },
+      "ToolApprovalView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "executing",
+              "done",
+              "failed",
+              "denied",
+              "unknown_outcome",
+              "confirmed_done",
+              "closed_unknown"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tool",
+          "status"
+        ],
+        "title": "ToolApprovalView"
+      },
       "ToolDecisionBody": {
         "properties": {
           "decision": {
             "type": "string",
             "enum": [
               "allow",
-              "deny"
+              "deny",
+              "confirm_done",
+              "close_unknown"
             ],
             "title": "Decision"
           }

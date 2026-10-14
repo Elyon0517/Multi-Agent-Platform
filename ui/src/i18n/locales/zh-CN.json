@@ -1583,7 +1583,21 @@
     "deliveryComplete": "任务已完成",
     "deliveryNotice": "修改已在当前工作区。剩余评审意见请查看交付报告。",
     "acknowledgeDelivery": "确认",
-    "costTooltip": "费用 {{cost}} 美分"
+    "costTooltip": "费用 {{cost}} 美分",
+    "toolStatusLoading": "正在读取工具状态…",
+    "toolOutcomeUnknown": "调用已中断，结果尚不确定。请先到外部服务核对结果，再处理此记录。不会自动重试。",
+    "toolConfirmDone": "已核实执行完成",
+    "toolCloseUnknown": "关闭记录，不重试",
+    "toolStatus": {
+      "executing": "工具正在执行…",
+      "done": "已完成",
+      "failed": "工具返回错误",
+      "denied": "已拒绝",
+      "confirmed_done": "已核实完成",
+      "closed_unknown": "已关闭，未重试"
+    },
+    "loadingWorkspace": "正在加载工作空间…",
+    "loadingView": "正在加载页面…"
   },
   "monitor": {
     "loading": "正在加载用量…",

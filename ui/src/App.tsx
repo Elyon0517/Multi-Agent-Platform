@@ -1,6 +1,6 @@
 import { LANGUAGES, setLanguage } from '@/i18n';
 import { useTranslation } from 'react-i18next';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, type RunDetail } from '@/api/client';
 import { watchRun } from '@/api/watchRun';
 import { useStore, type ConsoleTab } from '@/store/store';
@@ -14,19 +14,20 @@ import { RunTimeline } from '@/views/RunTimeline';
 import { VerdictBoard } from '@/views/VerdictBoard';
 import { AgentDetail } from '@/views/AgentDetail';
 import { ActivityView } from '@/views/ActivityView';
-import { KnowledgeView } from '@/views/KnowledgeView';
-import { ProjectView } from '@/views/ProjectView';
 import { ProjectDialogs } from '@/views/ProjectDialogs';
 import { ConnectionDialog } from '@/views/ConnectionDialog';
 import { ConsoleSplitter, OfficeMonitor } from '@/views/LayoutControls';
 import { loadLayout, saveLayout, type LayoutPrefs } from '@/views/layoutPrefs';
 import { Icon } from '@/components/Icon';
-import { MonitorView } from '@/views/MonitorView';
-import { SettingsView } from '@/views/SettingsView';
 import { Status, errorText } from '@/views/ui';
 
 import { ArtifactViewer } from '@/views/ArtifactViewer';
 import { ProjectSidebar, ConversationView } from '@/views/ProjectSidebar';
+
+const ProjectView = lazy(() => import('@/views/ProjectView').then((module) => ({ default: module.ProjectView })));
+const KnowledgeView = lazy(() => import('@/views/KnowledgeView').then((module) => ({ default: module.KnowledgeView })));
+const MonitorView = lazy(() => import('@/views/MonitorView').then((module) => ({ default: module.MonitorView })));
+const SettingsView = lazy(() => import('@/views/SettingsView').then((module) => ({ default: module.SettingsView })));
 
 const TABS: { key: ConsoleTab; label: string }[] = [
   { key: 'chat', label: 'conversation' },
@@ -174,12 +175,14 @@ export function App() {
               {detail?.run.id === activeRunId && <ArtifactViewer key={`artifact:${detail.run.id}`} detail={detail} />}
             </>
           )}
+          <Suspense fallback={<div role="status">{t('lab.loadingView')}</div>}>
           {tab === 'project' && <ProjectView onRunStarted={(id) => void openRun(id)} />}
           {tab === 'tasks' && <TasksKanban />}
           {tab === 'memory' && <KnowledgeView key={activeProjectId ?? 'global'} />}
           {tab === 'activity' && <ActivityView />}
           {tab === 'monitor' && <MonitorView />}
           {tab === 'settings' && <SettingsView />}
+          </Suspense>
         </div>
       </aside>
       <TaskDetailOverlay />

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { OfficeFloor } from '@/scene/office/OfficeFloor';
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+const OfficeFloor = lazy(() => import('@/scene/office/OfficeFloor').then((module) => ({ default: module.OfficeFloor })));
 import { Icon } from '@/components/Icon';
 import { PixelButton } from '@/components/PixelButton';
 import { DEFAULT_CONSOLE_WIDTH, MIN_CONSOLE_WIDTH, MIN_MAIN_WIDTH } from './layoutPrefs';
@@ -64,7 +64,7 @@ export function OfficeMonitor({ minimized, onMinimizedChange }: {
   };
   return (
     <section ref={ref} aria-label={t('lab.officeFloor')} style={{ position: 'relative', minHeight: 0, background: 'var(--cth-ink-900)' }}>
-      <OfficeFloor />
+      <Suspense fallback={<div role="status" style={{ color: 'var(--cth-paper-100)', padding: 16 }}>{t('lab.loadingWorkspace')}</div>}><OfficeFloor /></Suspense>
       <div className="office-controls">
         <button type="button" onClick={toggleFullscreen}
           title={t(fullscreen ? 'lab.officeExitFullscreen' : 'lab.officeFullscreen')}
