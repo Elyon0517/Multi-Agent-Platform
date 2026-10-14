@@ -115,8 +115,8 @@ const GOSSIP_KEYS = [
 ] as const;
 
 /** Load a texture via an <img> element. Unlike Pixi's Assets.load(), this
- *  handles extension-less data: URLs (Vite inlines small assets like the a5
- *  tileset as base64), which the Assets resolver fails to type-detect. */
+ *  handles extension-less data: URLs when Vite inlines small assets,
+ *  which the Assets resolver fails to type-detect. */
 function loadTexture(url: string): Promise<Texture> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -185,7 +185,7 @@ export function OfficeFloor() {
     const MAX_ENVELOPES = 16;
 
     const init = async () => {
-      // Load the active theme bundle (falls back to 'office' on a bad/absent bundle).
+      // Load the active theme bundle (falls back to 'studio' on a bad/absent bundle).
       const theme = await loadTheme(officeTheme);
       await app.init({
         background: hexNum(theme.palette.background),
@@ -306,7 +306,7 @@ export function OfficeFloor() {
       }
       if (waitTiles.length === 0) waitTiles.push(entrance);
 
-      // Seat 0 is desk-ceo — "Michael's room" — reserved for the god agent.
+      // Seat 0 is desk-ceo — "Aster's room" — reserved for the god agent.
       // All other workers claim seats from 1 onward.
       const GOD_SEAT = 0;
       const claimSeat = (agent: Agent): number | null => {
@@ -800,7 +800,7 @@ export function OfficeFloor() {
         if (free.length === 0) return;
         const idx = free[Math.floor(Math.random() * free.length)];
         const spot = ERRAND_SPOTS[idx];
-        // Pick the performer. The CEO office's spots belong to Michael alone —
+        // Pick the performer. The CEO office's spots belong to Aster alone —
         // and unlike workers he runs his errands FROM his desk (he's seated
         // while idle, so the sitting check doesn't apply to him).
         let agent: Agent | undefined;

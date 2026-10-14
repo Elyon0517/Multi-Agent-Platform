@@ -7,7 +7,7 @@
 Chat with a Root agent about your local repository. Questions get answered directly; coding work goes to a
 Planner → Coder → Gate → three independent reviewers → human signoff loop, visualized as a pixel office.
 
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/) [![Node](https://img.shields.io/badge/node-22-339933)](https://nodejs.org/) [![Status](https://img.shields.io/badge/status-alpha-orange)](docs/DISCOVERY.md) [![Stars](https://img.shields.io/github/stars/Elyon0517/multi-agent-platform?style=flat)](https://github.com/Elyon0517/multi-agent-platform/stargazers)
+Python 3.12+ · Node 22 · Alpha
 
 Find this useful? Give it a star ⭐
 
@@ -234,16 +234,10 @@ See the roadmap in [`docs/DISCOVERY.md`](docs/DISCOVERY.md) §16.
 ## Credits
 
 The office visualization is adapted from [munder-difflin](https://github.com/chaitanyagiri/munder-difflin) (MIT).
-Pixel art tilesets by [LimeZu](https://limezu.itch.io/), used under a purchased licence that does not permit
-redistribution; they are planned to be replaced before any public release. Fonts are under the SIL OFL. Full
-notices: [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md).
-
----
-
-<div align="center">
-
-If this project helps you, please consider giving it a star ⭐
-
-</div>
-
-Model spending is tracked without budget caps for conversations, runs, project planning, and summaries. Legacy budget settings remain accepted for compatibility but do not limit execution.
+Workspace tile art, maps, fictional character recipes and break-room dialogue are original to this project.
+The original artwork is available under the MIT license in `ui/src/assets/LICENSE.txt`.
+Retained renderer code also includes ISC-licensed contributions from
+[the-office](https://github.com/shahar061/the-office). Fonts are under the SIL OFL.
+See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md) and
+[`ui/src/assets/ATTRIBUTION.md`](ui/src/assets/ATTRIBUTION.md) for full provenance.
+Production builds include the license texts in `THIRD_PARTY_NOTICES.txt`.

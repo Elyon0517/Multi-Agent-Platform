@@ -1,8 +1,8 @@
 Bundled fonts and their licenses
 ================================
 
-Munder Difflin ships three font files inside the application bundle, in
-src/renderer/src/assets/fonts/. They are NOT ours. All three are licensed under
+Agent Converge bundles three unmodified upstream font files in
+ui/src/assets/fonts/. All three are licensed under
 the SIL Open Font License, Version 1.1, whose full text follows the attributions
 below. The OFL requires this notice to travel with every copy of the software.
 
@@ -23,7 +23,7 @@ below. The OFL requires this notice to travel with every copy of the software.
 
 No CJK or Arabic face is bundled: a full CJK face is 8 to 10 MB, and every
 platform we ship on already carries one. The design tokens name those system
-faces as fallbacks instead (see src/renderer/src/design/tokens.css).
+faces as fallbacks instead (see ui/src/design/tokens.css).
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

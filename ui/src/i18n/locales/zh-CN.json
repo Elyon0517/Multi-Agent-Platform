@@ -165,33 +165,17 @@
     "reportProblem": "反馈问题",
     "fullChangelog": "完整更新日志 →",
     "announcement": "公告",
-    "proLaunch": "v0.5.0 与 Munder Difflin Pro 一同发布。",
-    "proCommunityFree": "社区版保持免费、开源，并持续获得更新。",
-    "proParagraph": "Pro 版将带来新的功能与集成，全年持续上新；它领先于社区版，面向想要充分发挥编码智能体与智能体工具链潜力的重度用户。Pro 路线图还包括移动端应用。",
-    "foundersWallTitle": "在 Founders' Wall 上吗？",
-    "foundersWallBody": "免费获得一个月的 Munder Difflin Pro，此后年度套餐享 5 折。仅限前 100 位上榜用户。",
-    "seeTheWall": "查看榜单",
     "joinDiscord": "加入 Discord"
   },
   "officeTheme": {
     "title": "办公室主题",
-    "tvShow": "电视剧办公室主题",
     "experimental": "实验性",
-    "desc": "把像素办公室换皮成电视剧场景。切换会开启一套全新演员阵容。",
+    "desc": "切换工作空间布局，保留当前智能体和任务。",
     "current": "当前",
     "soon": "即将推出",
     "notBuiltYet": "{{label}} 尚未构建——暂时显示办公室。",
-    "switchAborted": "切换中止——终端无法关闭：{{error}}",
-    "confirmTitle": "切换到「{{label}}」？",
-    "startsFreshCast": "开启全新演员阵容",
-    "deleteCount": "你的 {{count}} 个当前智能体将被删除——它们的终端会关闭，进行中的工作会停止。",
-    "deleteCountPlural": "你的 {{count}} 个当前智能体将被删除——它们的终端会关闭，进行中的工作会停止。",
-    "onlyCarries": "只有 {{god}} 会保留。",
-    "stillWorking": "⚠ {{count}} 个智能体仍在工作。",
-    "stillWorkingPlural": "⚠ {{count}} 个智能体仍在工作。",
-    "cantUndo": "此操作无法撤销。",
-    "switching": "切换中…",
-    "deleteSwitch": "删除 {{count}} 个并切换"
+    "switchAborted": "主题切换失败：{{error}}",
+    "originalThemes": "原创工作空间主题"
   },
   "settings": {
     "title": "设置",
@@ -401,12 +385,12 @@
     },
     "terminalFullscreen": "终端已全屏打开。按 Esc 返回。",
     "noTerminal": "{{name}} 没有实时终端。",
-    "dispatchViaMichael": "派发——经由 {{godName}}",
+    "dispatchViaRoot": "派发——经由 {{godName}}",
     "suggestedOwner": "建议负责人",
-    "michaelDecides": "{{godName}} 决定",
+    "rootDecides": "{{godName}} 决定",
     "dispatchPlaceholder": "描述任务…（{{godName}} 会拆解、写卡片并分配）",
     "dispatch": "派发",
-    "sentToMichael": "已发送给 {{godName}}",
+    "sentToRoot": "已发送给 {{godName}}",
     "sentToWithSuggestion": "已发送给 {{godName}}（建议 {{name}}）",
     "dispatchFailed": "失败：{{error}}",
     "dispatchSuggestion": "（人类建议由 {{name}}（{{id}}）处理——你是调度者，你来定。）",
@@ -578,7 +562,7 @@
   },
   "onboarding": {
     "titles": {
-      "persona": "欢迎来到 MUNDER DIFFLIN",
+      "persona": "欢迎来到 AGENT CONVERGE",
       "welcome": "认识你的办公室",
       "home": "第 1 步，共 4 步 · HARNESS 主目录",
       "homePlain": "第 1 步，共 4 步 · 为应用找一个家",
@@ -591,7 +575,7 @@
     },
     "persona": {
       "headline": "一个 24/7 工作的你",
-      "body": "Munder Difflin 把你在用的 CLI 智能体变成你的克隆——一个经营着一屋子长期运行智能体、在你离开时持续工作的存在。它管理着围绕它们的一切：上下文、记忆、任务、触发器、环境、文件和集成。",
+      "body": "Agent Converge 把你在用的 CLI 智能体变成你的克隆——一个经营着一屋子长期运行智能体、在你离开时持续工作的存在。它管理着围绕它们的一切：上下文、记忆、任务、触发器、环境、文件和集成。",
       "bodyLocal": " 一切都在本机运行。",
       "ask": "首先——你是谁？（我们会据此定制设置）",
       "technicalTitle": "我是技术人员",
@@ -692,7 +676,7 @@
       "openAtLogin": "开机启动",
       "openAtLoginDesc": "重启后自动重新启动 harness，让计划任务自行恢复。无提示——立即生效。",
       "shareStats": "共享匿名使用统计",
-      "shareStatsDesc": "少量匿名事件（打开应用、生成智能体、使用功能），用于改进 Munder Difflin——绝不包含提示词、代码、文件路径或智能体输出。完整清单见 TELEMETRY.md；可随时在设置中更改。",
+      "shareStatsDesc": "少量匿名事件（打开应用、生成智能体、使用功能），用于改进 Agent Converge——绝不包含提示词、代码、文件路径或智能体输出。完整清单见 TELEMETRY.md；可随时在设置中更改。",
       "stayAwake": "接电源时保持唤醒（手动）",
       "stayAwakeDescMac": "macOS 只允许你自己设置这一项。在「电池」→「选项」中，开启「防止显示器关闭时自动进入睡眠」（接电源适配器时），这样显示器休眠时定时器也能继续触发。没有防休眠设置的话 Mac 仍会真正休眠——工作会保存并在唤醒后补上。",
       "stayAwakeDescWindows": "Windows 只允许你自己设置这一项。在「设置」→「系统」→「电源和电池」→「屏幕和睡眠」中，将「使用电源时，使设备进入睡眠状态」设为「从不」（或延长时间），这样定时器也能继续触发。没有防休眠设置的话 Windows 仍会真正休眠——工作会保存并在唤醒后补上。",
@@ -743,7 +727,7 @@
         "这层楼自己就能运转 🚬",
         "老板休息一下。",
         "思考人生 🚬",
-        "我宣布……休息一下"
+        "休息一下，整理思路。"
       ]
     },
     "suckUp": [
@@ -758,11 +742,11 @@
     "gossip": [
       "他到底写过代码没有？",
       "又一个拖了一小时的「快速同步」…",
-      "「世界上最好的老板」——那个杯子是他自己买的",
+      "今天的讨论带来了一张好用的图。",
       "他把我的任务据为己有，说是他的主意",
       "说真的，那股雪茄味…",
       "他浇了那盆植物。就一盆。他自己的。",
-      "你听见了吗？「我宣布……休息一下」"
+      "休息一下，整理思路。"
     ],
     "cheer": [
       "完成！✔",
@@ -802,7 +786,7 @@
     "askDesc": "{{godName}} 可以为你安装 {{count}} 个缺失的推荐工具。这会填好他的派发框——在你按下派发前不会运行任何东西。",
     "askDescPlural": "{{godName}} 可以为你安装 {{count}} 个缺失的推荐工具。这会填好他的派发框——在你按下派发前不会运行任何东西。",
     "allReady": "所有推荐项都已安装。上面的单个引擎都是可选的——只设置你实际使用的即可。",
-    "askMichael": "让 {{godName}} 设置一切",
+    "askRoot": "让 {{godName}} 设置一切",
     "sections": {
       "prerequisites": {
         "title": "前置条件",
@@ -831,7 +815,7 @@
     "localEndpoint": "本地端点 · 默认模型（按引擎）",
     "defaultModelPlaceholder": "默认模型（提供商/模型）",
     "runningOpenModels": "要跑开源模型？分步指南：",
-    "runOnOpenModels": "在开源模型上运行 Munder Difflin",
+    "runOnOpenModels": "在开源模型上运行 Agent Converge",
     "setUpMacMini": "在 Mac Mini 上配置",
     "autoModeCaveat": "⚠ 在自动模式下，这些引擎以完整的文件系统 + shell 访问权限运行（无沙箱）——就像 Claude 的绕过模式。把自动模式关掉（通用页）即可让它们先询问。与真实模型调用的端到端实测仍在等待你的密钥 / 本地 LLM。"
   },
@@ -881,7 +865,7 @@
     "downloadingHeadline": "正在下载 v{{version}}",
     "downloadingDetail": "已完成 {{percent}}%。你可以继续工作；重启由你自己决定。",
     "downloadedHeadline": "v{{version}} 已就绪，可安装",
-    "downloadedDetail": "重启 Munder Difflin 以完成从 v{{v}} 的更新。",
+    "downloadedDetail": "重启 Agent Converge 以完成从 v{{v}} 的更新。",
     "restartBtn": "重启以更新",
     "manualDetail": "此安装无法自行更新——请从发布页面下载。",
     "manualDetailReason": "此安装无法自行更新（{{reason}}）——请从发布页面下载。",
@@ -908,7 +892,7 @@
     "webhooks": "Webhook",
     "webhooksBlurb": "让外部系统把工作投进来。",
     "organisation": "组织",
-    "organisationBlurb": "让队友的 Munder Difflin 给你的发消息。"
+    "organisationBlurb": "让队友的 Agent Converge 给你的发消息。"
   },
   "orgSection": {
     "acceptMessages": "接受来自你组织的消息",

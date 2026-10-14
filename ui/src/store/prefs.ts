@@ -9,12 +9,16 @@ export interface Prefs {
   notes: Record<string, string>;
 }
 
-const DEFAULTS: Prefs = { theme: 'office', order: [], names: {}, notes: {} };
+const DEFAULTS: Prefs = { theme: 'studio', order: [], names: {}, notes: {} };
 
 export function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULTS;
+    if (!raw) return DEFAULTS;
+    const saved = JSON.parse(raw) as Partial<Prefs>;
+    // Retired or unknown themes migrate to the original default. Keep user names/order.
+    const theme = saved.theme === 'atrium' ? 'atrium' : 'studio';
+    return { ...DEFAULTS, ...saved, theme };
   } catch {
     return DEFAULTS;
   }

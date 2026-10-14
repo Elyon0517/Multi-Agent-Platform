@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { activeFloorAgents, floorAgentLabel } from './activity';
 import type { Agent } from '@/store/store';
 const agent = (id: string, status: Agent['status'] = 'idle'): Agent => ({
-  id, name: id, status, character: 'jim', accent: 'sky', description: '', action: '', progress: 0,
+  id, name: id, status, character: 'byte', accent: 'sky', description: '', action: '', progress: 0,
   project: '', isGod: id === 'supervisor',
 });
 describe('actual floor activity', () => {

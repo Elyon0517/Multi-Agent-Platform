@@ -480,22 +480,23 @@ function drawHeavyFace(buf: Buf, skin: string): void {
   set(buf, 7, 17, s.sh); set(buf, 10, 17, s.sh); // crease shadow between chin + roll
 }
 
+// Original fictional cast: fresh palettes and combinations, with no likeness reference.
 const RECIPES: Record<OfficeCharacterName, Recipe> = {
-  michael:  { skin: 'light', hairc: [58, 42, 28],   hair: 'styleShort',  hairargs: { part: 'L' }, cloth: 'suit', c1: [58, 63, 74], tie: [170, 58, 58], brow: 'flat', mouth: 'smile' },
-  jim:      { skin: 'light', hairc: [92, 60, 34],   hair: 'styleFloppy', cloth: 'dressshirt', c1: [172, 196, 224], tie: [120, 130, 150], brow: 'flat', mouth: 'smile' },
-  pam:      { skin: 'light', hairc: [120, 76, 42],  hair: 'styleFrame',  hairargs: { length: 18, vol: 2 }, cloth: 'cardigan', c1: [236, 174, 192], c2: [244, 242, 238], brow: 'soft', mouth: 'smile', blush: true, lashes: true },
-  dwight:   { skin: 'light', hairc: [64, 48, 28],   hair: 'styleShort',  hairargs: { part: 'L', recede: 1 }, cloth: 'dressshirt', c1: [184, 155, 62], tie: [120, 82, 46], glasses: true, brow: 'angry', mouth: 'neutral' },
-  kevin:    { skin: 'light', hairc: [58, 44, 30],   hair: 'styleBald',   cloth: 'polo', c1: [110, 140, 180], c2: [90, 120, 160], brow: 'flat', mouth: 'neutral', heavy: true },
-  angela:   { skin: 'light', hairc: [186, 154, 90], hair: 'styleBun',    cloth: 'cardigan', c1: [150, 146, 170], c2: [235, 233, 226], brow: 'angry', mouth: 'frown', lashes: true },
-  oscar:    { skin: 'tan',   hairc: [28, 22, 18],   hair: 'styleShort',  hairargs: { part: 'L' }, cloth: 'sweater', c1: [122, 60, 74], brow: 'flat', mouth: 'smile' },
-  stanley:  { skin: 'dark',  hairc: [60, 54, 48],   hair: 'styleRecede', cloth: 'dressshirt', c1: [150, 120, 86], tie: [120, 78, 52], glasses: true, facial: 'mustache', brow: 'flat', mouth: 'neutral', heavy: true },
-  phyllis:  { skin: 'light', hairc: [196, 162, 110], hair: 'styleCurly', cloth: 'blouse', c1: [202, 160, 192], glasses: true, brow: 'soft', mouth: 'smile', lashes: true, heavy: true },
-  andy:     { skin: 'light', hairc: [74, 51, 32],   hair: 'styleShort',  hairargs: { part: 'R' }, cloth: 'polo', c1: [176, 65, 58], c2: [150, 50, 46], brow: 'raised', mouth: 'smile' },
-  kelly:    { skin: 'tan',   hairc: [24, 18, 22],   hair: 'styleFrame',  hairargs: { length: 20, vol: 1 }, cloth: 'blouse', c1: [212, 90, 158], brow: 'soft', mouth: 'smile', blush: true, lashes: true },
-  ryan:     { skin: 'light', hairc: [42, 32, 24],   hair: 'styleSpiky',  cloth: 'suit', c1: [58, 58, 68], tie: [40, 40, 50], brow: 'flat', mouth: 'neutral' },
-  toby:     { skin: 'light', hairc: [106, 90, 66],  hair: 'styleShort',  hairargs: { part: 'L', recede: 1 }, cloth: 'dressshirt', c1: [150, 150, 120], facial: 'mustacheSm', brow: 'soft', mouth: 'frown' },
-  creed:    { skin: 'light', hairc: [170, 166, 156], hair: 'styleBald',   cloth: 'dressshirt', c1: [126, 130, 96], facial: 'stubble', brow: 'flat', mouth: 'neutral' },
-  meredith: { skin: 'light', hairc: [154, 82, 46],  hair: 'styleMessy',  hairargs: { length: 15 }, cloth: 'blouse', c1: [176, 86, 74], brow: 'raised', mouth: 'smile', lashes: true },
+  aster: { skin: 'tan', hairc: [35, 40, 65], hair: 'styleSpiky', cloth: 'sweater', c1: [75, 166, 160], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: true },
+  byte: { skin: 'dark', hairc: [40, 43, 69], hair: 'styleCurly', cloth: 'polo', c1: [217, 129, 104], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  lumen: { skin: 'brown', hairc: [45, 46, 73], hair: 'styleBun', cloth: 'blouse', c1: [143, 134, 201], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  quartz: { skin: 'light', hairc: [50, 49, 77], hair: 'styleFrame', cloth: 'cardigan', c1: [99, 168, 193], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  moss: { skin: 'tan', hairc: [55, 52, 81], hair: 'styleShort', cloth: 'suit', c1: [164, 181, 110], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  iris: { skin: 'dark', hairc: [60, 55, 85], hair: 'styleMessy', cloth: 'sweater', c1: [199, 125, 154], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: true },
+  atlas: { skin: 'brown', hairc: [65, 58, 89], hair: 'styleFloppy', cloth: 'polo', c1: [189, 155, 100], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  cedar: { skin: 'light', hairc: [70, 61, 93], hair: 'styleShort', cloth: 'cardigan', c1: [115, 154, 200], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  fern: { skin: 'tan', hairc: [75, 64, 97], hair: 'styleFrame', cloth: 'dressshirt', c1: [122, 172, 144], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: true },
+  ember: { skin: 'dark', hairc: [80, 67, 101], hair: 'styleRecede', cloth: 'blouse', c1: [199, 149, 112], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  coral: { skin: 'brown', hairc: [85, 70, 105], hair: 'styleBun', cloth: 'sweater', c1: [182, 139, 206], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  nova: { skin: 'light', hairc: [90, 73, 109], hair: 'styleCurly', cloth: 'polo', c1: [127, 172, 167], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  sage: { skin: 'tan', hairc: [95, 76, 113], hair: 'styleSpiky', cloth: 'cardigan', c1: [184, 163, 102], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: true },
+  flint: { skin: 'dark', hairc: [100, 79, 117], hair: 'styleShort', cloth: 'suit', c1: [126, 145, 172], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
+  river: { skin: 'brown', hairc: [105, 82, 121], hair: 'styleMessy', cloth: 'dressshirt', c1: [197, 140, 145], c2: [228, 224, 212], tie: [93, 166, 156], brow: 'soft', mouth: 'smile', glasses: false },
 };
 
 /** The face/hair group (head → face → facial hair → hair → glasses), no clothing. */
@@ -543,7 +544,7 @@ const sceneCache = new Map<OfficeCharacterName, SceneFrames>();
 function getBuf(name: OfficeCharacterName): Buf {
   let buf = bufCache.get(name);
   if (!buf) {
-    buf = compose(RECIPES[name] ?? RECIPES.jim);
+    buf = compose(RECIPES[name] ?? RECIPES.byte);
     bufCache.set(name, buf);
   }
   return buf;
@@ -555,7 +556,7 @@ export interface SceneFrames { front: Buf[]; back: Buf[]; }
 export function sceneFrameBufs(name: OfficeCharacterName): SceneFrames {
   let frames = sceneCache.get(name);
   if (!frames) {
-    const r = RECIPES[name] ?? RECIPES.jim;
+    const r = RECIPES[name] ?? RECIPES.byte;
     frames = {
       front: [composeScene(r, 0, false), composeScene(r, 1, false), composeScene(r, 2, false)],
       back: [composeScene(r, 0, true), composeScene(r, 1, true), composeScene(r, 2, true)],

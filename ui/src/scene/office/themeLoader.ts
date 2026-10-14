@@ -1,16 +1,9 @@
-// Theme loader — resolves a ThemeConfig into a ready-to-render map.
-//
-// Phase 0 keeps this thin: it parses the theme's Tiled JSON and patches the
-// appended tileset atlases with their inline metadata (the same patch the
-// office scene did inline as resolveMap()). The async `loadTheme` signature is
-// deliberate headroom for later phases, where a show bundle may be fetched and
-// validated before it's handed to the scene; on any failure it falls back to
-// the office theme so a bad/absent bundle never breaks the floor (report §E).
+// Resolve original workspace maps and their atlas metadata.
 
 import type { TiledMap } from './TiledMapRenderer';
 import {
   getTheme,
-  OFFICE_THEME,
+  STUDIO_THEME,
   type ThemeConfig,
   type ThemeId,
 } from './themeRegistry';
@@ -53,13 +46,13 @@ function isThemeRenderable(theme: ThemeConfig): boolean {
 }
 
 /** Resolve a theme id to a renderable ThemeConfig. Async by design (later
- *  phases may fetch a show bundle here); falls back to the office theme if the
+ *  a later loader may fetch an additional workspace); falls back to the office theme if the
  *  requested theme is missing or its map won't parse. */
 export async function loadTheme(id: ThemeId): Promise<ThemeConfig> {
   const theme = getTheme(id);
   if (!isThemeRenderable(theme)) {
-    console.warn(`[themeLoader] theme '${id}' is not renderable — falling back to 'office'`);
-    return OFFICE_THEME;
+    console.warn(`[themeLoader] theme '${id}' is not renderable — falling back to 'studio'`);
+    return STUDIO_THEME;
   }
   return theme;
 }

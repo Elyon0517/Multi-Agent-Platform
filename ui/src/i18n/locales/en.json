@@ -165,33 +165,17 @@
     "reportProblem": "report a problem",
     "fullChangelog": "full changelog →",
     "announcement": "Announcement",
-    "proLaunch": "v0.5.0 launches with Munder Difflin Pro.",
-    "proCommunityFree": "Community stays free, stays open, and keeps getting updates.",
-    "proParagraph": "Pro ships with new features and integrations, with more posted throughout the year, and it stays ahead of Community, for power users who want the full potential of coding agents and agent harnesses. The Pro roadmap also includes a mobile app.",
-    "foundersWallTitle": "On the Founders' Wall?",
-    "foundersWallBody": "A month of Munder Difflin Pro free, then 50% off the annual plan. For the first 100 people on the wall.",
-    "seeTheWall": "see the wall",
     "joinDiscord": "join Discord"
   },
   "officeTheme": {
     "title": "Office Theme",
-    "tvShow": "TV-show office themes",
     "experimental": "experimental",
-    "desc": "Re-skin the pixel office as a TV show. Switching starts a fresh cast.",
+    "desc": "Switch the workspace layout while keeping your agents and tasks.",
     "current": "current",
     "soon": "soon",
     "notBuiltYet": "{{label}} isn't built yet — showing the office for now.",
-    "switchAborted": "Switch aborted — a terminal wouldn't close: {{error}}",
-    "confirmTitle": "SWITCH OFFICE TO \"{{label}}\"?",
-    "startsFreshCast": "STARTS A FRESH CAST",
-    "deleteCount": "Your {{count}} current agent will be deleted — their terminals close and any in-progress work stops.",
-    "deleteCountPlural": "Your {{count}} current agents will be deleted — their terminals close and any in-progress work stops.",
-    "onlyCarries": "Only {{god}} carries over.",
-    "stillWorking": "⚠ {{count}} agent is still working.",
-    "stillWorkingPlural": "⚠ {{count}} agents are still working.",
-    "cantUndo": "This can't be undone.",
-    "switching": "switching…",
-    "deleteSwitch": "delete {{count}} & switch"
+    "switchAborted": "Theme switch failed: {{error}}",
+    "originalThemes": "Original workspace themes"
   },
   "settings": {
     "title": "SETTINGS",
@@ -401,12 +385,12 @@
     },
     "terminalFullscreen": "Terminal is open in fullscreen. Press Esc to bring it back.",
     "noTerminal": "{{name}} has no live terminal.",
-    "dispatchViaMichael": "DISPATCH — VIA {{godName}}",
+    "dispatchViaRoot": "DISPATCH — VIA {{godName}}",
     "suggestedOwner": "SUGGESTED OWNER",
-    "michaelDecides": "{{godName}} decides",
+    "rootDecides": "{{godName}} decides",
     "dispatchPlaceholder": "Describe the task… ({{godName}} decomposes, writes the card, and assigns)",
     "dispatch": "dispatch",
-    "sentToMichael": "sent to {{godName}}",
+    "sentToRoot": "sent to {{godName}}",
     "sentToWithSuggestion": "sent to {{godName}} (suggesting {{name}})",
     "dispatchFailed": "failed: {{error}}",
     "dispatchSuggestion": "(The human suggests {{name}} ({{id}}) for this — your call as orchestrator.)",
@@ -578,7 +562,7 @@
   },
   "onboarding": {
     "titles": {
-      "persona": "WELCOME TO MUNDER DIFFLIN",
+      "persona": "WELCOME TO AGENT CONVERGE",
       "welcome": "MEET YOUR OFFICE",
       "home": "STEP 1 OF 4 · HARNESS HOME",
       "homePlain": "STEP 1 OF 4 · A HOME FOR THE APP",
@@ -591,7 +575,7 @@
     },
     "persona": {
       "headline": "A CLONE OF YOU, WORKING 24/7",
-      "body": "Munder Difflin turns the CLI agent you already use into a clone of you — one that runs an office of long-running agents and keeps working while you're away. It manages everything around them: context, memory, tasks, triggers, environment, files, and integrations.",
+      "body": "Agent Converge turns the CLI agent you already use into a clone of you — one that runs an office of long-running agents and keeps working while you're away. It manages everything around them: context, memory, tasks, triggers, environment, files, and integrations.",
       "bodyLocal": " Everything runs on this machine.",
       "ask": "FIRST — WHO ARE YOU? (we'll tailor the setup)",
       "technicalTitle": "I'M TECHNICAL",
@@ -692,7 +676,7 @@
       "openAtLogin": "OPEN AT LOGIN",
       "openAtLoginDesc": "Relaunch the harness after a reboot so scheduled missions resume on their own. No prompt — applies immediately.",
       "shareStats": "SHARE ANONYMOUS USAGE STATS",
-      "shareStatsDesc": "A handful of anonymous events (app opened, agent spawned, feature used) that help improve Munder Difflin — never prompts, code, file paths, or agent output. Full list in TELEMETRY.md; change anytime in Settings.",
+      "shareStatsDesc": "A handful of anonymous events (app opened, agent spawned, feature used) that help improve Agent Converge — never prompts, code, file paths, or agent output. Full list in TELEMETRY.md; change anytime in Settings.",
       "stayAwake": "STAY AWAKE ON POWER (MANUAL)",
       "stayAwakeDescMac": "macOS only lets you set this one yourself. In Battery → Options, turn on \"Prevent automatic sleeping when the display is off\" (on power adapter) so timers keep firing with the display asleep. Without a sleep-preventing setting the Mac still truly sleeps — work survives and catches up on wake.",
       "stayAwakeDescWindows": "Windows only lets you set this one yourself. In Settings → System → Power & battery → Screen, blank & sleep, set \"On battery power, put my device to sleep\" and \"When plugged in\" to Never (or increase them) so timers keep firing. Without a sleep-preventing setting Windows still truly sleeps — work survives and catches up on wake.",
@@ -743,7 +727,7 @@
         "the floor runs itself 🚬",
         "boss break.",
         "thinking big thoughts 🚬",
-        "I DECLARE… a break"
+        "Taking a moment to think."
       ]
     },
     "suckUp": [
@@ -758,11 +742,11 @@
     "gossip": [
       "has he ever actually written code?",
       "another 'quick sync' that took an hour…",
-      "'world's best boss' — he bought that mug himself",
+      "The last sync came with a useful diagram.",
       "he pinned MY task as his idea",
       "the cigar smell, honestly…",
       "he watered the plant. ONE plant. his own.",
-      "did you hear him? 'I DECLARE… a break'"
+      "Taking a moment to think."
     ],
     "cheer": [
       "done! ✔",
@@ -802,7 +786,7 @@
     "askDesc": "{{godName}} can install the {{count}} missing recommended tool for you. This fills in his dispatch box — nothing runs until you press dispatch.",
     "askDescPlural": "{{godName}} can install the {{count}} missing recommended tools for you. This fills in his dispatch box — nothing runs until you press dispatch.",
     "allReady": "Everything recommended is installed. Individual engines above are optional — set up only the ones you use.",
-    "askMichael": "ask {{godName}} to set up everything",
+    "askRoot": "ask {{godName}} to set up everything",
     "sections": {
       "prerequisites": {
         "title": "Prerequisites",
@@ -831,7 +815,7 @@
     "localEndpoint": "LOCAL ENDPOINT · DEFAULT MODEL (PER ENGINE)",
     "defaultModelPlaceholder": "default model (provider/model)",
     "runningOpenModels": "Running open models? Step-by-step guides:",
-    "runOnOpenModels": "run Munder Difflin on open models",
+    "runOnOpenModels": "run Agent Converge on open models",
     "setUpMacMini": "set it up on a Mac Mini",
     "autoModeCaveat": "⚠ In auto mode these engines run with full filesystem + shell access (no sandbox) — like Claude's bypass mode. Turn auto mode off (General) to make them ask first. Live end-to-end verification with real model calls is pending your keys / a local LLM."
   },
@@ -881,7 +865,7 @@
     "downloadingHeadline": "Downloading v{{version}}",
     "downloadingDetail": "{{percent}}% done. You can keep working; the restart is yours to trigger.",
     "downloadedHeadline": "v{{version}} is ready to install",
-    "downloadedDetail": "Restart Munder Difflin to finish updating from v{{v}}.",
+    "downloadedDetail": "Restart Agent Converge to finish updating from v{{v}}.",
     "restartBtn": "Restart to update",
     "manualDetail": "This install can't update itself — download it from the release page.",
     "manualDetailReason": "This install can't update itself ({{reason}}) — download it from the release page.",
@@ -908,7 +892,7 @@
     "webhooks": "WEBHOOKS",
     "webhooksBlurb": "Let an outside system post work in.",
     "organisation": "ORGANISATION",
-    "organisationBlurb": "Let a teammate's Munder Difflin message yours."
+    "organisationBlurb": "Let a teammate's Agent Converge message yours."
   },
   "orgSection": {
     "acceptMessages": "Accept messages from your organisation",

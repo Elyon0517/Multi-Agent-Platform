@@ -1,9 +1,17 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'distribute-license-notices',
+    generateBundle() {
+      const texts = ['./THIRD_PARTY_NOTICES.md', './src/assets/LICENSE.txt', './src/assets/fonts/LICENSE.txt']
+        .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'));
+      this.emitFile({ type: 'asset', fileName: 'THIRD_PARTY_NOTICES.txt', source: texts.join('\n\n') });
+    },
+  }],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
