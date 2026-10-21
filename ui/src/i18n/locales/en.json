@@ -1576,6 +1576,7 @@
     "coderSaid": "Coder said",
     "stopRun": "Stop",
     "stopRunTitle": "Stop the running task in this conversation",
+    "stopTurnTitle": "Stop Root from answering this message",
     "stopAndDeleteConversation": "This conversation has a task that is running or waiting. Stop the task and delete the conversation?",
     "workspaceMode": "Where agents edit code",
     "workspaceModeBranch": "Current checkout and branch (live IDE changes; no commit/push)",

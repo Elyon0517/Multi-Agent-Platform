@@ -40,7 +40,8 @@ class FakeRuntime:
                         task=f"Perform {r} for: {inp.goal}",
                     )
                     for r in inp.context["roles"]
-                }
+                },
+                reviewers=inp.context["reviewer_roles"],
             )
         else:
             result = self._scripts[role](inp)

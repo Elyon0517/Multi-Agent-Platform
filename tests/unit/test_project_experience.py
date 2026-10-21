@@ -30,7 +30,7 @@ def test_manual_routing_has_exact_bindings_and_no_fallback(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="every worker"):
         project_config(svc.cfg, settings.model_copy(update={"bindings": {}}))
     with pytest.raises(ValueError, match="unavailable"):
-        Dispatch(assignments={r: Binding(alias="unknown", task="task") for r in bindings}).validate_for(svc.cfg, settings)
+        Dispatch(assignments={r: Binding(alias="unknown", task="task") for r in bindings}, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, settings)
 
 
 def test_private_documents_threads_and_workspace_isolation(tmp_path: Path) -> None:
@@ -225,18 +225,18 @@ def test_reviewer_diversity_compares_model_ids_not_aliases(tmp_path: Path) -> No
         alias.model = "shared-model"
     bindings = {r: Binding(alias="strong", task="task") for r in worker_roles(svc.cfg)}
     bindings["arch-reviewer"] = Binding(alias="strong-alt", task="task")
-    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())  # all aliases share one ID
+    Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, ProjectSettings())  # all aliases share one ID
     svc.cfg.models.aliases["root"].model = "second-model"
     with pytest.raises(ValueError, match="different model IDs"):
-        Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())
+        Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, ProjectSettings())
     with pytest.raises(ValueError, match="different model IDs"):
         project_config(svc.cfg, ProjectSettings(mode="manual", bindings=bindings))
     bindings["arch-reviewer"] = Binding(alias="root", task="task")
-    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings())
+    Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, ProjectSettings())
     project_config(svc.cfg, ProjectSettings(mode="manual", bindings=bindings))
     # A project deliberately selecting a single model still works.
     bindings["arch-reviewer"] = Binding(alias="strong", task="task")
-    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong"]))
+    Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong"]))
 
 
 def test_global_upload_embeds_without_project(tmp_path: Path) -> None:
@@ -304,3 +304,39 @@ def test_new_project_defaults_enable_semantic_retrieval_without_settings(tmp_pat
         assert saved.status_code == 200 and saved.json()['settings']['retrieval'] == 'keyword'
         assert client.get(f'/projects/{project["id"]}').json()['settings']['retrieval'] == 'keyword'
         assert client.post('/memory/search', json={'project_id': project['id'], 'query': 'career'}).json() == []
+
+
+async def test_auto_dispatch_runs_only_the_reviewers_it_selects(tmp_path: Path) -> None:
+    svc = services(tmp_path)
+    workspace = seed_demo_workspace(tmp_path / "focused")
+    project = svc.projects.create("auto", "fix add", str(workspace))
+    project.settings = ProjectSettings()
+    svc.projects.save(project)
+    driver = svc.driver(workspace, "fake", "python", project.id)
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async("fix add", project_id=project.id)
+    original = driver.runtime
+
+    class FocusedDispatch:
+        async def run_agent(self, role, inp, out, ctx):
+            result = await original.run_agent(role, inp, out, ctx)
+            if role == "supervisor":
+                result.output.reviewers = ["correctness-reviewer"]
+            return result
+
+    driver.runtime = FocusedDispatch()
+    run = await driver.run(run.id)
+    reviewed = {s.role for s in svc.store.steps(run.id) if s.role in svc.cfg.reviewer_roles}
+    assert reviewed == {"correctness-reviewer"}
+    assert svc.restore_driver(run.id).recovery_options["reviewers"] == ["correctness-reviewer"]
+    driver.workspace.close()
+
+
+def test_dispatch_needs_known_reviewers(tmp_path: Path) -> None:
+    svc = services(tmp_path)
+    bindings = {r: Binding(alias=svc.cfg.model_policy.roles[r].primary, task="task") for r in worker_roles(svc.cfg)}
+    with pytest.raises(ValueError):
+        Dispatch(assignments=bindings, reviewers=[])
+    for reviewers in (["coder"], ["correctness-reviewer", "correctness-reviewer"]):
+        with pytest.raises(ValueError, match="unknown or duplicate reviewer"):
+            Dispatch(assignments=bindings, reviewers=reviewers).validate_for(svc.cfg, ProjectSettings())

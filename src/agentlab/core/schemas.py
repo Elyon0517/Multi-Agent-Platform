@@ -120,6 +120,10 @@ class FileEdit(Strict):
 
 class CoderOutput(Strict):
     edits: list[FileEdit]
+    # Explicit checkpoint handoff after saving new evidence, never an error retry.
+    continue_evidence: bool = False
+    # Completed read-only analysis; no workspace change is required.
+    report: str | None = None
     # Why no change could be made (missing information, access or capability); shown to the user.
     blocked_reason: str | None = None
 
@@ -257,7 +261,9 @@ class Step(Strict):
     response_ref: str | None = None
 
 
-ArtifactKind = Literal["dispatch", "plan", "diff", "review", "gate", "arbiter", "feedback", "memory"]
+ArtifactKind = Literal[
+    "dispatch", "plan", "diff", "review", "gate", "arbiter", "feedback", "memory", "report", "evidence"
+]
 
 
 class Artifact(Strict):

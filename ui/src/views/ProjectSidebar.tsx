@@ -278,6 +278,13 @@ export function ConversationView() {
       .catch((e) => { if (current()) setError(String(e)); })
       .finally(() => { if (current()) setStopping(false); });
   };
+  // Stopping Root ends the turn early; its reply still arrives through the pending send.
+  const stopTurn = () => {
+    setStopping(true); setError(null);
+    void api.stopTurn(activeProjectId ?? 'global', activeThreadId!)
+      .catch((e) => { if (current()) setError(String(e)); })
+      .finally(() => { if (current()) setStopping(false); });
+  };
   const decideTool = (approvalId: string, decision: ToolDecision) => {
     setToolBusy(true); setError(null);
     void api.decideTool(activeProjectId ?? 'global', activeThreadId!, approvalId, decision)
@@ -366,7 +373,9 @@ export function ConversationView() {
           <div className="chat-composer-bar">
             <span>{activeRunIds.length > 0 ? `${t('lab.run')} · ${[...new Set(activeRunIds.map((id) => runStatus[id]))].join(' / ')}` : t('lab.composerHint')}</span>
             {/* Like Claude / Codex: with an empty composer and a task running, the send button becomes Stop. */}
-            {!draft.trim() && activeRunIds.length > 0 && !busy
+            {busy
+              ? <button type="button" className="primary" disabled={stopping} title={t('lab.stopTurnTitle')} onClick={stopTurn}>■ {t('lab.stopRun')}</button>
+              : !draft.trim() && activeRunIds.length > 0
               ? <button type="button" className="primary" disabled={stopping} title={t('lab.stopRunTitle')} onClick={stopRuns}>■ {t('lab.stopRun')}</button>
               : <button type="submit" className="primary" disabled={busy || !draft.trim()} aria-label="Send">{busy ? '…' : '↑'}</button>}
           </div>

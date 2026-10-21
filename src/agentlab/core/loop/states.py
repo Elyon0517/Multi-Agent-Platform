@@ -12,12 +12,12 @@ TERMINAL = frozenset({S.DONE, S.CANCELLED})
 
 TRANSITIONS: dict[S, frozenset[S]] = {
     S.PLANNING: frozenset({S.CODING}),
-    S.CODING: frozenset({S.GATING, S.REVIEWING}),
+    S.CODING: frozenset({S.GATING, S.REVIEWING, S.DONE}),
     S.GATING: frozenset({S.REVIEWING, S.CODING}),
     S.REVIEWING: frozenset({S.ARBITRATING}),
     S.ARBITRATING: frozenset({S.CODING, S.WAITING_HUMAN}),
     S.WAITING_HUMAN: frozenset({S.DONE, S.CANCELLED} | ACTIVE),
-    S.DONE: frozenset(),
+    S.DONE: frozenset({S.CODING}),  # explicit read-only report revision only
     S.CANCELLED: frozenset(),
 }
 

@@ -117,10 +117,18 @@ class StructuredCaller:
                 else:
                     ctx.check_budget(estimate)
 
+            current_attempt: dict[str, str | None] = {"id": None}
+
+            def timed_out(current_attempt: dict[str, str | None] = current_attempt) -> None:
+                attempt_id = current_attempt["id"]
+                if attempt_id and ctx.attempt_finished:
+                    ctx.attempt_finished(attempt_id, {"status": "failed", "error_kind": "read_timeout"})
+
             async def attempt(
                 estimate: float = estimate,
                 messages: tuple[dict[str, Any], ...] = tuple(messages),
                 available_tools: list[dict[str, Any]] | None = available_tools,
+                current_attempt: dict[str, str | None] = current_attempt,
             ) -> Completion:
                 nonlocal usage
                 attempt_id = (
@@ -143,6 +151,7 @@ class StructuredCaller:
                     if ctx.attempt_started
                     else None
                 )
+                current_attempt["id"] = attempt_id
                 try:
                     completion = await self._chat(
                         model=alias_cfg.model,
@@ -219,7 +228,9 @@ class StructuredCaller:
                 )
                 return completion
 
-            completion = await call_with_retry(attempt, self._cfg.retry.llm_call, log, check_attempt)
+            completion = await call_with_retry(
+                attempt, self._cfg.retry.llm_call, log, check_attempt, on_timeout=timed_out,
+            )
             if completion.tool_calls:
                 if not available_tools:
                     raise LlmError("unexpected_tool_calls")

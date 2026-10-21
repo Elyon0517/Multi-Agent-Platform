@@ -284,7 +284,9 @@ async def test_worker_grants_and_sensitive_writes(tmp_path):
     reviewer = WorkerTools(
         "arch-reviewer", ["workspace_read", "workspace_write", "gate_run"], driver.workspace, driver.gate, memory
     )
-    assert [s["function"]["name"] for s in reviewer.specs] == ["workspace_read"]
+    assert {s["function"]["name"] for s in reviewer.specs} == {
+        "workspace_read", "workspace_read_next", "workspace_read_status", "workspace_excerpt",
+    }
     with pytest.raises(ValueError, match="not granted"):
         await reviewer.execute("workspace_write", {"path": "calc.py", "content": "unsafe"})
     coder = WorkerTools("coder", ["workspace_write"], driver.workspace, driver.gate, memory)
@@ -300,9 +302,9 @@ def test_reviewer_diversity_ignores_models_below_reviewer_tier(tmp_path):
     bindings = {role: Binding(alias="strong", task="review") for role in worker_roles(svc.cfg)}
     bindings["test-style-reviewer"] = Binding(alias="cheap", task="review style")
     # Cheap is a distinct model, but cannot be assigned to correctness/architecture.
-    Dispatch(assignments=bindings).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong", "cheap"]))
+    Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(svc.cfg, ProjectSettings(allowed_aliases=["strong", "cheap"]))
     with pytest.raises(ValueError, match="different model IDs"):
-        Dispatch(assignments=bindings).validate_for(
+        Dispatch(assignments=bindings, reviewers=svc.cfg.reviewer_roles).validate_for(
             svc.cfg, ProjectSettings(allowed_aliases=["strong", "strong-alt", "cheap"])
         )
 
@@ -468,3 +470,29 @@ async def test_root_read_only_git_and_missing_files(tmp_path):
     assert git("status", "--porcelain") == before
     assert git("branch", "--show-current").strip() == b"without-module"
     workspace.close()
+
+
+async def test_stop_ends_a_running_root_turn(tmp_path):
+    import asyncio
+
+    import httpx
+
+    svc = services(tmp_path)
+    started = asyncio.Event()
+
+    class Hanging:
+        async def run_agent(self, *args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+    svc.runtime = lambda name=None, cfg=None: Hanging()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(svc)), base_url="http://t") as client:
+        thread = (await client.post("/threads", json={"title": "t"})).json()
+        sending = asyncio.create_task(client.post(f"/threads/{thread['id']}/messages", json={"text": "hi"}))
+        await asyncio.wait_for(started.wait(), 5)
+        assert (await client.post(f"/threads/{thread['id']}/turn/cancel")).json() == {"stopped": True}
+        response = await asyncio.wait_for(sending, 5)
+        assert response.status_code == 200, response.text
+        assert response.json()["turn"]["reply"] == "已停止本轮回答。"
+        assert (await client.post(f"/threads/{thread['id']}/turn/cancel")).json() == {"stopped": False}
+    assert [r["status"] for r in svc.store.records("root_turn")] == ["cancelled"]

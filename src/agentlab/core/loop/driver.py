@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from agentlab.core.budget import BudgetExceeded, BudgetGuard, estimate_cents
 from agentlab.core.config import AppConfig
+from agentlab.core.evidence import EvidenceContract, EvidenceRecord, evidence_status, validate_record
 from agentlab.core.llm.retry import ParallelFailure
 from agentlab.core.llm.structured import render_user_message
 from agentlab.core.loop.arbiter import arbitrate
@@ -68,7 +69,7 @@ def summarize(out: BaseModel) -> str:
     if isinstance(out, Verdict):
         text = f"{out.verdict}: {out.summary}" + "".join(f"\n- [{f.severity}] {f.issue}" for f in out.findings)
     elif isinstance(out, CoderOutput):
-        text = "edited " + ", ".join(e.path for e in out.edits)
+        text = out.report or ("edited " + ", ".join(e.path for e in out.edits))
     elif isinstance(out, Plan):
         text = out.summary + "".join(f"\n{i + 1}. {s}" for i, s in enumerate(out.steps))
     else:
@@ -223,6 +224,34 @@ class Driver:
             self._clear_agent_cache(run_id)
         return await self._after_run(run)
 
+    def revise_report(self, run_id: str, feedback: str, contract: EvidenceContract) -> Run:
+        """Explicitly reopen a read-only report without losing its history or raising limits."""
+        if not feedback.strip():
+            raise ValueError("revision feedback is required")
+        with self.store.lock_run(run_id), self._atomic():
+            self._reload_checkpoint(run_id)
+            run = self.store.get_run(run_id)
+            if run.status != S.DONE or not self.store.artifacts(run_id, "report"):
+                raise ValueError("only a completed read-only report can be revised")
+            if self.store.artifacts(run_id, "diff"):
+                raise ValueError("code deliveries cannot be reopened as read-only reports")
+            revisions = self.recovery_options.get("report_revisions", 0)
+            if revisions >= run.max_iter:
+                raise ValueError("report revision limit reached")
+            # Validate all source access before committing any revision state.
+            for path in {r.claim_path for r in contract.requirements} | set(contract.source_paths):
+                self.workspace.source_text(path)
+            if self.runtime_factory:
+                self.runtime = self.runtime_factory()  # terminal restoration uses an inert runtime
+            self.workspace.begin_run()  # terminal runs have released their old snapshot
+            self.recovery_options["report_revisions"] = revisions + 1
+            self.recovery_options["evidence"] = {"contract": contract.model_dump(), "records": {}, "searches": []}
+            self._save_artifact(run, "feedback", feedback, "human", to="coder")
+            self._clear_agent_cache(run_id)
+            self._finished.discard(run_id)
+            self._advance(run, S.CODING)
+            return run
+
     def decide(
         self,
         run_id: str,
@@ -271,7 +300,7 @@ class Driver:
             if approval.reason == "signoff":
                 # Isolated runs land in the user's working tree now; a conflict leaves the approval pending.
                 integrate = getattr(self.workspace, "integrate_back", None)
-                if integrate:
+                if integrate and not approval.payload.get("read_only_evidence"):
                     integrate()
         if (
             decision != "abort"
@@ -295,12 +324,12 @@ class Driver:
         if decision == "reject" or (
             decision == "approve"
             and approval.reason
-            in {"oscillation_detected", "reviewer_conflict", "inconsistent_verdict", "workspace_escape"}
+            in {"oscillation_detected", "reviewer_conflict", "inconsistent_verdict", "workspace_escape", "no_changes"}
         ):
             if decision == "reject" or feedback:
                 self._save_artifact(run, "feedback", feedback or "rejected without feedback", "human")
             run.iteration_base = len(self.store.iterations(run_id))
-        if decision in {"reject", "abort"}:
+        if decision in {"reject", "abort"} or approval.reason == "no_changes":
             self._clear_agent_cache(run.id)
         if approval.reason == "interrupted_call":
             recover_run_calls(self.store, run_id)
@@ -330,6 +359,7 @@ class Driver:
                         if p.primary in (settings.allowed_aliases or self.cfg.models.aliases)
                     },
                     "roles": sorted(set(self.cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}),
+                    "reviewer_roles": self.cfg.reviewer_roles,
                     "reviewer_max_tiers": {
                         role: max(
                             self.cfg.models.tiers[self.cfg.model_policy.roles[role].primary],
@@ -338,7 +368,8 @@ class Driver:
                         for role in self.cfg.reviewer_roles
                     },
                     "instruction": (
-                        "Assign each worker a model alias and task. Keep all reviewers independent; "
+                        "Assign each worker a model alias and task. In reviewers, list only the reviewer roles "
+                        "this task needs (at least one); each selected reviewer stays independent. "
                         "Use configured gates when available; never skip human approvals. "
                         "When tier-eligible reviewer models contain at least two distinct model IDs, "
                         "assign correctness-reviewer and arch-reviewer different model IDs. "
@@ -365,6 +396,7 @@ class Driver:
                         data["model_policy"]["roles"][role]["fallback"] = []
                     self.cfg = AppConfig.model_validate(data)
                     self.recovery_options["assignments"] = result.output.model_dump(mode="json")["assignments"]
+                    self.recovery_options["reviewers"] = result.output.reviewers
                     self.store.put_record("dispatch_" + run.id, run.id, result.output.model_dump(mode="json"))
                     self._save_artifact(run, "dispatch", result.output.model_dump_json(), "supervisor")
                     # Keep dispatch separate from the planner's plan artifact.
@@ -382,9 +414,76 @@ class Driver:
         if len(self.store.iterations(run.id)) - run.iteration_base >= run.max_iter:
             self._escalate(run, "max_iter_exceeded", {"max_iter": run.max_iter})
             return
+        evidence = self.recovery_options.get("evidence")
+        before_ids = set(evidence.get("records", {})) if evidence else set()
         res = await self._agent(run, "coder", self._coder_input(run), CoderOutput)
+        if res.output.continue_evidence:
+            new_ids = set(evidence.get("records", {})) - before_ids if evidence else set()
+            used = self.recovery_options.get("evidence_continuations", 0)
+            if (not evidence or not new_ids or res.output.edits or res.output.report
+                    or res.output.blocked_reason or used >= run.max_iter - 1):
+                self._escalate(run, "no_changes", {
+                    "blocked_reason": "Evidence handoff requires new saved items, no errors/edits/report, "
+                                      "and remaining continuation allowance.",
+                    "new_evidence_count": len(new_ids), "continuations_used": used,
+                    "continuation_limit": max(0, run.max_iter - 1),
+                }, on_approve=S.CODING)
+                return
+            with self._atomic():
+                self.recovery_options["evidence_continuations"] = used + 1
+                feedback = self._latest_text(run, "feedback") or ""
+                self._save_artifact(run, "feedback", feedback +
+                    f"\nCheckpoint handoff {used + 1}: saved {len(new_ids)} new items. "
+                    "Continue only remaining evidence_status requirements; preserve existing records. "
+                    "Do not restart reading completed material.", "driver", to="coder")
+                self._clear_agent_cache(run.id)
+                self._checkpoint(run)
+            return
+        if self.recovery_options.get("evidence") and res.output.edits:
+            self._escalate(run, "no_changes", {
+                "blocked_reason": "Evidence-contract revision is read-only; submit evidence records, not edits.",
+            }, on_approve=S.CODING)
+            return
         self.workspace.apply_edits(res.output.edits)
         diff = await self.workspace.diff()
+        unread = self.recovery_options.get("read_cursors", {}).get("coder", {}).get("pending", [])
+        if not diff.strip() and unread:
+            self._escalate(run, "no_changes", {
+                "blocked_reason": "Requested evidence ranges remain unread; use workspace_read_next to finish them.",
+                "pending_reads": unread,
+            }, on_approve=S.CODING)
+            return
+        if not diff.strip() and (res.output.report or "").strip() and not res.output.blocked_reason:
+            assert res.output.report is not None
+            evidence = self.recovery_options.get("evidence")
+            if evidence:
+                status = evidence_status(evidence)
+                problems = []
+                contract = EvidenceContract.model_validate(evidence["contract"])
+                for row in evidence.get("records", {}).values():
+                    try:
+                        validate_record(EvidenceRecord.model_validate(row), contract,
+                                        self.workspace.source_text, evidence.get("searches", []))
+                    except ValueError as exc:
+                        problems.append(str(exc))
+                if status["missing_count"] or problems:
+                    self._escalate(run, "no_changes", {
+                        "blocked_reason": "Evidence contract incomplete; finish missing items, not a full rerun.",
+                        "evidence_status": status, "evidence_errors": problems[:20],
+                    }, on_approve=S.CODING)
+                    return
+                with self._atomic():
+                    self._save_artifact(run, "report", res.output.report, "coder")
+                    self._save_artifact(run, "evidence", json.dumps(evidence, ensure_ascii=False), "coder")
+                    self._escalate(run, "signoff", {
+                        "read_only_evidence": True, "evidence_status": status,
+                        "note": "Literal quotes and coverage checked. Semantic correctness still requires review.",
+                    }, on_approve=S.DONE)
+                return
+            with self._atomic():
+                self._save_artifact(run, "report", res.output.report, "coder")
+                self._advance(run, S.DONE)
+            return
         if not diff.strip():
             # Nothing changed: reviewing an empty diff only spends budget, so ask the user right away.
             self._escalate(run, "no_changes", {"blocked_reason": (res.output.blocked_reason or "")[:2000]},
@@ -428,7 +527,9 @@ class Driver:
     async def _reviewing(self, run: Run) -> None:
         inp = self._input(run, diff=self._latest_text(run, "diff"), gate=self._last_iteration(run).gate_result)
         inp.iteration = self._last_iteration(run).n
-        results = await self._agents(run, self.cfg.reviewer_roles, inp, Verdict)
+        # Auto dispatch picks the reviewers a task needs; manual projects run all of them.
+        reviewers = self.recovery_options.get("reviewers") or self.cfg.reviewer_roles
+        results = await self._agents(run, reviewers, inp, Verdict)
         verdicts = [
             r.output.model_copy(
                 update={
@@ -653,7 +754,9 @@ class Driver:
                     run.model_copy(update={"goal": query}), role, inp.model_copy(update={"goal": query})
                 )
 
-            tools = WorkerTools(role, self.cfg.agents[role].tool_grants, self.workspace, self.gate, search)
+            read_state = self.recovery_options.setdefault("read_cursors", {}).setdefault(role, {})
+            tools = WorkerTools(role, self.cfg.agents[role].tool_grants, self.workspace, self.gate, search, read_state,
+                                self.recovery_options.get("evidence") if role == "coder" else None)
             extra = external.get(role)
             if not extra:
                 return tools.specs, tools.execute
@@ -771,13 +874,24 @@ class Driver:
         gate = next((a for a in reversed(pending) if a.kind == "gate"), None)
         arb = next((a for a in reversed(pending) if a.kind == "arbiter"), None)
         fb = next((a for a in reversed(pending) if a.kind == "feedback"), None)
+        evidence = self.recovery_options.get("evidence")
+        evidence_instruction = (
+            "\nEvidence contract enabled: call evidence_status, then gather and save each required item with "
+            "evidence_record. Use evidence_capture and citation_id references to avoid retyping source quotes. "
+            "It checks exact quotes and executed searches; it does not judge truth. "
+            "Do not finish while missing_count > 0. Saved records survive interruption. "
+            "If you need fresh context after a substantial evidence batch, return continue_evidence=true, "
+            "edits=[], report=null, blocked_reason=null. This is allowed only with NEW saved IDs and within "
+            "the existing iteration limit; never use it to retry errors. Missing work alone is not a blocker. "
+            "Final report must reference the evidence IDs and include scores, calculations, uncertainties."
+        ) if evidence else ""
         return self._input(
             run,
             gate=GateResult.model_validate_json(self.blobs.get(gate.content_ref)) if gate else None,
             instructions=ArbiterDecision.model_validate_json(self.blobs.get(arb.content_ref)).instructions
             if arb
             else [],
-            feedback=self.blobs.get(fb.content_ref) if fb else None,
+            feedback=(self.blobs.get(fb.content_ref) if fb else "") + evidence_instruction,
         )
 
     def _escalate(

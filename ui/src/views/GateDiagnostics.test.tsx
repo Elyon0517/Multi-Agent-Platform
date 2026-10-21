@@ -77,3 +77,12 @@ it('explains an oscillation pause and lists the open findings instead of fingerp
   expect(html).not.toContain('naming');
   expect(html).not.toContain('086f2c18c3de0196');
 });
+
+it('prefills a higher iteration limit so Approve can continue past the limit', () => {
+  const approval: Approval = { id: 'a', run_id: 'r', reason: 'max_iter_exceeded', status: 'pending',
+    on_approve: 'CODING', report: null, decided_by: null, feedback: null, decided_at: null, payload: {} };
+  const detail = { run: { max_iter: 5 }, iterations: [] } as unknown as RunDetail;
+  expect(render(<ApprovalBar runId="r" approval={approval} detail={detail} />)).toContain('value="10"');
+  const capped = { run: { max_iter: 40 }, iterations: [] } as unknown as RunDetail;
+  expect(render(<ApprovalBar runId="r" approval={approval} detail={capped} />)).toContain('value="50"');
+});

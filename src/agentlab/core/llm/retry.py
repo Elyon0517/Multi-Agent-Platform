@@ -60,6 +60,7 @@ async def call_with_retry(
     log: AttemptLog,
     check_budget: Callable[[], None],
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    on_timeout: Callable[[], None] | None = None,
 ) -> R:
     for attempt in range(cfg.num_retries + 1):
         check_budget()
@@ -67,6 +68,8 @@ async def call_with_retry(
         try:
             return await asyncio.wait_for(fn(), cfg.timeout_s)
         except TimeoutError as exc:
+            if on_timeout:
+                on_timeout()
             if "read_timeout" in cfg.do_not_retry_on or "read_timeout" not in cfg.retry_on:
                 raise NonRetryable("read_timeout") from exc
             log.reasons.append("read_timeout")

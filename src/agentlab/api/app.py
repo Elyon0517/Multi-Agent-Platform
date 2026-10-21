@@ -17,6 +17,7 @@ from agentlab.api.images import build_image_router
 from agentlab.api.knowledge import build_router
 from agentlab.bootstrap import MissingGatewayConfig, Services, build_services
 from agentlab.core.conversation import Message, RootTurn
+from agentlab.core.evidence import EvidenceContract
 from agentlab.core.loop.driver import Decision, Driver
 from agentlab.core.loop.states import ACTIVE
 from agentlab.core.ports import RunBusy
@@ -56,6 +57,11 @@ class DecideBody(BaseModel):
     max_iter: int | None = None
 
 
+class ReviseReportBody(BaseModel):
+    feedback: str = Field(min_length=1, max_length=20000)
+    contract: EvidenceContract
+
+
 class PickFolderBody(BaseModel):
     # A required JSON body forces a CORS preflight, so other websites cannot open the dialog.
     prompt: str = Field(default="Select the project folder", max_length=200)
@@ -92,6 +98,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
     drivers: dict[str, Driver] = {}
     tasks: set[asyncio.Task[Run]] = set()
     run_tasks: dict[str, asyncio.Task[Run]] = {}
+    turn_tasks: dict[str, asyncio.Task[tuple[RootTurn, str]]] = {}
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -234,7 +241,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
             raise HTTPException(404, "conversation not found in this project") from exc
         try:
             with svc.store.lock_run("turn:" + thread_id):
-                turn, turn_id = await SessionService(svc).answer(project_id, thread_id, body.text)
+                answer = asyncio.create_task(SessionService(svc).answer(project_id, thread_id, body.text))
+                turn_tasks[thread_id] = answer
+                try:
+                    turn, turn_id = await answer
+                finally:
+                    turn_tasks.pop(thread_id, None)
                 run = None
                 if turn.intent == "task":
                     try:
@@ -283,6 +295,15 @@ def create_app(svc: Services | None = None) -> FastAPI:
                 return {"message": message, "turn": turn, "run": run}
         except RunBusy as exc:
             raise HTTPException(409, "conversation is answering another message") from exc
+
+    @app.post("/projects/{project_id}/threads/{thread_id}/turn/cancel")
+    def cancel_turn(project_id: str | None, thread_id: str) -> dict[str, bool]:
+        answer = turn_tasks.get(thread_id)
+        return {"stopped": bool(answer and answer.cancel())}
+
+    @app.post("/threads/{thread_id}/turn/cancel")
+    def cancel_global_turn(thread_id: str) -> dict[str, bool]:
+        return cancel_turn(None, thread_id)
 
     @app.get("/threads")
     def global_threads() -> list[Any]:
@@ -444,6 +465,18 @@ def create_app(svc: Services | None = None) -> FastAPI:
             )
         except (ValueError, MissingGatewayConfig, RunBusy) as e:
             raise HTTPException(409, str(e)) from e
+        spawn(driver, run_id)
+        return run
+
+    @app.post("/runs/{run_id}/revise-report", response_model=Run)
+    async def revise_report(run_id: str, body: ReviseReportBody) -> Run:
+        get_run(run_id)
+        try:
+            driver = svc.restore_driver(run_id)
+            run = driver.revise_report(run_id, body.feedback, body.contract)
+            drivers[run_id] = driver
+        except (ValueError, RunBusy) as exc:
+            raise HTTPException(409, str(exc)) from exc
         spawn(driver, run_id)
         return run
 

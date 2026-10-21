@@ -1373,6 +1373,108 @@
         }
       }
     },
+    "/projects/{project_id}/threads/{thread_id}/turn/cancel": {
+      "post": {
+        "summary": "Cancel Turn",
+        "operationId": "cancel_turn_projects__project_id__threads__thread_id__turn_cancel_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Cancel Turn Projects  Project Id  Threads  Thread Id  Turn Cancel Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/threads/{thread_id}/turn/cancel": {
+      "post": {
+        "summary": "Cancel Global Turn",
+        "operationId": "cancel_global_turn_threads__thread_id__turn_cancel_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Cancel Global Turn Threads  Thread Id  Turn Cancel Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/threads": {
       "get": {
         "summary": "Global Threads",
@@ -2158,6 +2260,55 @@
         }
       }
     },
+    "/runs/{run_id}/revise-report": {
+      "post": {
+        "summary": "Revise Report",
+        "operationId": "revise_report_runs__run_id__revise_report_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseReportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/resume": {
       "post": {
         "summary": "Resume",
@@ -2454,7 +2605,9 @@
               "gate",
               "arbiter",
               "feedback",
-              "memory"
+              "memory",
+              "report",
+              "evidence"
             ],
             "title": "Kind"
           },
@@ -2508,7 +2661,9 @@
               "gate",
               "arbiter",
               "feedback",
-              "memory"
+              "memory",
+              "report",
+              "evidence"
             ],
             "title": "Kind"
           },
@@ -2939,6 +3094,75 @@
           "budget.warning"
         ],
         "title": "EventType"
+      },
+      "EvidenceContract": {
+        "properties": {
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRequirement"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Requirements"
+          },
+          "source_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Source Paths"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "requirements",
+          "source_paths"
+        ],
+        "title": "EvidenceContract"
+      },
+      "EvidenceRequirement": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "claim_path": {
+            "type": "string",
+            "title": "Claim Path"
+          },
+          "line_start": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Line Start"
+          },
+          "line_end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Line End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "claim_path",
+          "line_start",
+          "line_end"
+        ],
+        "title": "EvidenceRequirement"
       },
       "Finding": {
         "properties": {
@@ -4139,6 +4363,25 @@
           "run_ids"
         ],
         "title": "ProjectStep"
+      },
+      "ReviseReportBody": {
+        "properties": {
+          "feedback": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Feedback"
+          },
+          "contract": {
+            "$ref": "#/components/schemas/EvidenceContract"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedback",
+          "contract"
+        ],
+        "title": "ReviseReportBody"
       },
       "RootTurn": {
         "properties": {

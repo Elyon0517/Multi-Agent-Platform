@@ -1,9 +1,9 @@
 llm_call:
   num_retries: 3
   backoff_base_s: 1.0
-  timeout_s: 180
-  retry_on: [rate_limit_429, server_error_5xx, connection_error, read_timeout, empty_response]
-  do_not_retry_on: [auth_401_403, context_length_exceeded, content_policy_refusal, budget_exceeded]
+  timeout_s: 900
+  retry_on: [rate_limit_429, server_error_5xx, connection_error, empty_response]
+  do_not_retry_on: [auth_401_403, context_length_exceeded, content_policy_refusal, budget_exceeded, read_timeout]
 
 structured_output_repair:
   max_repairs: 2
