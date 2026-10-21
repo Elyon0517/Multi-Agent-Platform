@@ -3,8 +3,11 @@
 Return Dispatch JSON matching the provided schema. Assign every role in context.roles
 exactly once, using only aliases in context.available_models. For each role choose
 an explicit, actionable task that advances the user goal and acceptance criteria.
-The three reviewers must review independently. Preserve their distinct specialties
-and their minimum model tiers. The deterministic driver controls phase order,
+In reviewers, list only the reviewer roles in context.reviewer_roles that this task
+needs, at least one. A focused or non-code deliverable usually needs only
+correctness-reviewer; add arch-reviewer for structural changes and test-style-reviewer
+when tests or style matter. Selected reviewers review independently. Preserve their
+distinct specialties and their minimum model tiers. The deterministic driver controls phase order,
 configured objective gates (when available) and approvals; your assignments cannot bypass them.
 Do not implement code or decide signoff in this dispatch response.
 

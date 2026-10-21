@@ -190,6 +190,7 @@ export const api = {
   models: () => json<ModelCatalog>('/models'),
   updateProjectSettings: (id: string, settings: ProjectSettings) => post<Project>(`/projects/${id}/settings`, settings, 'PUT'),
   sendMessage: (id: string, tid: string, text: string) => post<components['schemas']['SendMessageResult']>(`${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/messages`, { text }),
+  stopTurn: (id: string, tid: string) => post<{ stopped: boolean }>(`${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/turn/cancel`, {}),
   threadEvents: (id: string, tid: string, callback: (type: string, payload: Record<string, unknown>) => void) => {
     return stream(`${BASE}${id === 'global' ? '' : `/projects/${id}`}/threads/${tid}/events`, (es) => {
       es.onopen = () => callback('sync', {});

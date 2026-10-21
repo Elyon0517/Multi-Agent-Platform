@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -216,6 +217,12 @@ class SessionService:
             record.update(status="completed", intent=turn.intent, output=turn.model_dump(mode="json"))
             save()
             return turn, turn_id
+        except asyncio.CancelledError:
+            # The user pressed Stop; the turn ends with a short note instead of an answer.
+            stopped = RootTurn(intent="answer", reply="已停止本轮回答。")
+            record.update(status="cancelled", intent=stopped.intent, output=stopped.model_dump(mode="json"))
+            save()
+            return stopped, turn_id
         except Exception as exc:
             record.update(status="failed", error=type(exc).__name__)
             if summary:

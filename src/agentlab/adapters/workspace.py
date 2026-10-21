@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -134,7 +135,7 @@ class GitWorkspace:
                 timeout=30,
             )
             objects = Path(self._snapshot_dir.name) / "objects"
-            objects.mkdir(exist_ok=True)
+            objects.mkdir(parents=True, exist_ok=True)
             self._object_env = {
                 **scrubbed_env(),
                 "GIT_OBJECT_DIRECTORY": str(objects),
@@ -289,6 +290,7 @@ class GitWorkspace:
         return known_secret or bool(re.search(pattern, text))
 
     def begin_run(self) -> None:
+        self._object_env = None
         self._present_repositories.clear()
         self._baseline_tree, self._baseline_meta = self._snapshot()
 
@@ -357,7 +359,8 @@ class GitWorkspace:
                 break
         return files
 
-    def read_source(self, rel: str, line_start: int = 1, line_end: int | None = None) -> str:
+    def source_text(self, rel: str) -> str:
+        """Read validated source text for paging and full-file search."""
         # Dependencies are excluded from source tools, but asking to inspect one
         # is an ordinary unsupported read, not a request to escape the workspace.
         # Resolve first so an external dependency symlink still stops the run.
@@ -374,8 +377,6 @@ class GitWorkspace:
             raise SourceUnavailable("is_directory: read a file inside it, or use an empty path to list files")
         if not path.is_file():
             raise SourceUnavailable("not_a_regular_file")
-        if path.stat().st_size > 100_000:
-            raise SourceUnavailable("file_too_large")
         try:
             text = self.read(rel)
         except UnicodeDecodeError as exc:
@@ -384,14 +385,45 @@ class GitWorkspace:
             raise SourceUnavailable("binary_file")
         if self._secret_text(text):
             raise WorkspaceEscape("secret content")
-        if line_start < 1 or (line_end is not None and line_end < line_start):
-            raise ValueError("invalid line range")
-        lines = text.splitlines(keepends=True)
+        return text
+
+    def read_source(
+        self, rel: str, line_start: int = 1, line_end: int | None = None, char_start: int = 0,
+    ) -> str:
+        """Return a bounded page with a lossless continuation, even inside one long line."""
+        if line_start < 1 or (line_end is not None and line_end < line_start) or char_start < 0:
+            raise ValueError("invalid source range")
+        lines = self.source_text(rel).splitlines(keepends=True)
+        if line_start > len(lines):
+            if char_start:
+                raise ValueError("character offset outside line")
+            return ""
+        if char_start > len(lines[line_start - 1]):
+            raise ValueError("character offset outside line")
         end = min(line_end if line_end is not None else line_start + 199, len(lines))
-        selected = "".join(lines[line_start - 1:end])
-        encoded = selected.encode()
-        if len(encoded) > 12000:
-            return encoded[:12000].decode(errors="ignore") + "\n[truncated; request a smaller line range]"
+        chunks = []
+        remaining = 12000
+        for index in range(line_start - 1, end):
+            offset = char_start if index == line_start - 1 else 0
+            value = lines[index][offset:]
+            encoded = json.dumps(value, ensure_ascii=False)[1:-1].encode()
+            if len(encoded) > remaining:
+                low, high = 0, min(len(value), remaining)
+                while low < high:
+                    mid = (low + high + 1) // 2
+                    if len(json.dumps(value[:mid], ensure_ascii=False)[1:-1].encode()) <= remaining:
+                        low = mid
+                    else:
+                        high = mid - 1
+                prefix = value[:low]
+                chunks.append(prefix)
+                return "".join(chunks) + (
+                    f"\n[more text; continue with line_start={index + 1}; "
+                    f"char_start={offset + len(prefix)}; total_lines={len(lines)}]"
+                )
+            chunks.append(value)
+            remaining -= len(encoded)
+        selected = "".join(chunks)
         if end < len(lines):
             selected += f"\n[more lines; continue with line_start={end + 1}; total_lines={len(lines)}]"
         return selected

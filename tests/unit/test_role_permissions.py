@@ -8,7 +8,7 @@ from agentlab.core.config import load_config
 from agentlab.core.llm.tools import WorkerTools
 
 CONFIG = load_config(Path(__file__).resolve().parents[2] / "config")
-READ = {"workspace_read", "workspace_search", "memory_search", "git_status", "git_branch", "git_log", "git_diff", "git_show"}
+READ = {"workspace_excerpt", "workspace_read_next", "workspace_read_status", "workspace_read", "workspace_search", "memory_search", "git_status", "git_branch", "git_log", "git_diff", "git_show"}
 
 
 async def _memory(query: str) -> dict:

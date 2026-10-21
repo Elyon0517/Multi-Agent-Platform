@@ -457,6 +457,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/threads/{thread_id}/turn/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Turn */
+        post: operations["cancel_turn_projects__project_id__threads__thread_id__turn_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/threads/{thread_id}/turn/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Global Turn */
+        post: operations["cancel_global_turn_threads__thread_id__turn_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/threads": {
         parameters: {
             query?: never;
@@ -733,6 +767,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/revise-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revise Report */
+        post: operations["revise_report_runs__run_id__revise_report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/resume": {
         parameters: {
             query?: never;
@@ -862,7 +913,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "dispatch" | "plan" | "diff" | "review" | "gate" | "arbiter" | "feedback" | "memory";
+            kind: "dispatch" | "plan" | "diff" | "review" | "gate" | "arbiter" | "feedback" | "memory" | "report" | "evidence";
             /** Sha256 */
             sha256: string;
             /** Content Ref */
@@ -881,7 +932,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "dispatch" | "plan" | "diff" | "review" | "gate" | "arbiter" | "feedback" | "memory";
+            kind: "dispatch" | "plan" | "diff" | "review" | "gate" | "arbiter" | "feedback" | "memory" | "report" | "evidence";
             /** Content */
             content: string;
         };
@@ -1015,6 +1066,26 @@ export interface components {
          * @enum {string}
          */
         EventType: "message.created" | "message.delta" | "turn.finished" | "run.created" | "run.status" | "step.started" | "step.tool_call" | "step.finished" | "artifact.created" | "gate.finished" | "arbiter.decision" | "approval.requested" | "approval.decided" | "budget.warning";
+        /** EvidenceContract */
+        EvidenceContract: {
+            /** Requirements */
+            requirements: components["schemas"]["EvidenceRequirement"][];
+            /** Source Paths */
+            source_paths: string[];
+        };
+        /** EvidenceRequirement */
+        EvidenceRequirement: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Claim Path */
+            claim_path: string;
+            /** Line Start */
+            line_start: number;
+            /** Line End */
+            line_end: number;
+        };
         /** Finding */
         Finding: {
             severity: components["schemas"]["Severity"];
@@ -1484,6 +1555,12 @@ export interface components {
              * @default []
              */
             run_ids: string[];
+        };
+        /** ReviseReportBody */
+        ReviseReportBody: {
+            /** Feedback */
+            feedback: string;
+            contract: components["schemas"]["EvidenceContract"];
         };
         /** RootTurn */
         RootTurn: {
@@ -2863,6 +2940,73 @@ export interface operations {
             };
         };
     };
+    cancel_turn_projects__project_id__threads__thread_id__turn_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string | null;
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_global_turn_threads__thread_id__turn_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     global_threads_threads_get: {
         parameters: {
             query?: never;
@@ -3382,6 +3526,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["DecideBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_report_runs__run_id__revise_report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviseReportBody"];
             };
         };
         responses: {

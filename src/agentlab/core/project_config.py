@@ -82,10 +82,14 @@ def project_config(cfg: AppConfig, settings: ProjectSettings) -> AppConfig:
 
 class Dispatch(Strict):
     assignments: dict[str, Binding]
+    # Reviewer roles this task needs; only these review each round.
+    reviewers: list[str] = Field(min_length=1)
 
     def validate_for(self, cfg: AppConfig, settings: ProjectSettings) -> None:
         if set(self.assignments) != worker_roles(cfg):
             raise ValueError("supervisor must assign every worker exactly once")
+        if len(set(self.reviewers)) != len(self.reviewers) or set(self.reviewers) - set(cfg.reviewer_roles):
+            raise ValueError("supervisor selected an unknown or duplicate reviewer")
         allowed = set(settings.allowed_aliases or cfg.models.aliases)
         for role, binding in self.assignments.items():
             if binding.alias not in allowed:

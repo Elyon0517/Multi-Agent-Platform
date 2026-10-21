@@ -16,7 +16,10 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
 }) {
   const { t } = useTranslation();
   const [feedback, setFeedback] = useState('');
-  const [maxIter, setMaxIter] = useState('');
+  // At the iteration limit, Approve needs a higher limit; start with another round of the same size.
+  const currentMaxIter = detail?.run?.max_iter;
+  const [maxIter, setMaxIter] = useState(
+    approval.reason === 'max_iter_exceeded' && currentMaxIter ? String(Math.min(50, currentMaxIter * 2)) : '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const onAction = async (label: string) => {
@@ -63,6 +66,14 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
         onAction={onAction}
       />
       <Status error={error} />
+      {approval.reason !== 'signoff' && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <Field id="resume-max-iter" label={t('lab.resumeMaxIter')}>
+            <input id="resume-max-iter" type="number" min="1" max="50" step="1" style={inputStyle}
+              value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
+          </Field>
+        </div>
+      )}
       {findings.length > 0 && (
         <div style={{ marginTop: 8, fontSize: 12 }}>
           <strong>{t('lab.openFindings')}</strong>
@@ -74,14 +85,6 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
         </div>
       )}
       {approval.reason === 'interrupted_call' && <p>{t('lab.interruptedCall')}</p>}
-      {approval.reason !== 'signoff' && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <Field id="resume-max-iter" label={t('lab.resumeMaxIter')}>
-            <input id="resume-max-iter" type="number" min="1" max="50" step="1" style={inputStyle}
-              value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
-          </Field>
-        </div>
-      )}
       <label htmlFor="feedback" style={{ display: 'block', marginTop: 4 }}>{t('lab.feedbackForReject')}</label>
       <input id="feedback" value={feedback} onChange={(e) => setFeedback(e.target.value)} style={{ width: '100%' }} />
     </div>

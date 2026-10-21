@@ -34,7 +34,7 @@ async def test_an_empty_delivery_pauses_with_the_coders_reason_instead_of_being_
     svc = _svc(tmp_path)
     driver = svc.driver(seed_demo_workspace(tmp_path / "ws"), "fake", "python")
     scripts = demo_scripts()
-    scripts["coder"] = lambda inp: CoderOutput(edits=[], blocked_reason="cannot read the reference repository")
+    scripts["coder"] = lambda inp: CoderOutput(edits=[], report="Partial analysis", blocked_reason="cannot read the reference repository")
     driver.runtime = FakeRuntime(scripts)
     await driver.workspace.ensure_repo()
     run = await driver.create_async("port the MVP")
@@ -83,3 +83,65 @@ def test_project_check_commands_run_in_the_worktree_with_linked_dependencies(tmp
         assert detail["pending_approval"]["payload"]["automated_checks"] == "passed"
         assert all(report["passed"] for report in detail["gate_reports"])
         assert detail["gate_reports"][0]["language"] == "project"
+
+
+async def test_read_only_report_finishes_without_code_review(tmp_path: Path) -> None:
+    svc = _svc(tmp_path)
+    driver = svc.driver(seed_demo_workspace(tmp_path / "ws"), "fake", "python")
+    scripts = demo_scripts()
+    scripts["coder"] = lambda inp: CoderOutput(edits=[], report="Evidence and itemized scores")
+    driver.runtime = FakeRuntime(scripts)
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async("read-only scoring")
+    run = await driver.run(run.id)
+    assert run.status == RunStatus.DONE
+    assert svc.store.pending_approval(run.id) is None
+    report = svc.store.artifacts(run.id, "report")[-1]
+    assert driver.blobs.get(report.content_ref) == "Evidence and itemized scores"
+    assert not [s for s in svc.store.steps(run.id) if s.role.endswith("reviewer") or s.role == "arbiter"]
+
+
+async def test_no_changes_approval_actually_retries_coder(tmp_path: Path) -> None:
+    svc = _svc(tmp_path)
+    driver = svc.driver(seed_demo_workspace(tmp_path / "ws"), "fake", "python")
+    calls = []
+
+    def coder(inp):
+        calls.append(inp)
+        if len(calls) == 1:
+            return CoderOutput(edits=[], blocked_reason="temporary missing context")
+        return CoderOutput(edits=[], report="Completed analysis")
+
+    scripts = demo_scripts()
+    scripts["coder"] = coder
+    driver.runtime = FakeRuntime(scripts)
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async("read-only scoring")
+    run = await driver.run(run.id)
+    assert run.status == RunStatus.WAITING_HUMAN
+    driver.runtime_factory = None
+    driver.decide(run.id, "approve")
+    run = await driver.run(run.id)
+    assert len(calls) == 2
+    assert run.status == RunStatus.DONE
+
+
+async def test_report_cannot_finish_with_pending_evidence_reads(tmp_path: Path) -> None:
+    svc = _svc(tmp_path)
+    driver = svc.driver(seed_demo_workspace(tmp_path / "ws"), "fake", "python")
+
+    def coder(inp):
+        driver.recovery_options['read_cursors'] = {'coder': {'pending': [
+            {'path': 'evidence.txt', 'line_start': 190, 'char_start': 22, 'line_end': 250},
+        ]}}
+        return CoderOutput(edits=[], report='Premature final score')
+
+    scripts = demo_scripts()
+    scripts['coder'] = coder
+    driver.runtime = FakeRuntime(scripts)
+    await driver.workspace.ensure_repo()
+    run = await driver.create_async('score evidence')
+    run = await driver.run(run.id)
+    assert run.status == RunStatus.WAITING_HUMAN
+    assert svc.store.pending_approval(run.id).payload['pending_reads'][0]['line_start'] == 190
+    assert not svc.store.artifacts(run.id, 'report')

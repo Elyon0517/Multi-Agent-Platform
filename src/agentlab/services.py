@@ -528,6 +528,9 @@ class MemoryHooks:
                     from agentlab.core.signoff import report_text
 
                     reply = report_text(report)
+                elif run.status == RunStatus.DONE and store.artifacts(run.id, "report") and self.session_services:
+                    artifact = store.artifacts(run.id, "report")[-1]
+                    reply = self.session_services.blobs.get(artifact.content_ref)
                 elif self.session_services:
                     try:
                         from agentlab.core.session.service import SessionService

@@ -239,3 +239,32 @@ def test_accounting_replays_do_not_charge_budget_twice(tmp_path: Path):
     record(paid)
     assert len(charges) == 1
     assert summarize(svc.store, svc.cfg.agents).total.calls == 1
+
+
+async def test_deadline_closes_attempt_without_automatic_timeout_retry(tmp_path: Path):
+    import asyncio
+    svc = services(tmp_path)
+    cfg = svc.cfg.model_copy(deep=True)
+    cfg.retry.llm_call.timeout_s = 0.01
+    attempts = {}
+
+    def started(data):
+        key = str(len(attempts))
+        attempts[key] = {"status": "in_flight"}
+        return key
+
+    def finished(key, data):
+        attempts[key].update(data)
+
+    async def slow(**kwargs):
+        await asyncio.sleep(1)
+
+    run = Run(goal="score", workspace=str(tmp_path))
+    ctx = RunContext(run, lambda _: None, attempt_started=started, attempt_finished=finished,
+                     record_usage=UsageRecorder(svc.store, "turn", run.id, None))
+    with pytest.raises(NonRetryable, match="read_timeout"):
+        await StructuredCaller(cfg, slow).call(
+            "root", AgentInput(run_id=run.id, iteration=0, goal="score"), RootTurn, ctx,
+        )
+    assert list(attempts.values()) == [{"status": "failed", "error_kind": "read_timeout"}]
+    assert summarize(svc.store, cfg.agents).total.unmetered_calls == 1
