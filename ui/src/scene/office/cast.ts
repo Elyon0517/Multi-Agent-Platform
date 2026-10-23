@@ -1,9 +1,5 @@
-// Cast metadata and procedural frames share the recipes in portraitArt.ts.
-// See assets/ATTRIBUTION.md.
-
 import type { Texture } from 'pixi.js';
 import { paintPortrait, sceneFrameBufs, SCENE_W, SCENE_H } from './portraitArt';
-
 export type OfficeCharacterName =
   | 'aster' | 'byte' | 'lumen' | 'quartz' | 'moss' | 'iris'
   | 'atlas' | 'cedar' | 'fern' | 'ember' | 'coral' | 'nova'
@@ -46,48 +42,27 @@ export function hexToNumber(hex: string): number {
   return parseInt(hex.replace('#', ''), 16);
 }
 
-// ─── scene frames ────────────────────────────────────────────────────────────
-const frameCache = new Map<OfficeCharacterName, Texture[][]>();
 
-function bufToTexture(buf: Uint8ClampedArray, factory: typeof Texture): Texture {
-  const canvas = document.createElement('canvas');
-  canvas.width = SCENE_W; canvas.height = SCENE_H;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(SCENE_W, SCENE_H);
-  img.data.set(buf);
-  ctx.putImageData(img, 0, 0);
-  const tex = factory.from(canvas);
-  tex.source.scaleMode = 'nearest';
-  return tex;
+const pending = new Map<string, Promise<Texture[][]>>();
+export function getCastFrames(name: OfficeCharacterName): Promise<Texture[][]> {
+  if (!pending.has(name)) pending.set(name, buildFrames(name).catch(error => { pending.delete(name); throw error; }));
+  return pending.get(name)!;
 }
-
-/**
- * Frame grid CharacterSprite expects: 3 rows (down, up, right) × 7 frames
- * [walk1, walk2, walk3, type1, type2, read1, read2]. We provide a front view
- * (down — and reused for the side row, so left/right walkers still show a face)
- * and a back view (up — agents seated facing their desk show their back). The
- * three walk frames are stand / step-left / step-right.
- */
-export async function getCastFrames(name: OfficeCharacterName): Promise<Texture[][]> {
-  const cached = frameCache.get(name);
-  if (cached) return cached;
+async function buildFrames(name: OfficeCharacterName): Promise<Texture[][]> {
   const { Texture } = await import('pixi.js');
-  const { front, back } = sceneFrameBufs(name);
-  const toRow = (bufs: Uint8ClampedArray[]): Texture[] => {
-    const [stand, stepL, stepR] = bufs.map((buf) => bufToTexture(buf, Texture));
-    return [stand, stepL, stepR, stand, stand, stand, stand];
+  const source = sceneFrameBufs(name);
+  const upload = (buffer: Uint8ClampedArray) => {
+    const canvas = document.createElement('canvas'); Object.assign(canvas, { width: SCENE_W, height: SCENE_H });
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Character canvas unavailable');
+    const image = context.createImageData(SCENE_W, SCENE_H); image.data.set(buffer); context.putImageData(image, 0, 0);
+    const result = Texture.from(canvas); result.source.scaleMode = 'nearest'; return result;
   };
-  const frontRow = toRow(front);
-  const frames: Texture[][] = [frontRow, toRow(back), frontRow]; // down, up, right
-  frameCache.set(name, frames);
-  return frames;
+  const row = (buffers: Uint8ClampedArray[]) => {
+    const frames = buffers.map(upload); return [...frames, frames[1], frames[2], frames[0], frames[1]];
+  };
+  const front = row(source.front); return [front, row(source.back), front];
 }
-
-/** Paint a static cast portrait. */
-export async function paintCastPortrait(
-  ctx: CanvasRenderingContext2D,
-  name: OfficeCharacterName,
-  scale = 2,
-): Promise<void> {
-  paintPortrait(ctx, name, scale);
+export async function paintCastPortrait(context: CanvasRenderingContext2D, name: OfficeCharacterName, scale = 2): Promise<void> {
+  paintPortrait(context, name, scale);
 }

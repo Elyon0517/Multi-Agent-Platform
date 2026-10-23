@@ -1,5 +1,9 @@
 # Multi-Agent Platform Discovery
 
+> 当前 UI 实现更新（2026-10-23）：旧可视化移植方案已由仓库内重新实现替代。
+> 下文 ADR-011、ADR-017、ADR-031 及移植清单保留为历史决策，关于保留移植代码的描述不再代表当前实现。
+> 当前来源、兼容性范围和验证记录见 [UI_REPLACEMENT.md](UI_REPLACEMENT.md)。
+
 > 状态：v1.12 · P0 / P1 / P2 完成；v1.6 新增 Root 会话入口（§2.5、ADR-025）；v1.7 新增 Monitor 模块（按 agent 统计 token，§15.5、ADR-027）；v1.8 已接入 summarizer 与删除项目（§9.1、ADR-028）；v1.9 决定 Gate 改为可选、取消多语言 Gate（§4、ADR-029），embedding / rerank 默认本地运行（§7.4、ADR-030），开源前替换所有可能侵权的素材与影视 IP（§15.6、ADR-031）；v1.10 每个 run 使用独立 worktree，同一仓库可并行多个任务，取消工具调用次数上限（§16.5、ADR-033）；接入 MCP：GitHub 与 Fetch（§16.6、ADR-034）；v1.11 开发能力补强：空交付暂停、停止按钮、coder 只读外部工具、项目检查命令（§16.7、ADR-035）；v1.12 默认分支模式（直接改你的仓库）、审批显示在对话中（§16.5、ADR-036）· 可持续更新
 > 最近更新：2026-10-10
 > 仓库名称：`multi-agent-platform`（Multi-Agent Platform）；Python 包、CLI 与 `AGENTLAB_*` 配置名保留兼容。

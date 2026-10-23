@@ -1,126 +1,43 @@
-import { useEffect, useRef, useState } from 'react';
-import { isComposingKey } from '@shared/imeGuard';
-
+import { useRef, useState } from 'react';
+import { isComposingKey } from '@/shared/imeGuard';
 export interface AgentNameEditorProps {
-  name: string;
-  onCommit: (name: string) => Promise<{ ok: boolean; error?: string }>;
-  /** Cards render names in their established all-caps display style. */
-  uppercase?: boolean;
-  fontSize?: number | string;
+  name: string; onCommit: (name: string) => Promise<{ ok: boolean; error?: string }>;
+  uppercase?: boolean; fontSize?: number | string;
 }
-
-/** Inline display-name editor shared by the floor card and agent detail header. */
-export function AgentNameEditor({
-  name,
-  onCommit,
-  uppercase = false,
-  fontSize = 'var(--cth-text-display-sm)'
-}: AgentNameEditorProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name);
-  const [error, setError] = useState<string>();
-  const committing = useRef(false);
-  const cancelling = useRef(false);
-
-  useEffect(() => {
-    if (!editing) setDraft(name);
-  }, [editing, name]);
-
-  const beginEditing = () => {
-    setDraft(name);
-    setError(undefined);
-    setEditing(true);
-  };
-
-  const commit = async () => {
-    if (committing.current || cancelling.current) return;
-    const nextName = draft.trim();
-    if (!nextName) {
-      setError('Name is required');
-      return;
-    }
-    if (nextName === name) {
-      setEditing(false);
-      return;
-    }
-
-    committing.current = true;
-    setError(undefined);
+export function AgentNameEditor({ name, onCommit, uppercase, fontSize = 'var(--cth-text-display-sm)' }: AgentNameEditorProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const busy = useRef(false), cancelled = useRef(false);
+  const begin = () => { cancelled.current = false; setError(''); setDraft(name); };
+  const save = async () => {
+    if (busy.current || cancelled.current || draft === null) return;
+    const value = draft.trim();
+    if (!value) { setError('Name is required'); return; }
+    if (value === name) { setDraft(null); return; }
+    busy.current = true;
     try {
-      const result = await onCommit(nextName);
-      if (result.ok) setEditing(false);
-      else setError(result.error ?? 'Could not rename agent');
-    } catch (commitError) {
-      setError(commitError instanceof Error ? commitError.message : 'Could not rename agent');
-    } finally {
-      committing.current = false;
-    }
+      const result = await onCommit(value);
+      if (result.ok) setDraft(null); else setError(result.error || 'Rename failed');
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { busy.current = false; }
   };
-
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        draggable={false}
-        value={draft}
-        aria-label={`Rename ${name}`}
-        title={error}
-        onFocus={(event) => event.currentTarget.select()}
-        onChange={(event) => setDraft(event.target.value)}
-        onClick={(event) => event.stopPropagation()}
-        onMouseDown={(event) => event.stopPropagation()}
-        onBlur={() => { void commit(); }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          // Still stop propagation for a composition key: it belongs to this
-          // input's IME, not to a global hotkey.
-          if (isComposingKey(event)) return;
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            void commit();
-          } else if (event.key === 'Escape') {
-            cancelling.current = true;
-            setEditing(false);
-            queueMicrotask(() => { cancelling.current = false; });
-          }
-        }}
-        style={{
-          width: '100%', minWidth: 0, height: 20, padding: '1px 4px', boxSizing: 'border-box',
-          border: 'none', outline: 'none',
-          background: 'var(--cth-paper-100)',
-          boxShadow: `inset 0 0 0 1px var(--cth-${error ? 'coral' : 'ink-300'})`,
-          fontFamily: 'var(--cth-font-display)', fontSize,
-          color: 'var(--cth-ink-900)', textTransform: uppercase ? 'uppercase' : undefined
-        }}
-      />
-    );
-  }
-
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, flex: 1 }}>
-      <span
-        onDoubleClick={(event) => { event.stopPropagation(); beginEditing(); }}
-        title={`${name} — double-click to rename`}
-        style={{
-          fontFamily: 'var(--cth-font-display)', fontSize,
-          color: 'var(--cth-ink-900)',
-          minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-        }}
-      >{uppercase ? name.toUpperCase() : name}</span>
-      <button
-        type="button"
-        draggable={false}
-        aria-label={`Rename ${name}`}
-        title={`Rename ${name}`}
-        onClick={(event) => { event.stopPropagation(); beginEditing(); }}
-        onMouseDown={(event) => event.stopPropagation()}
-        style={{
-          flexShrink: 0, width: 14, height: 14, padding: 0,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          border: 'none', background: 'transparent', cursor: 'text',
-          color: 'var(--cth-ink-500)', fontFamily: 'var(--cth-font-ui)', fontSize: 9, lineHeight: 1
-        }}
-      >✎</button>
-    </span>
-  );
+  const style = { fontFamily: 'var(--cth-font-display)', fontSize, minWidth: 0,
+    color: 'var(--cth-ink-900)', textTransform: uppercase ? 'uppercase' as const : undefined };
+  if (draft !== null) return <input autoFocus aria-label={`Rename ${name}`} aria-invalid={!!error} title={error}
+    value={draft} onChange={e => setDraft(e.target.value)} onFocus={e => e.currentTarget.select()}
+    onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onBlur={() => void save()}
+    onKeyDown={e => {
+      e.stopPropagation(); if (isComposingKey(e)) return;
+      if (e.key === 'Escape') { cancelled.current = true; setDraft(null); }
+      if (e.key === 'Enter') { e.preventDefault(); void save(); }
+    }} style={{ ...style, width: '100%', height: 20, padding: '1px 4px',
+      background: 'var(--cth-paper-100)', border: `1px solid var(--cth-${error ? 'coral' : 'ink-300'})` }} />;
+  return <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flex: 1, minWidth: 0 }}>
+    <span onDoubleClick={e => { e.stopPropagation(); begin(); }} title={`${name} — double-click to rename`}
+      style={{ ...style, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+    <button type="button" aria-label={`Rename ${name}`} title={`Rename ${name}`}
+      onClick={e => { e.stopPropagation(); begin(); }} onMouseDown={e => e.stopPropagation()}
+      style={{ background: 'transparent', border: 0, padding: 0, width: 14, height: 14,
+        color: 'var(--cth-ink-500)', fontSize: 9, cursor: 'text', flexShrink: 0 }}>✎</button>
+  </span>;
 }

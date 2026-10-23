@@ -1,58 +1,22 @@
-// Resolve original workspace maps and their atlas metadata.
-
 import type { TiledMap } from './TiledMapRenderer';
-import {
-  getTheme,
-  STUDIO_THEME,
-  type ThemeConfig,
-  type ThemeId,
-} from './themeRegistry';
-
-/** Parse a theme's raw Tiled JSON and patch its tileset array.
- *  `embedded` atlases keep the map's own inline metadata; the rest are replaced
- *  by the theme's inline metadata (firstgid + image dimensions). The result's
- *  tileset order matches the texture-load order (texture[i] ↔ tilesets[i]). */
+import { getTheme, STUDIO_THEME, type ThemeId, type ThemeConfig } from './themeRegistry';
 export function resolveThemeMap(theme: ThemeConfig): TiledMap {
-  const m = JSON.parse(theme.mapRaw) as TiledMap;
-  return {
-    ...m,
-    tilesets: theme.tilesets.map((t, i) => {
-      if (t.embedded) return m.tilesets[i];
-      // Strip the renderer-only fields (url/embedded); the rest is Tiled metadata.
-      const { url: _url, embedded: _embedded, ...meta } = t;
-      return meta as TiledMap['tilesets'][number];
-    }),
-  };
+  const data = JSON.parse(theme.mapRaw) as TiledMap;
+  if (![data.width, data.height, data.tilewidth, data.tileheight].every(n => Number.isInteger(n) && n > 0) ||
+    !Array.isArray(data.layers) || !Array.isArray(data.tilesets)) throw new Error(`Invalid workspace map: ${theme.id}`);
+  const tilesets = theme.tilesets.map((entry, index) => {
+    if (entry.embedded) {
+      if (!data.tilesets[index]) throw new Error('Missing embedded atlas');
+      return data.tilesets[index];
+    }
+    const { url: _url, embedded: _embedded, ...metadata } = entry;
+    return metadata as TiledMap['tilesets'][number];
+  });
+  return { ...data, tilesets };
 }
-
-/** The ordered tileset image URLs to load as textures, matching the map's
- *  tileset order (so texture[i] lines up with tilesets[i]). */
-export function themeTilesetUrls(theme: ThemeConfig): string[] {
-  return theme.tilesets.map((t) => t.url);
-}
-
-/** Light validation: the theme's map must parse and carry sane dimensions. */
-function isThemeRenderable(theme: ThemeConfig): boolean {
-  try {
-    const m = JSON.parse(theme.mapRaw) as TiledMap;
-    return (
-      typeof m.width === 'number' && m.width > 0 &&
-      typeof m.height === 'number' && m.height > 0 &&
-      Array.isArray(m.layers) && Array.isArray(m.tilesets)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Resolve a theme id to a renderable ThemeConfig. Async by design (later
- *  a later loader may fetch an additional workspace); falls back to the office theme if the
- *  requested theme is missing or its map won't parse. */
+export function themeTilesetUrls(theme: ThemeConfig): string[] { return Array.from(theme.tilesets, entry => entry.url); }
 export async function loadTheme(id: ThemeId): Promise<ThemeConfig> {
-  const theme = getTheme(id);
-  if (!isThemeRenderable(theme)) {
-    console.warn(`[themeLoader] theme '${id}' is not renderable — falling back to 'studio'`);
-    return STUDIO_THEME;
-  }
-  return theme;
+  const requested = getTheme(id);
+  try { resolveThemeMap(requested); return requested; }
+  catch { resolveThemeMap(STUDIO_THEME); return STUDIO_THEME; }
 }

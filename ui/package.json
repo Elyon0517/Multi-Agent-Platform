@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gen:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false",
-    "check:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false --check"
+    "check:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false --check",
+    "test:e2e": "playwright test",
+    "check:distribution": "node ../scripts/check_ui_distribution.mjs"
   },
   "dependencies": {
     "i18next": "^26.3.6",
@@ -22,10 +24,14 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/hast": "^3.0.4",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "jsdom": "^29.1.1",
     "openapi-typescript": "^7.4.0",
     "typescript": "^5.6.3",
     "vite": "^8.3.4",

@@ -1,3 +1,6 @@
+> 历史审查记录：本文描述 2026-10-14 的实现。后续可视化代码替换及当前署名见
+> [UI_REPLACEMENT.md](UI_REPLACEMENT.md)；本文关于保留上游代码署名的结论已被替代。
+
 # 项目审查与素材替换记录 — 2026-10-14
 
 审查基线：`main` / `e939ae5`。执行 `git fetch origin` 后，`git rev-list --left-right --count HEAD...origin/main` 返回 `0 0`，工作区初始无修改。实施分支：`codex/project-review-original-assets`。

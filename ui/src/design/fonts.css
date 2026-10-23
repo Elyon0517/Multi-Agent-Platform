@@ -1,26 +1,4 @@
-/* Bundle Latin fonts for offline use; CJK and Arabic use system fallbacks. */
-
-@font-face {
-  font-family: 'Press Start 2P';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('../assets/fonts/press-start-2p-latin-400.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  /* Variable: one file answers every weight the design tokens ask for. */
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('../assets/fonts/inter-latin-var.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('../assets/fonts/jetbrains-mono-latin-var.woff2') format('woff2');
-}
+/* Offline font faces; permissions are recorded in assets/fonts/LICENSE.txt. */
+@font-face { font-family: "Inter"; src: url("../assets/fonts/inter-latin-var.woff2") format("woff2"); font-weight: 400 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-var.woff2") format("woff2"); font-weight: 400 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Press Start 2P"; src: url("../assets/fonts/press-start-2p-latin-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }

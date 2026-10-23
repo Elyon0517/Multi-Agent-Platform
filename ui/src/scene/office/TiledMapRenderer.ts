@@ -1,14 +1,4 @@
-import { Container, Sprite, Texture, Rectangle } from 'pixi.js';
-
-// Trimmed port of shahar061/the-office (office/engine/TiledMapRenderer.ts):
-// renders floor/walls/furniture tile layers and parses collision, spawn-points
-// and zones. Interactive-object / war-room / monitor-glow extraction is dropped
-// (we render every tile statically), so no tiles ever go missing.
-
-const FLIPPED_H_FLAG = 0x80000000;
-const FLIPPED_V_FLAG = 0x40000000;
-const FLIPPED_D_FLAG = 0x20000000;
-const TILE_ID_MASK = 0x1fffffff;
+import { Container, Sprite, Texture, Rectangle, Matrix } from 'pixi.js';
 
 export interface TiledMap {
   width: number;
@@ -47,215 +37,87 @@ export interface TiledTilesetRef {
 export interface ZoneRect { x: number; y: number; width: number; height: number; }
 export interface Point { x: number; y: number; }
 
-const TILE_LAYERS = ['floor', 'walls', 'furniture-below', 'furniture-above'] as const;
-const COLLISION_LAYER = 'collision';
-const SPAWN_POINTS_LAYER = 'spawn-points';
-const ZONES_LAYER = 'zones';
 
+// The map is indexed once. Rendering and navigation then share this immutable index.
 export class TiledMapRenderer {
   readonly width: number;
   readonly height: number;
   readonly tileSize: number;
+  private readonly stage = new Container();
+  private readonly actors = new Container();
+  private readonly blocked: Uint8Array;
+  private readonly points = new Map<string, Point>();
+  private readonly regions = new Map<string, ZoneRect>();
+  private readonly layers = new Map<string, TiledLayer>();
+  private readonly atlases: { definition: TiledTilesetRef; texture: Texture }[];
 
-  private walkabilityGrid: boolean[][] = [];
-  private spawnPoints: Map<string, Point> = new Map();
-  private zones: Map<string, ZoneRect> = new Map();
-  private characterContainer: Container;
-  private rootContainer: Container;
-
-  private static readonly WALKABLE_SPAWN_PREFIXES = ['desk-', 'pc-', 'warroom-', 'entrance'];
-
-  constructor(private mapData: TiledMap, private tilesetTextures: Texture[]) {
-    this.width = mapData.width;
-    this.height = mapData.height;
-    this.tileSize = mapData.tilewidth;
-    this.rootContainer = new Container();
-    this.characterContainer = new Container();
-    this.characterContainer.sortableChildren = true;
-
-    this.parseCollisionLayer();
-    this.parseSpawnPoints();
-    this.markWalkableSpawnPoints();
-    this.parseZones();
-    this.buildTileLayers();
-  }
-
-  getContainer(): Container { return this.rootContainer; }
-  getCharacterContainer(): Container { return this.characterContainer; }
-
-  isWalkable(tx: number, ty: number): boolean {
-    if (tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return false;
-    return this.walkabilityGrid[ty][tx];
-  }
-
-  tileToPixel(tx: number, ty: number): Point {
-    return { x: tx * this.tileSize, y: ty * this.tileSize };
-  }
-
-  pixelToTile(px: number, py: number): Point {
-    return { x: Math.floor(px / this.tileSize), y: Math.floor(py / this.tileSize) };
-  }
-
-  getSpawnPoint(name: string): Point | undefined { return this.spawnPoints.get(name); }
-  getAllSpawnPoints(): Map<string, Point> { return this.spawnPoints; }
-  getZone(name: string): ZoneRect | undefined { return this.zones.get(name); }
-  getAllZones(): Map<string, ZoneRect> { return this.zones; }
-
-  /** The (flip-stripped) gid painted at a tile of a layer, 0 when empty.
-   *  Lets the scene locate furniture by art — e.g. each desk's monitor block. */
-  gidAt(layerName: string, tx: number, ty: number): number {
-    const layer = this.findLayer(layerName, 'tilelayer');
-    if (!layer?.data || tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return 0;
-    return (layer.data[ty * this.width + tx] ?? 0) & TILE_ID_MASK;
-  }
-
-  /** A sub-texture for one tileset tile, addressed by gid — for dynamic props
-   *  that reuse map art (e.g. the lit monitor variant overlaid when an agent
-   *  sits down). Returns undefined for gid 0 / out-of-range.
-   *  NOTE: allocates a fresh Texture per call and the CALLER owns its lifetime
-   *  (fine for constructor-time use, kept alive by sprites; do NOT call this
-   *  per frame or the textures leak). */
-  textureForGid(gid: number): Texture | undefined {
-    const tileId = gid & TILE_ID_MASK;
-    if (tileId === 0) return undefined;
-    const resolved = this.resolveTileset(tileId);
-    if (!resolved) return undefined;
-    const { tileset, texture } = resolved;
-    const cols = tileset.columns ?? 16;
-    const tw = tileset.tilewidth ?? this.tileSize;
-    const th = tileset.tileheight ?? this.tileSize;
-    const localId = tileId - tileset.firstgid;
-    const frame = new Rectangle((localId % cols) * tw, Math.floor(localId / cols) * th, tw, th);
-    return new Texture({ source: texture.source, frame });
-  }
-
-  private parseCollisionLayer(): void {
-    const layer = this.findLayer(COLLISION_LAYER, 'tilelayer');
-    this.walkabilityGrid = Array.from({ length: this.height }, () => Array(this.width).fill(true));
-    if (!layer?.data) return;
-    for (let y = 0; y < this.height; y++) {
-      for (let x = 0; x < this.width; x++) {
-        const rawId = layer.data[y * this.width + x];
-        if ((rawId & TILE_ID_MASK) !== 0) this.walkabilityGrid[y][x] = false;
-      }
+  constructor(private readonly data: TiledMap, textures: Texture[]) {
+    this.width = data.width; this.height = data.height; this.tileSize = data.tilewidth;
+    this.blocked = new Uint8Array(this.width * this.height);
+    this.atlases = data.tilesets.map((definition, index) => ({ definition, texture: textures[index] }))
+      .sort((a, b) => b.definition.firstgid - a.definition.firstgid);
+    for (const layer of data.layers) this.layers.set(layer.name, layer);
+    this.layers.get('collision')?.data?.forEach((gid, index) => { this.blocked[index] = gid ? 1 : 0; });
+    for (const object of this.layers.get('spawn-points')?.objects ?? []) {
+      const tile = this.pixelToTile(object.x, object.y);
+      this.points.set(object.name, tile);
+      if (/^(desk-|pc-|warroom-|entrance)/.test(object.name) && this.inBounds(tile.x, tile.y))
+        this.blocked[tile.y * this.width + tile.x] = 0;
     }
-  }
-
-  private parseSpawnPoints(): void {
-    const layer = this.findLayer(SPAWN_POINTS_LAYER, 'objectgroup');
-    if (!layer?.objects) return;
-    for (const obj of layer.objects) {
-      this.spawnPoints.set(obj.name, {
-        x: Math.floor(obj.x / this.tileSize),
-        y: Math.floor(obj.y / this.tileSize),
+    for (const object of this.layers.get('zones')?.objects ?? []) {
+      this.regions.set(object.name, { ...this.pixelToTile(object.x, object.y),
+        width: Math.floor((object.width ?? 0) / data.tilewidth),
+        height: Math.floor((object.height ?? 0) / data.tileheight) });
+    }
+    for (const name of ['floor', 'walls', 'furniture-below', 'furniture-above']) {
+      const group = new Container(); group.label = name;
+      this.layers.get(name)?.data?.forEach((encoded, index) => {
+        const texture = this.textureForGid(encoded);
+        if (!texture) return;
+        const sprite = new Sprite(texture);
+        // Tiled flips act about the tile center, diagonal reflection first.
+        const horizontal = !!(encoded & 0x80000000), vertical = !!(encoded & 0x40000000);
+        const diagonal = !!(encoded & 0x20000000);
+        const sx = horizontal ? -1 : 1, sy = vertical ? -1 : 1;
+        const transform = diagonal ? new Matrix(0, -sy, -sx, 0) : new Matrix(sx, 0, 0, sy);
+        const px = index % this.width * data.tilewidth, py = Math.floor(index / this.width) * data.tileheight;
+        transform.tx = px + data.tilewidth / 2; transform.ty = py + data.tileheight / 2;
+        sprite.pivot.set(data.tilewidth / 2, data.tileheight / 2);
+        sprite.setFromMatrix(transform);
+        group.addChild(sprite);
       });
+      this.stage.addChild(group);
     }
+    this.actors.sortableChildren = true; this.stage.addChild(this.actors);
   }
-
-  /** Force seat/desk tiles walkable so agents can path onto them even though
-   *  the underlying chair/desk tile is non-walkable in the collision layer. */
-  private markWalkableSpawnPoints(): void {
-    for (const [name, point] of this.spawnPoints) {
-      if (!TiledMapRenderer.WALKABLE_SPAWN_PREFIXES.some((p) => name.startsWith(p))) continue;
-      if (point.y >= 0 && point.y < this.height && point.x >= 0 && point.x < this.width) {
-        this.walkabilityGrid[point.y][point.x] = true;
-      }
-    }
+  private inBounds(x: number, y: number): boolean {
+    return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < this.width && y < this.height;
   }
-
-  private parseZones(): void {
-    const layer = this.findLayer(ZONES_LAYER, 'objectgroup');
-    if (!layer?.objects) return;
-    for (const obj of layer.objects) {
-      this.zones.set(obj.name, {
-        x: Math.floor(obj.x / this.tileSize),
-        y: Math.floor(obj.y / this.tileSize),
-        width: Math.floor((obj.width ?? 0) / this.tileSize),
-        height: Math.floor((obj.height ?? 0) / this.tileSize),
-      });
-    }
+  getContainer(): Container { return this.stage; }
+  getCharacterContainer(): Container { return this.actors; }
+  getSpawnPoint(name: string): Point | undefined { return this.points.get(name); }
+  getAllSpawnPoints(): Map<string, Point> { return new Map(this.points); }
+  getZone(name: string): ZoneRect | undefined { return this.regions.get(name); }
+  getAllZones(): Map<string, ZoneRect> { return new Map(this.regions); }
+  isWalkable(x: number, y: number): boolean { return this.inBounds(x, y) && !this.blocked[y * this.width + x]; }
+  tileToPixel(x: number, y: number): Point { return { x: x * this.data.tilewidth, y: y * this.data.tileheight }; }
+  pixelToTile(x: number, y: number): Point {
+    return { x: Math.floor(x / this.data.tilewidth), y: Math.floor(y / this.data.tileheight) };
   }
-
-  private resolveTileset(tileId: number): { tileset: TiledTilesetRef; texture: Texture } | undefined {
-    for (let i = this.mapData.tilesets.length - 1; i >= 0; i--) {
-      if (tileId >= this.mapData.tilesets[i].firstgid) {
-        return { tileset: this.mapData.tilesets[i], texture: this.tilesetTextures[i] };
-      }
-    }
-    return undefined;
+  gidAt(name: string, x: number, y: number): number {
+    return this.inBounds(x, y) ? (this.layers.get(name)?.data?.[y * this.width + x] ?? 0) & 0x0fffffff : 0;
   }
-
-  private buildTileLayers(): void {
-    if (this.mapData.tilesets.length === 0) return;
-
-    for (const layerName of TILE_LAYERS) {
-      const layer = this.findLayer(layerName, 'tilelayer');
-      const container = new Container();
-      container.label = layerName;
-
-      if (layer?.data) {
-        for (let y = 0; y < this.height; y++) {
-          for (let x = 0; x < this.width; x++) {
-            const raw = layer.data[y * this.width + x];
-            if (raw === 0) continue;
-
-            const flippedH = (raw & FLIPPED_H_FLAG) !== 0;
-            const flippedV = (raw & FLIPPED_V_FLAG) !== 0;
-            const flippedD = (raw & FLIPPED_D_FLAG) !== 0;
-            const tileId = raw & TILE_ID_MASK;
-
-            const resolved = this.resolveTileset(tileId);
-            if (!resolved) continue;
-
-            const { tileset, texture } = resolved;
-            const cols = tileset.columns ?? 16;
-            const tw = tileset.tilewidth ?? this.tileSize;
-            const th = tileset.tileheight ?? this.tileSize;
-            const localId = tileId - tileset.firstgid;
-            const srcX = (localId % cols) * tw;
-            const srcY = Math.floor(localId / cols) * th;
-
-            const frame = new Rectangle(srcX, srcY, tw, th);
-            const sprite = new Sprite(new Texture({ source: texture.source, frame }));
-
-            if (flippedH || flippedV || flippedD) {
-              sprite.anchor.set(0.5, 0.5);
-              sprite.x = x * this.tileSize + this.tileSize / 2;
-              sprite.y = y * this.tileSize + this.tileSize / 2;
-              if (flippedD) {
-                if (flippedH && !flippedV) {
-                  sprite.rotation = Math.PI / 2;
-                } else if (!flippedH && flippedV) {
-                  sprite.rotation = -Math.PI / 2;
-                } else if (flippedH && flippedV) {
-                  sprite.rotation = Math.PI / 2;
-                  sprite.scale.y = -1;
-                } else {
-                  sprite.rotation = Math.PI / 2;
-                  sprite.scale.x = -1;
-                }
-              } else {
-                if (flippedH) sprite.scale.x = -1;
-                if (flippedV) sprite.scale.y = -1;
-              }
-            } else {
-              sprite.x = x * this.tileSize;
-              sprite.y = y * this.tileSize;
-            }
-
-            container.addChild(sprite);
-          }
-        }
-      }
-
-      this.rootContainer.addChild(container);
-    }
-
-    // Characters render above every tile layer.
-    this.rootContainer.addChild(this.characterContainer);
-  }
-
-  private findLayer(name: string, type: 'tilelayer' | 'objectgroup'): TiledLayer | undefined {
-    return this.mapData.layers.find((l) => l.name === name && l.type === type);
+  textureForGid(encoded: number): Texture | undefined {
+    const gid = encoded & 0x0fffffff;
+    if (!gid) return;
+    const atlas = this.atlases.find(({ definition }) => definition.firstgid <= gid);
+    if (!atlas?.texture) return;
+    const { definition: d, texture } = atlas;
+    const local = gid - d.firstgid, w = d.tilewidth ?? this.data.tilewidth, h = d.tileheight ?? this.data.tileheight;
+    if (local >= (d.tilecount ?? Infinity)) return;
+    const columns = d.columns ?? Math.floor(texture.width / w);
+    if (columns < 1) return;
+    return new Texture({ source: texture.source,
+      frame: new Rectangle(local % columns * w, Math.floor(local / columns) * h, w, h) });
   }
 }

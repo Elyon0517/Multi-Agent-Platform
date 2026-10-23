@@ -52,3 +52,9 @@ jobs:
         run: npm --prefix ui run check:api
       - name: Typecheck and production build
         run: npm --prefix ui run build
+      - name: Verify current UI distribution
+        run: npm --prefix ui run check:distribution
+      - name: Install browser test runtime
+        run: npm --prefix ui exec -- playwright install --with-deps chromium
+      - name: Browser interaction regression
+        run: npm --prefix ui run test:e2e

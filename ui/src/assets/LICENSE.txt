@@ -1,6 +1,7 @@
 This license applies to the original workspace.svg atlas, studio.tmj and
-atrium.tmj maps, and original character recipes created for Agent Converge.
-It does not replace upstream code or font licenses.
+atrium.tmj maps, and original character recipes and the procedural drawing implementation in
+scene/office/portraitArt.ts created for Agent Converge.
+It does not replace third-party package or font licenses.
 
 MIT License
 
