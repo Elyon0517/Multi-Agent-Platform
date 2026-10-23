@@ -5,13 +5,14 @@
 **One conversation. A reviewed team. Your final say.**
 
 Chat with a Root agent about your local repository. Questions get answered directly; coding work goes to a
-Planner → Coder → Gate → three independent reviewers → human signoff loop, visualized as a pixel office.
+Planner → Coder → Gate → Review → human signoff loop, visualized as a pixel office.
+Use the raw runtime for a review panel, or opt into Codex SDK Coding → Claude Agent SDK Review.
 
 Python 3.12+ · Node 22.12+ · Alpha
 
 Find this useful? Give it a star ⭐
 
-[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [Testing](#testing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
+[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [SDK workflow](#native-sdk-workflow-route-b) · [Testing](#testing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
 
 </div>
 
@@ -21,10 +22,8 @@ flowchart LR
   Root -- answer / clarify --> You
   Root -- task --> Planner --> Coder --> Gate{Gate<br/>optional}
   Gate -- fail --> Coder
-  Gate --> R1[Correctness reviewer]
-  Gate --> R2[Architecture reviewer]
-  Gate --> R3[Test/style reviewer]
-  R1 & R2 & R3 --> Arbiter
+  Gate --> Review[Raw review panel<br/>or single Claude SDK reviewer]
+  Review --> Arbiter
   Arbiter -- changes requested --> Coder
   Arbiter -- signoff --> Human{{Human signoff}}
   Human --> Summarizer[Summarizer → memory]
@@ -34,11 +33,11 @@ flowchart LR
 
 - **One entry point.** Every message goes to Root, which decides whether to answer (read-only file, git, memory
   and web search tools), ask a clarifying question, or hand a task to the team.
-- **Convergence, not a single shot.** Planner and Coder iterate until three reviewers on different models report
+- **Convergence, not a single shot.** Planner and Coder iterate until the configured reviewers report
   no blocking or major findings, or the loop escalates to you.
-- **Deterministic control.** Budgets, retries, convergence, oscillation detection, routing and approvals are
+- **Deterministic control.** Revision checks, retries, convergence, oscillation detection, routing and approvals are
   plain Python, never delegated to a model.
-- **Human signoff.** Nothing completes without you. The signoff card shows the goal and acceptance criteria,
+- **Human signoff.** Coding deliveries require your approval. The signoff card shows the goal and acceptance criteria,
   automated check results (or "no automated tests were run") and any remaining findings.
 - **Memory that learns.** Global, project and per-agent memory; a summarizer turns your feedback and review
   findings into versioned lessons. Upload documents (PDF / Markdown / text) for retrieval-augmented answers.
@@ -55,19 +54,29 @@ flowchart LR
 | Root session | Intent routing (answer / clarify / task), read-only tools, streamed replies | `src/agentlab/core/session/` |
 | Loop driver | State machine, convergence, oscillation, arbiter, budget guard, checkpoints | `src/agentlab/core/loop/` |
 | Model access | Role → alias → model routing, retry and fallback, structured output repair | `src/agentlab/core/llm/`, `config/model_policy.yaml` |
-| Runtimes | OpenAI-compatible gateway, Anthropic Messages API, offline fake runtime | `src/agentlab/adapters/runtime/` |
+| Runtimes | Raw gateways, optional Codex SDK Coding → Claude Agent SDK Review, offline fake | `src/agentlab/adapters/runtime/` |
 | Gate and sandbox | Optional objective checks (built-in Python gate), Docker or local sandbox | `src/agentlab/adapters/gates/`, `docker/` |
 | Storage | PostgreSQL with one schema per project, content-addressed blobs, Git snapshots | `src/agentlab/adapters/store/`, `.agentlab/` |
 | Memory | Hybrid retrieval (BM25 + vectors + rerank), summarizer, versioned items | `src/agentlab/core/memory/` |
 
 **Run states.** `PLANNING → CODING → GATING → REVIEWING → ARBITRATING → WAITING_HUMAN → DONE`. Projects without a
-matching Gate skip `GATING`. Failures, budget limits, conflicts and oscillation all pause in `WAITING_HUMAN`; only
-signoff can complete a run.
+matching Gate skip `GATING`. Failures, conflicts and oscillation pause in `WAITING_HUMAN`.
+Coding deliveries complete after signoff; read-only reports can complete without a code approval.
+
+Code diffs, Gate results, reviewer results and signoff approvals carry the same source revision.
+If source files change during checks, review or an approval pause, the run pauses with `workspace_changed`;
+Approve preserves the current files and reruns checks and all reviewers. Partial reviewer results are reused
+only while that revision still matches. Older runs without revision bindings also require fresh checks and review.
+
+Coder deliveries and `workspace_write` tools persist file operations before writing, with original and target
+SHA-256 hashes. Recovery recognizes applied files, resumes pending files and pauses on `edit_conflict` rather
+than overwriting edits made during an interruption. Approve rechecks the same operations; Reject with feedback
+starts a fresh Coder execution from the current files. Legacy cached edits without a write baseline require replanning.
 
 **Design principles.**
 
-1. Anything deterministic stays out of the model: budgets, convergence, retries and routing are code.
-2. Configuration is code: agents, prompts, routing, budgets and gates live in strictly validated YAML under `config/`.
+1. Anything deterministic stays out of the model: revision validation, convergence, retries and routing are code.
+2. Configuration is code: agents, prompts, routing, harness settings and gates live in strictly validated YAML under `config/`.
 3. Cheap checks first: when a Gate exists, build, type, lint and tests run before any reviewer token is spent.
 4. Everything is replayable: steps, prompts, responses, artifacts and events are persisted and content-addressed.
 
@@ -82,7 +91,7 @@ signoff can complete a run.
 | `src/agentlab/db/` | Alembic migrations and per-project schema isolation |
 | `ui/` | Web console |
 | `evals/`, `tests/`, `scripts/` | Regression tasks and scorecards, unit and integration tests, showcase and smoke scripts |
-| `docs/` | [`DISCOVERY.md`](docs/DISCOVERY.md) (design and roadmap), [`ACCEPTANCE.md`](docs/ACCEPTANCE.md) |
+| `docs/` | [`DISCOVERY.md`](docs/DISCOVERY.md) (design and roadmap), [`ACCEPTANCE.md`](docs/ACCEPTANCE.md), [`SDK_HANDOFF_ACCEPTANCE.md`](docs/SDK_HANDOFF_ACCEPTANCE.md) |
 
 ## Setup
 
@@ -152,19 +161,19 @@ docker build -t agentlab/gate-python:latest docker/gate-python
 ```
 
 Python projects then run FAST checks each round and FULL checks before signoff, in an offline, read-only
-container. Other languages run without a Gate and are marked as untested at signoff.
+container. Projects can also configure check commands. Projects without a matching Gate are marked as untested at signoff.
 
 ## Usage
 
 1. **New project** (left sidebar): name, goal and a local Git repository root. **Choose folder…** opens the macOS
-   folder picker. The project planner drafts phases and steps; model and budget settings live in the same dialog.
+   folder picker. The project planner drafts phases and steps; model settings live in the same dialog.
 2. **Talk to Root** in the project conversation. Ask questions ("what is uncommitted on this branch?") or request
    work ("fix calc.add so the tests pass"). Say "answer only" or "go ahead and change it" to steer.
 3. **Watch** the office, the run timeline and Gate diagnostics; progress and approvals also appear in the chat.
 4. **Decide** on the signoff card: approve, reject with feedback (the team iterates), or abort.
 5. **Memory** tab: upload documents globally or per project, test retrieval and rebuild vectors.
    **Monitor** shows cumulative tokens and estimated cost per agent across projects.
-6. **⚙ Agent configuration** (console header) edits the current project's dispatch mode, models, budget and
+6. **⚙ Agent configuration** (console header) edits the current project's dispatch mode, models and
    retrieval, with YAML export and import for version control.
 
 By default, agents edit the selected repository checkout on its current branch, including main/master, so changes are visible immediately in your IDE. Runs do not commit or push in this mode. Select worktree mode explicitly to isolate parallel runs; that mode uses private bookkeeping commits and applies changes back on signoff.
@@ -177,6 +186,65 @@ uv run agentlab show RUN_ID            # timeline, artifacts, pending approval
 uv run agentlab resume RUN_ID          # continue after a restart or kill -9
 uv run agentlab decide RUN_ID approve  # resolve an approval from the terminal
 ```
+
+## Native SDK workflow (Route B)
+
+Install the optional, pinned native Harness dependencies and opt in per process or run:
+
+```sh
+uv sync --extra harness
+uv run --extra harness agentlab run 'Fix the failing test' --workspace /absolute/path/to/repo --runtime sdk
+# API/UI process:
+AGENTLAB_RUNTIME=sdk uv run --extra harness agentlab serve
+```
+
+Root, Supervisor, Planner and Summarizer continue using the existing raw gateway. Coding uses
+`openai-codex` and the single `correctness-reviewer` uses `claude-agent-sdk`; neither falls back to raw
+on SDK failure. Set native model IDs in `config/harness.yaml`. These IDs are separate from raw model
+aliases and Supervisor allocation; the frozen run configuration is reused on restore. Existing raw/fake
+profiles and their reviewer panels are unchanged. This profile supports coding tasks, not the custom
+evidence-contract tools.
+
+SDK authentication is independent of `AGENTLAB_LLM_*`: export `OPENAI_API_KEY` (or sign in with the native
+Codex CLI) and `ANTHROPIC_API_KEY` before starting AgentLab. A native Codex login's `auth.json` is copied
+into the private invocation state directory; project/user Codex configuration is not copied. Claude uses
+a private configuration directory and does not inherit project/user settings, MCP servers, skills or
+plugins. No paid SDK call is made during installation or service creation.
+
+The Coder works in a persistent private copy under `AGENTLAB_DATA_DIR/harness/`, including allowed dirty
+and untracked source files, with its own Git metadata. Copies are materialized from immutable Git objects
+matching the bound revision, rather than a second set of live file reads. Dependencies/caches, credentials
+and native SDK project settings are excluded. Codex uses workspace-write sandboxing without network or extra temporary
+write roots. Existing Gates still run against the authoritative workspace after promotion. Text additions
+and replacements pass through the existing EditJournal and before/after hashes; unsupported deletions,
+renames, binary edits, executable-bit changes, symlinks, nested repositories and reserved paths fail before
+promotion. Unchanged binary files are preserved in the copy. Dependency installation in the SDK copy is
+not part of this minimal profile.
+
+Claude receives a separate, read-only copy pinned to the authoritative revision. Only Read/Glob/Grep and
+the SDK's StructuredOutput helper are permitted; a tool hook restricts source reads to that copy. The
+terminal structured Verdict is validated locally, and Driver assigns its identity/revision. Missing,
+malformed or failed review results cannot approve a run. Gate, Arbiter and human signoff remain unchanged.
+
+Invocation/session IDs, input revision, SDK version, source/output manifests and normalized results are
+persisted alongside existing checkpoints. A completed invocation is reused without another model call;
+partial promotion replays only pending journal entries and preserves conflicting human edits. A completed
+SDK reply awaiting normalization can also recover if its frozen copy is unchanged. Prepared copies are
+rechecked against their source manifests before any SDK launch; exported bytes are checked individually
+and preserve UTF-8 line endings through blob storage and EditJournal. Legacy Reviewer records without an
+iteration also block reissue for the same revision when the input fingerprint changes. **An execution whose
+termination is unknown is never automatically resumed or replayed.** It pauses using the existing approval
+flow; reject with feedback to create a fresh isolated attempt. Merely approving does not reopen an unknown
+writer. Native session data and copies are retained for diagnosis; a session ID alone is not a filesystem
+checkpoint. This integration does not add stage deadlines, a new termination policy or multiple SDK reviewers.
+
+SDK usage is recorded once per invocation through the existing usage ledger. Claude's reported cost is an
+estimate; Codex exposes tokens but no billed dollar amount here (its cost remains unavailable/zero in the
+current numeric cost field). Interrupted calls without terminal usage remain explicitly unmetered.
+
+Native SDK references: [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk) and [Claude Agent SDK for Python](https://code.claude.com/docs/en/agent-sdk/python).
+
+Real SDK handoff, process-interruption recovery, and the JSONB identity regression are documented in [the SDK acceptance record](docs/SDK_HANDOFF_ACCEPTANCE.md).
 
 ## Testing
 
@@ -219,15 +287,32 @@ AGENTLAB_LIVE=1 uv run pytest -q -s tests/live    # cross-provider handoff
 uv run python scripts/check_local_memory.py       # local embedding upload and search
 ```
 
+**Native SDK integration** (real model usage, opt in explicitly):
+
+```bash
+uv sync --extra harness
+AGENTLAB_LIVE_SDK=1 AGENTLAB_TEST_DATABASE_URL=<disposable-postgres-dsn> \
+  uv run --extra harness pytest -q -s tests/live/test_live_sdk_handoff.py
+```
+
+Provide the raw gateway and native SDK authentication described above. These tests use disposable repositories
+and a disposable database, exercise review-driven repair and signoff, and interrupt processes to verify recovery.
+
+The latest full backend regression run passed **444 tests**, with **3 opt-in live tests skipped**.
+The earlier real SDK acceptance run passed both native SDK scenarios; it predates the final isolation review fixes.
+Those fixes have offline regression coverage for immutable copies, prepared-copy tampering, exported byte hashes,
+legacy reviewer replay protection and CRLF preservation. See [the SDK acceptance record](docs/SDK_HANDOFF_ACCEPTANCE.md)
+for the real-run evidence and authentication setup.
+
 See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full checklist and expected results.
 
 ## Limitations
 
 - Alpha software for personal, local use; the API binds to `127.0.0.1` and has no authentication.
-- The built-in Gate covers Python only; custom check commands are planned.
+- The built-in Gate covers Python; other projects need configured check commands.
 - Vector ranking runs in Python; pgvector SQL indexes are planned.
 - Project schemas separate data for export and deletion; access control is application-level filtering.
-- The ADK runtime, LiteLLM virtual keys and external MCP tools are not implemented yet.
+- The ADK runtime and LiteLLM virtual keys are not implemented yet.
 
 See the roadmap in [`docs/DISCOVERY.md`](docs/DISCOVERY.md) §16.
 

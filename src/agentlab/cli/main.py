@@ -43,7 +43,7 @@ async def _drive(svc: Services, driver: Driver, run: Run, auto_approve: bool) ->
 def run(
     goal: Annotated[str, typer.Argument()],
     workspace: Annotated[Path, typer.Option("--workspace", "-w")] = Path("."),
-    runtime: Annotated[str | None, typer.Option(help="raw | adk | fake")] = None,
+    runtime: Annotated[str | None, typer.Option(help="raw | sdk | adk | fake")] = None,
     language: Annotated[str | None, typer.Option()] = None,
     auto_approve: Annotated[bool, typer.Option()] = False,
 ) -> None:

@@ -2,6 +2,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agentlab.api.app import create_app
@@ -90,3 +91,46 @@ def test_conflict_keeps_signoff_pending_and_aborting_discards_the_worktree(tmp_p
             time.sleep(0.05)
         assert not Path(run["workspace"]).exists()
         assert (repo / "calc.py").read_text() == "def add(a, b):\n    return b - a\n"
+
+
+@pytest.mark.parametrize("during_commit", [False, True])
+def test_changed_worktree_cannot_integrate_under_old_signoff(tmp_path: Path, monkeypatch, during_commit) -> None:
+    svc = _svc(tmp_path)
+    repo = _repo(tmp_path / "repo")
+    original = (repo / "calc.py").read_text()
+    project = _worktree_project(svc, repo)
+    with TestClient(create_app(svc)) as client:
+        run = client.post("/runs", json={"goal": "fix add", "project_id": project.id, "runtime": "fake"}).json()
+        _wait(client, run["id"], "WAITING_HUMAN")
+        source = Path(run["workspace"]) / "calc.py"
+        if during_commit:
+            from agentlab.adapters import worktree
+
+            original_commit = worktree._commit
+
+            def changed_commit(path, message):
+                source.write_text(source.read_text() + "# changed during delivery commit\n")
+                return original_commit(path, message)
+
+            monkeypatch.setattr(worktree, "_commit", changed_commit)
+            response = client.post(f"/runs/{run['id']}/decision", json={"decision": "approve"})
+            assert response.status_code == 409
+            assert (repo / "calc.py").read_text() == original
+            monkeypatch.setattr(worktree, "_commit", original_commit)
+        else:
+            source.write_text(source.read_text() + "# changed after review\n")
+        response = client.post(f"/runs/{run['id']}/decision", json={"decision": "approve"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "WAITING_HUMAN"
+        detail = client.get(f"/runs/{run['id']}").json()
+        assert detail["pending_approval"]["reason"] == "workspace_changed"
+        assert (repo / "calc.py").read_text() == original
+        assert source.exists()
+        assert client.post(f"/runs/{run['id']}/decision", json={"decision": "abort"}).status_code == 200
+        _wait(client, run["id"], "CANCELLED")
+        for _ in range(100):
+            if not Path(run["workspace"]).exists():
+                break
+            time.sleep(0.05)
+        assert not Path(run["workspace"]).exists()
+        assert (repo / "calc.py").read_text() == original

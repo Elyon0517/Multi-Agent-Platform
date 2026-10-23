@@ -12,8 +12,19 @@ void translation.init({ lng: 'en', resources: { en: { translation: en } }, initA
 const render = (content: React.ReactNode) => renderToStaticMarkup(<I18nextProvider i18n={translation}>{content}</I18nextProvider>);
 
 describe('objective check evidence', () => {
+  it('explains a recorded write conflict and shows affected paths safely', () => {
+    const approval: Approval = { id: 'a', run_id: 'r', reason: 'edit_conflict', status: 'pending',
+      on_approve: 'CODING', report: null, decided_by: null, feedback: null, decided_at: null,
+      payload: { operation_id: 'write-1', paths: ['src/main.py', '<script>.py'] } };
+    const html = render(<ApprovalBar runId="r" approval={approval} />);
+    expect(html).toContain('File content conflicts with the recorded write');
+    expect(html).toContain('unresolved conflicts still pause');
+    expect(html).toContain('src/main.py');
+    expect(html).toContain('&lt;script&gt;.py');
+    expect(html).not.toContain('<script>');
+  });
   it('shows file/line, diagnostic code and escaped error output', () => {
-    const report: GateResult = { language: 'python', mode: 'fast', passed: false, failed_at: 'lint', steps: [{
+    const report: GateResult = { revision_id: null, language: 'python', mode: 'fast', passed: false, failed_at: 'lint', steps: [{
       name: 'lint', passed: false, exit_code: 1, duration_ms: 2, truncated_log_ref: null,
       log_tail: '<script>unsafe()</script>',
       diagnostics: [{ file: 'module.py', line: 12, col: 3, code: 'F821', message: 'Undefined variable' }],

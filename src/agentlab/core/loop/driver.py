@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from agentlab.core.budget import BudgetExceeded, BudgetGuard, estimate_cents
 from agentlab.core.config import AppConfig
+from agentlab.core.edits import EditJournal
 from agentlab.core.evidence import EvidenceContract, EvidenceRecord, evidence_status, validate_record
 from agentlab.core.llm.retry import ParallelFailure
 from agentlab.core.llm.structured import render_user_message
@@ -24,6 +25,7 @@ from agentlab.core.monitor import UsageRecorder, commit_result_usage, recover_ru
 from agentlab.core.ports import (
     AgentRuntime,
     BlobStore,
+    EditConflict,
     EventBus,
     GateAdapter,
     RunBusy,
@@ -32,7 +34,7 @@ from agentlab.core.ports import (
     Workspace,
     execution_error_reason,
 )
-from agentlab.core.project_config import Dispatch, ProjectSettings
+from agentlab.core.project_config import Dispatch, ProjectSettings, worker_roles
 from agentlab.core.schemas import (
     AgentInput,
     AgentResult,
@@ -45,6 +47,7 @@ from agentlab.core.schemas import (
     CoderOutput,
     Event,
     EventType,
+    FileEdit,
     GateMode,
     GateResult,
     Iteration,
@@ -55,6 +58,7 @@ from agentlab.core.schemas import (
     Step,
     Usage,
     Verdict,
+    new_id,
     utcnow,
 )
 
@@ -91,6 +95,7 @@ class Driver:
     ) -> None:
         self.cfg, self.store, self.blobs, self.bus = cfg, store, blobs, bus
         self.runtime, self.gate, self.workspace = runtime, gate, workspace
+        self.edit_journal = EditJournal(store, blobs, workspace)
         self.runtime_factory: Callable[[], AgentRuntime] | None = None
         self.hooks: RunHooks = hooks or NoHooks()
         self.recovery_options: dict[str, Any] = {}
@@ -163,6 +168,11 @@ class Driver:
                 self._escalate(
                     run, "budget_exceeded", {"required_budget_cents": e.required_budget_cents}, on_approve=run.status
                 )
+            except EditConflict as exc:
+                run = self.store.get_run(run_id)
+                self._escalate(run, "edit_conflict", {
+                    "operation_id": exc.operation_id, "paths": exc.paths,
+                }, on_approve=run.status)
             except Exception as exc:
                 run = self.store.get_run(run_id)
                 # Exceptions can contain prompts/keys. Persist only a safe error class.
@@ -291,6 +301,22 @@ class Driver:
         ):
             raise ValueError("reject with feedback to regenerate invalid model/task assignments")
         if decision == "approve":
+            if approval.reason == "workspace_changed":
+                # Recheck the current files, preserving edits made while the run was paused.
+                revision, diff = self.workspace.review_snapshot()
+                self._bind_revision(run, revision, diff)
+            elif (
+                not approval.payload.get("read_only_evidence")
+                and (approval.reason == "signoff" or approval.on_approve in {S.GATING, S.REVIEWING, S.ARBITRATING})
+            ):
+                revision, _ = self.workspace.review_snapshot()
+                if (not self._revision_matches(run, revision)
+                        or (approval.reason == "signoff" and (
+                            approval.payload.get("revision_id") != revision
+                            or not self._review_evidence_matches(run, revision, require_verdicts=True)
+                        ))):
+                    self._invalidate_revision(run, revision)
+                    return run
             if approval.reason in {"reviewer_conflict", "inconsistent_verdict"} and not (feedback or "").strip():
                 raise ValueError("feedback is required to resolve reviewer disagreement")
             if approval.reason == "max_iter_exceeded" and (max_iter is None or max_iter <= run.max_iter):
@@ -301,7 +327,7 @@ class Driver:
                 # Isolated runs land in the user's working tree now; a conflict leaves the approval pending.
                 integrate = getattr(self.workspace, "integrate_back", None)
                 if integrate and not approval.payload.get("read_only_evidence"):
-                    integrate()
+                    integrate(expected_revision=approval.payload["revision_id"])
         if (
             decision != "abort"
             and self.runtime_factory is not None
@@ -358,7 +384,7 @@ class Driver:
                         for r, p in self.cfg.model_policy.roles.items()
                         if p.primary in (settings.allowed_aliases or self.cfg.models.aliases)
                     },
-                    "roles": sorted(set(self.cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}),
+                    "roles": sorted(worker_roles(self.cfg)),
                     "reviewer_roles": self.cfg.reviewer_roles,
                     "reviewer_max_tiers": {
                         role: max(
@@ -444,8 +470,19 @@ class Driver:
                 "blocked_reason": "Evidence-contract revision is read-only; submit evidence records, not edits.",
             }, on_approve=S.CODING)
             return
-        self.workspace.apply_edits(res.output.edits)
-        diff = await self.workspace.diff()
+        result_key = next((k for k, v in self._completed_agents.items() if v is res), None)
+        scope = self.recovery_options.get("write_scopes", {}).get(result_key[3][len("coder"):] if result_key else "")
+        if scope:
+            if self.cfg.harness.enabled:
+                has_intent = any(row["run_id"] == run.id and row["scope_id"] == scope["id"]
+                                 for row in self.store.records("edit_operation"))
+                if not has_intent and self.workspace.review_snapshot()[0] != scope["revision_id"]:
+                    raise EditConflict("harness_source_changed", [e.path for e in res.output.edits])
+            self.edit_journal.apply(run, scope["id"], "final", res.output.edits, scope["baseline"], "coder_output")
+        elif res.output.edits:
+            # Legacy cached deliveries lack trustworthy preconditions. Replan from current files instead.
+            raise EditConflict("missing_write_baseline", [e.path for e in res.output.edits])
+        revision, diff = await asyncio.to_thread(self.workspace.review_snapshot)
         unread = self.recovery_options.get("read_cursors", {}).get("coder", {}).get("pending", [])
         if not diff.strip() and unread:
             self._escalate(run, "no_changes", {
@@ -490,25 +527,25 @@ class Driver:
                            on_approve=S.CODING)
             return
         with self._atomic():
-            self._save_artifact(run, "diff", diff, "coder", to="gate" if self.gate else "reviewers")
-            if self.gate is None:
-                self.store.add_iteration(Iteration(run_id=run.id, n=len(self.store.iterations(run.id)) + 1,
-                                                   phase=S.REVIEWING,
-                                                   diff_hash=hashlib.sha256(diff.encode()).hexdigest()))
-                self._advance(run, S.REVIEWING)
-            else:
-                self._advance(run, S.GATING)
+            self._bind_revision(run, revision, diff)
+            self._advance(run, S.REVIEWING if self.gate is None else S.GATING)
 
     async def _gating(self, run: Run) -> None:
         if self.gate is None:
             raise RuntimeError("GATING requires a configured gate")
+        if not await self._check_revision(run):
+            return
         diff = self._latest_text(run, "diff") or ""
         self._emit(run, EventType.STEP_STARTED, actor="gate", role="gate")
         gr = await self.gate.run(self.workspace.root, GateMode.FAST)
+        if not await self._check_revision(run):
+            return
+        gr = gr.model_copy(update={"revision_id": self.recovery_options["revision_id"]})
         with self._atomic():
             self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="coder")
             self._emit(run, EventType.GATE_FINISHED, actor="gate", passed=gr.passed, failed_at=gr.failed_at)
             it = Iteration(
+                revision_id=self.recovery_options["revision_id"],
                 run_id=run.id,
                 n=len(self.store.iterations(run.id)) + 1,
                 phase=S.GATING,
@@ -525,14 +562,24 @@ class Driver:
                 self._advance(run, S.REVIEWING)
 
     async def _reviewing(self, run: Run) -> None:
-        inp = self._input(run, diff=self._latest_text(run, "diff"), gate=self._last_iteration(run).gate_result)
+        if not await self._check_revision(run):
+            return
+        if not self._review_evidence_matches(run, self.recovery_options["revision_id"]):
+            self._invalidate_revision(run, self.recovery_options["revision_id"])
+            return
+        inp = self._input(run, diff=self._latest_text(run, "diff"), gate=self._last_iteration(run).gate_result,
+                          revision_id=self.recovery_options["revision_id"])
         inp.iteration = self._last_iteration(run).n
         # Auto dispatch picks the reviewers a task needs; manual projects run all of them.
-        reviewers = self.recovery_options.get("reviewers") or self.cfg.reviewer_roles
+        reviewers = (self.cfg.reviewer_roles if self.cfg.harness.enabled else
+                     self.recovery_options.get("reviewers") or self.cfg.reviewer_roles)
         results = await self._agents(run, reviewers, inp, Verdict)
+        if not await self._check_revision(run):
+            return
         verdicts = [
             r.output.model_copy(
                 update={
+                    "revision_id": inp.revision_id,
                     "reviewer_id": f"{r.role}@{r.model}",
                     "findings": [
                         f.model_copy(update={"reviewer_id": f"{r.role}@{r.model}"}) for f in r.output.findings
@@ -555,7 +602,13 @@ class Driver:
             log.exception("after_reviews hook failed for run %s", run.id)
 
     async def _arbitrating(self, run: Run) -> None:
+        if not await self._check_revision(run):
+            return
         verdicts = self._last_iteration(run).verdicts
+        revision = self.recovery_options["revision_id"]
+        if not self._review_evidence_matches(run, revision, require_verdicts=True):
+            self._invalidate_revision(run, revision)
+            return
         d = arbitrate(verdicts, self.cfg.budget.loop.blocking_confidence_threshold)
         self._emit(run, EventType.ARBITER_DECISION, actor="arbiter", action=d.action, reason=d.reason)
         if d.action == ArbiterAction.BACK_TO_CODER and is_oscillating(self._round_iterations(run)):
@@ -570,8 +623,13 @@ class Driver:
             await self._final_gate(run, d)
 
     async def _final_gate(self, run: Run, d: ArbiterDecision) -> None:
+        if not await self._check_revision(run):
+            return
         if self.gate is not None:
             gr = await self.gate.run(self.workspace.root, GateMode.FULL)
+            if not await self._check_revision(run):
+                return
+            gr = gr.model_copy(update={"revision_id": self.recovery_options["revision_id"]})
             with self._atomic():
                 self._save_artifact(run, "gate", gr.model_dump_json(), "gate", to="human")
                 self._emit(run, EventType.GATE_FINISHED, actor="gate", passed=gr.passed, mode="full")
@@ -588,6 +646,7 @@ class Driver:
                       for finding in verdict.findings],
         )
         self._escalate(run, "signoff", {
+            "revision_id": self.recovery_options["revision_id"],
             "diff_ref": self._latest(run, "diff").content_ref,
             "automated_checks": "passed" if self.gate is not None else "not_run",
         }, on_approve=S.DONE, report=report)
@@ -634,14 +693,22 @@ class Driver:
         )
         for role in roles:
             self._emit(run, EventType.STEP_STARTED, actor=role, role=role, iteration=inp.iteration)
-        batch_hash = hashlib.sha256((inp.model_dump_json(exclude={"context"}) + json.dumps(roles)).encode()).hexdigest()
+        # Keep non-review checkpoint keys compatible; review batches additionally bind their source revision.
+        input_json = inp.model_dump_json(exclude={"context"} if inp.revision_id else {"context", "revision_id"})
+        batch_hash = hashlib.sha256((input_json + json.dumps(roles)).encode()).hexdigest()
         # P2 checkpoints used an input-only hash; reuse paid legacy batches when roles match.
-        legacy_hash = hashlib.sha256(inp.model_dump_json(exclude={"context"}).encode()).hexdigest()
+        legacy_hash = hashlib.sha256(input_json.encode()).hexdigest()
         legacy_key = (run.id, run.status.value, inp.iteration, legacy_hash)
         if legacy_key in self._agent_inputs and set(self._agent_inputs[legacy_key]) == set(roles):
             batch_hash = legacy_hash
         batch_key = (run.id, run.status.value, inp.iteration, batch_hash)
         if batch_key not in self._agent_inputs:
+            if "coder" in roles:
+                baseline = await asyncio.to_thread(self.workspace.edit_baseline)
+                self.recovery_options.setdefault("write_scopes", {})[batch_hash] = {
+                    "id": new_id(), "baseline": baseline,
+                    **({"revision_id": self.workspace.review_snapshot()[0]} if self.cfg.harness.enabled else {}),
+                }
             files = await self.workspace.context_files()
             self._agent_inputs[batch_key] = {
                 r: inp.model_copy(
@@ -657,7 +724,18 @@ class Driver:
                 )
                 for r in roles
             }
+        write_scope = self.recovery_options.get("write_scopes", {}).get(batch_hash)
+        if self.cfg.harness.enabled and "coder" in roles and write_scope:
+            if self.recovery_options.get("evidence"):
+                raise ValueError("SDK profile supports coding tasks, not evidence-contract tools")
+            coder_input = self._agent_inputs[batch_key]["coder"]
+            coder_input.context.update({"_harness_scope": write_scope["id"],
+                                 "_harness_revision": write_scope["revision_id"],
+                                 "_harness_baseline": write_scope["baseline"]})
         self._checkpoint(run)
+        write_scope = self.recovery_options.get("write_scopes", {}).get(batch_hash)
+        if "coder" in roles and write_scope:
+            self.edit_journal.recover(run, write_scope["id"])
         inputs = self._agent_inputs[batch_key]
 
         def cache_key(role: str) -> tuple[str, str, int, str]:
@@ -678,6 +756,8 @@ class Driver:
         def completed(r: AgentResult[Any]) -> None:
             if cache_key(r.role) in self._completed_agents:
                 return
+            if isinstance(r.output, Verdict):
+                r.output = r.output.model_copy(update={"revision_id": inp.revision_id})
             settings = self.recovery_options.get("project_settings") or {}
             if settings.get("mode") == "manual":
                 r.routing_reason = "project_manual_binding"
@@ -741,10 +821,14 @@ class Driver:
         external_tools = getattr(self.hooks, "external_tools", None)
         if external_tools:
             for role in roles:
+                if self.cfg.harness.enabled and role in {"coder", "correctness-reviewer"}:
+                    continue
                 try:
                     external[role] = await external_tools(role)
                 except Exception:  # missing external tools must not stop the run
                     log.exception("external tools unavailable for %s", role)
+
+        write_call_ids: dict[str, str] = {}
 
         def tool_factory(role: str) -> Any:
             from agentlab.core.llm.tools import WorkerTools
@@ -755,8 +839,17 @@ class Driver:
                 )
 
             read_state = self.recovery_options.setdefault("read_cursors", {}).setdefault(role, {})
+
+            def write(edits: list[FileEdit]) -> list[str]:
+                if not write_scope:
+                    raise EditConflict("missing_write_baseline", [e.path for e in edits])
+                action_id = "tool:" + write_call_ids.pop(role, new_id())
+                return self.edit_journal.apply(
+                    run, write_scope["id"], action_id, edits, write_scope["baseline"], "workspace_write",
+                )
+
             tools = WorkerTools(role, self.cfg.agents[role].tool_grants, self.workspace, self.gate, search, read_state,
-                                self.recovery_options.get("evidence") if role == "coder" else None)
+                                self.recovery_options.get("evidence") if role == "coder" else None, write_edits=write)
             extra = external.get(role)
             if not extra:
                 return tools.specs, tools.execute
@@ -769,6 +862,8 @@ class Driver:
             return [*tools.specs, *extra_specs], execute
 
         def record_tool(payload: dict[str, Any]) -> None:
+            if payload["name"] == "workspace_write" and payload["status"] == "started":
+                write_call_ids[payload["role"]] = payload["id"]
             with self._atomic():
                 ref, _ = self.blobs.put(json.dumps(payload, ensure_ascii=False))
                 self._emit(
@@ -858,6 +953,7 @@ class Driver:
     def _clear_agent_cache(self, run_id: str) -> None:
         self._completed_agents = {k: v for k, v in self._completed_agents.items() if k[0] != run_id}
         self._agent_inputs = {k: v for k, v in self._agent_inputs.items() if k[0] != run_id}
+        self.recovery_options.pop("write_scopes", None)
 
     def _input(self, run: Run, **extra: Any) -> AgentInput:
         plan = self._latest_text(run, "plan")
@@ -908,7 +1004,59 @@ class Driver:
             run.paused_reason = reason
             self._emit(run, EventType.APPROVAL_REQUESTED, actor="supervisor", reason=reason, payload=payload,
                        report=report.model_dump(mode="json") if report else None)
-            self._advance(run, S.WAITING_HUMAN)
+            if run.status == S.WAITING_HUMAN:
+                self.store.save_run(run)
+                self._checkpoint(run)
+            else:
+                self._advance(run, S.WAITING_HUMAN)
+
+    def _bind_revision(self, run: Run, revision: str, diff: str) -> None:
+        self._clear_agent_cache(run.id)
+        self.recovery_options["revision_id"] = revision
+        self._save_artifact(run, "diff", diff, "coder", to="gate" if self.gate else "reviewers")
+        if self.gate is None:
+            self.store.add_iteration(Iteration(
+                run_id=run.id, n=len(self.store.iterations(run.id)) + 1, phase=S.REVIEWING,
+                revision_id=revision, diff_hash=hashlib.sha256(diff.encode()).hexdigest(),
+            ))
+
+    def _revision_matches(self, run: Run, revision: str) -> bool:
+        diffs = self.store.artifacts(run.id, "diff")
+        return (self.recovery_options.get("revision_id") == revision
+                and bool(diffs) and diffs[-1].revision_id == revision)
+
+    def _review_evidence_matches(self, run: Run, revision: str, *, require_verdicts: bool = False) -> bool:
+        iterations = self.store.iterations(run.id)
+        if not iterations or iterations[-1].revision_id != revision:
+            return False
+        it = iterations[-1]
+        if self.gate and (not it.gate_result or not it.gate_result.passed or it.gate_result.revision_id != revision):
+            return False
+        return not require_verdicts or (bool(it.verdicts) and all(v.revision_id == revision for v in it.verdicts))
+
+    async def _check_revision(self, run: Run) -> bool:
+        revision, _ = await asyncio.to_thread(self.workspace.review_snapshot)
+        if self._revision_matches(run, revision):
+            return True
+        self._invalidate_revision(run, revision)
+        return False
+
+    def _invalidate_revision(self, run: Run, current_revision: str) -> None:
+        """Retain historical evidence, but require fresh gates and all reviewers before completion."""
+        with self._atomic():
+            approval = self.store.pending_approval(run.id)
+            if approval:
+                approval.status = ApprovalStatus.REJECTED
+                approval.decided_by, approval.decided_at = "system", utcnow()
+                approval.feedback = "Workspace revision changed; previous results are stale."
+                self.store.save_approval(approval)
+            self._clear_agent_cache(run.id)
+            # Stale findings must not count as repeated failures in the fresh review cycle.
+            self.recovery_options["review_history_base"] = len(self.store.iterations(run.id))
+            self._escalate(run, "workspace_changed", {
+                "previous_revision_id": self.recovery_options.get("revision_id"),
+                "current_revision_id": current_revision,
+            }, on_approve=S.GATING if self.gate else S.REVIEWING)
 
     def _advance(self, run: Run, dst: S) -> None:
         with self._atomic():
@@ -925,7 +1073,8 @@ class Driver:
 
     def _save_artifact(self, run: Run, kind: ArtifactKind, content: str, by: str, to: str | None = None) -> None:
         ref, sha = self.blobs.put(content)
-        art = Artifact(run_id=run.id, kind=kind, sha256=sha, content_ref=ref)
+        revision = self.recovery_options.get("revision_id") if kind in {"diff", "gate", "review", "arbiter"} else None
+        art = Artifact(run_id=run.id, kind=kind, sha256=sha, content_ref=ref, revision_id=revision)
         self.store.add_artifact(art)
         self._emit(run, EventType.ARTIFACT_CREATED, actor=by, kind=kind, artifact_id=art.id, to=to)
 
@@ -1062,7 +1211,9 @@ class Driver:
         return self.store.iterations(run.id)[-1]
 
     def _round_iterations(self, run: Run) -> list[Iteration]:
-        return self.store.iterations(run.id)[run.iteration_base :]
+        base = max(run.iteration_base, self.recovery_options.get("review_history_base", 0))
+        return self.store.iterations(run.id)[base:]
 
     def _roster(self) -> list[dict[str, str]]:
-        return [{"role": r, "kind": a.kind} for r, a in self.cfg.agents.items()]
+        return [{"role": r, "kind": a.kind} for r, a in self.cfg.agents.items()
+                if a.kind != "reviewer" or r in self.cfg.reviewer_roles]

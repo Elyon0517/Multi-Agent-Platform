@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from agentlab.adapters.sandbox.local import scrubbed_env
@@ -80,10 +81,14 @@ def create(repo: Path, path: Path, run_id: str) -> dict[str, str]:
     return {"repo": str(repo), "path": str(path.resolve()), "branch": branch, "base": base, "run_id": run_id}
 
 
-def integrate(info: dict[str, str]) -> None:
+def integrate(info: dict[str, str], validate_revision: Callable[[], bool] | None = None) -> None:
     """Apply the run's changes (base → final) to the user's working tree, uncommitted, or raise."""
     path, repo = Path(info["path"]), Path(info["repo"])
     final = _commit(path, f"agentlab run {info['run_id']}")
+    # Validate after freezing the delivery commit too: edits made during staging must not
+    # slip into the immutable patch under an approval for an earlier revision.
+    if validate_revision and not validate_revision():
+        raise WorktreeConflict("the reviewed source revision changed during integration; review it again")
     patch = _git(path, "diff", "--binary", info["base"], final).stdout
     if not patch.strip():
         return

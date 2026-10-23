@@ -31,16 +31,20 @@ class ProjectSettings(Strict):
 
 
 def worker_roles(cfg: AppConfig) -> set[str]:
-    return set(cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}
+    return {r for r in cfg.model_policy.roles if r not in {"root", "supervisor", "project-planner"}
+            and (cfg.agents[r].kind != "reviewer" or r in cfg.reviewer_roles)}
 
 
 def validate_settings(settings: ProjectSettings, cfg: AppConfig) -> None:
     allowed = set(settings.allowed_aliases or cfg.models.aliases)
     if settings.root_alias not in cfg.models.aliases or allowed - cfg.models.aliases.keys():
         raise ValueError("unknown model alias")
-    if settings.mode == "manual" and set(settings.bindings) != worker_roles(cfg):
+    active = worker_roles(cfg)
+    known = (set(cfg.model_policy.roles) - {"root", "supervisor", "project-planner"}
+             if cfg.harness.enabled else active)
+    if settings.mode == "manual" and not active.issubset(settings.bindings):
         raise ValueError("manual mode requires a model and task for every worker role")
-    if set(settings.bindings) - worker_roles(cfg):
+    if set(settings.bindings) - known:
         raise ValueError("unknown worker role")
     if any(b.alias not in allowed for b in settings.bindings.values()):
         raise ValueError("worker model is outside the project model catalog")
@@ -49,6 +53,8 @@ def validate_settings(settings: ProjectSettings, cfg: AppConfig) -> None:
 
 
 def validate_reviewer_diversity(bindings: dict[str, Binding], cfg: AppConfig, allowed: set[str]) -> None:
+    if cfg.harness.enabled:
+        return
     roles = ("correctness-reviewer", "arch-reviewer")
     eligible = {
         a

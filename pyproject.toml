@@ -25,6 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+harness = ["openai-codex==0.163.0", "claude-agent-sdk==0.2.173"]
 adk = ["google-adk>=1.0"]
 postgres = [] # compatibility: PostgreSQL is now a core capability
 
@@ -57,7 +58,7 @@ ignore = ["UP046", "UP047", "RUF012"]
 "tests/**" = ["E501"]
 
 [[tool.mypy.overrides]]
-module = ["google.*"]
+module = ["google.*", "openai_codex.*", "claude_agent_sdk.*"]
 ignore_missing_imports = true
 
 [tool.mypy]

@@ -1,0 +1,5 @@
+# Opt in with AGENTLAB_RUNTIME=sdk or `agentlab run ... --runtime sdk`.
+# Native SDK model IDs are independent of the raw gateway's aliases/dispatch.
+# null uses each SDK's configured default; set explicit IDs for reproducibility.
+codex_model: null
+claude_model: null

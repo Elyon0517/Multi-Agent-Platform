@@ -97,6 +97,7 @@ class Finding(Strict):
 
 
 class Verdict(Strict):
+    revision_id: str | None = None
     reviewer_id: str
     verdict: Literal["APPROVE", "REQUEST_CHANGES", "BLOCK"]
     findings: list[Finding] = []
@@ -161,6 +162,7 @@ class GateStepResult(Strict):
 
 
 class GateResult(Strict):
+    revision_id: str | None = None
     language: str
     mode: GateMode
     passed: bool
@@ -219,6 +221,7 @@ class Run(Strict):
 
 
 class Iteration(Strict):
+    revision_id: str | None = None
     id: str = Field(default_factory=new_id)
     run_id: str
     n: int
@@ -267,6 +270,7 @@ ArtifactKind = Literal[
 
 
 class Artifact(Strict):
+    revision_id: str | None = None
     id: str = Field(default_factory=new_id)
     run_id: str
     kind: ArtifactKind
@@ -330,6 +334,7 @@ class Event(Strict):
 
 
 class AgentInput(Strict):
+    revision_id: str | None = None
     run_id: str
     iteration: int
     goal: str

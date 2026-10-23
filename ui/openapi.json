@@ -2587,6 +2587,17 @@
       },
       "Artifact": {
         "properties": {
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
           "id": {
             "type": "string",
             "title": "Id"
@@ -2639,6 +2650,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "revision_id",
           "id",
           "run_id",
           "kind",
@@ -3276,6 +3288,17 @@
       },
       "GateResult": {
         "properties": {
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
           "language": {
             "type": "string",
             "title": "Language"
@@ -3309,6 +3332,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "revision_id",
           "language",
           "mode",
           "passed",
@@ -3406,6 +3430,17 @@
       },
       "Iteration": {
         "properties": {
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
           "id": {
             "type": "string",
             "title": "Id"
@@ -3455,6 +3490,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "revision_id",
           "id",
           "run_id",
           "n",
@@ -5151,6 +5187,17 @@
       },
       "Verdict": {
         "properties": {
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
           "reviewer_id": {
             "type": "string",
             "title": "Reviewer Id"
@@ -5181,6 +5228,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "revision_id",
           "reviewer_id",
           "verdict",
           "findings",

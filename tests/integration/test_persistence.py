@@ -59,10 +59,11 @@ def store(request):
 def test_store_contract(store):
     r = Run(goal="goal", workspace="/tmp/test", budget_unlimited=True)
     store.create_run(r)
-    it = Iteration(run_id=r.id, n=1, phase=RunStatus.GATING, diff_hash="abc")
+    it = Iteration(run_id=r.id, n=1, phase=RunStatus.GATING, diff_hash="abc", revision_id="source-revision")
     store.add_iteration(it)
     store.add_step(Step(run_id=r.id, iteration_n=1, role="coder", model_alias="fake", model="fake"))
-    store.add_artifact(Artifact(run_id=r.id, kind="plan", content_ref="blob://test", sha256="abc"))
+    store.add_artifact(Artifact(run_id=r.id, kind="diff", content_ref="blob://test", sha256="abc",
+                                revision_id="source-revision"))
     approval = Approval(run_id=r.id, reason="budget_exceeded", on_approve=RunStatus.PLANNING)
     store.create_approval(approval)
     store.save_checkpoint(r.id, {"inputs": ["frozen"]})
@@ -74,6 +75,7 @@ def test_store_contract(store):
     assert store.get_run(r.id) == r
     assert store.iterations(r.id) == [it]
     assert len(store.steps(r.id)) == len(store.artifacts(r.id)) == 1
+    assert store.artifacts(r.id)[0].revision_id == "source-revision"
     assert store.pending_approval(r.id) == approval
     assert store.checkpoint(r.id) == {"inputs": ["frozen"]}
     assert store.records("planning") == [{"cost": 5}]
@@ -147,7 +149,8 @@ async def test_budget_and_abort_survive_restart(database_url, tmp_path):
     assert not svc.store.checkpoint(r.id)["results"]
 
 
-async def test_partial_review_cache_is_durable(database_url, tmp_path):
+@pytest.mark.parametrize("source_changed", [False, True])
+async def test_partial_review_cache_is_durable(database_url, tmp_path, source_changed):
     from agentlab.core.llm.retry import ParallelFailure
 
     svc, d = await driver_for(database_url, tmp_path)
@@ -176,17 +179,81 @@ async def test_partial_review_cache_is_durable(database_url, tmp_path):
     frozen = svc.store.checkpoint(r.id)["inputs"]
     # Memory can change while paused without invalidating the frozen inputs.
     await svc.knowledge.note(None, "global", "new context while paused")
+    if source_changed:
+        source = d.workspace.root / "test_calc.py"
+        source.write_text(source.read_text() + "# edit during review pause\n")
     svc2 = services(database_url, tmp_path)
     restored = svc2.restore_driver(r.id)
     assert svc2.store.checkpoint(r.id)["inputs"] == frozen
     restored.decide(r.id, "approve")
     r = svc2.store.get_run(r.id)
+    if source_changed:
+        assert r.paused_reason == "workspace_changed"
+        assert not svc2.store.checkpoint(r.id)["results"]
+        restored.decide(r.id, "approve")
+        r = svc2.store.get_run(r.id)
+        await restored._gating(r)
     await restored._reviewing(r)
     assert r.status == RunStatus.ARBITRATING
-    assert first not in [role for role, _ in restored.runtime.calls]
-    assert len([s for s in svc2.store.steps(r.id) if s.role in d.cfg.reviewer_roles]) == 3
-    assert r.cost_cents == pytest.approx(paid + 0.2)
+    assert (first in [role for role, _ in restored.runtime.calls]) == source_changed
+    assert len([s for s in svc2.store.steps(r.id) if s.role in d.cfg.reviewer_roles]) == (4 if source_changed else 3)
+    assert r.cost_cents == pytest.approx(paid + (0.3 if source_changed else 0.2))
+    revision = svc2.store.checkpoint(r.id)["options"]["revision_id"]
+    it = svc2.store.iterations(r.id)[-1]
+    assert it.revision_id == revision and all(v.revision_id == revision for v in it.verdicts)
     assert not svc2.store.checkpoint(r.id)["results"]
+
+
+@pytest.mark.parametrize("human_change", [False, True])
+async def test_partial_file_operations_survive_driver_and_store_restart(database_url, tmp_path, monkeypatch, human_change):
+    from agentlab.adapters.runtime.fake import FakeRuntime
+    from agentlab.core.ports import EditConflict
+    from agentlab.core.schemas import CoderOutput, FileEdit
+    from agentlab.demo import demo_scripts
+
+    class ProcessDied(BaseException):
+        pass
+
+    svc, driver = await driver_for(database_url, tmp_path)
+    driver.gate = None
+    driver.recovery_options["gate"] = None
+    (driver.workspace.root / "a.py").write_text("a = 1\n")
+    (driver.workspace.root / "b.py").write_text("b = 1\n")
+    edits = [FileEdit(path="a.py", content="a = 2\n"), FileEdit(path="b.py", content="b = 2\n")]
+    driver.runtime = FakeRuntime({**demo_scripts(), "coder": lambda _: CoderOutput(edits=edits)})
+    run = driver.create("update a and b")
+    await driver._planning(run)
+    original_save = svc.store.put_record
+
+    def lose_ack(kind, key, data):
+        if kind == "edit_operation" and any(f["status"] == "applied" for f in data["files"]):
+            raise ProcessDied()
+        return original_save(kind, key, data)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(svc.store, "put_record", lose_ack)
+        with pytest.raises(ProcessDied):
+            await driver._coding(run)
+    assert (driver.workspace.root / "a.py").read_text() == "a = 2\n"
+    assert (driver.workspace.root / "b.py").read_text() == "b = 1\n"
+    assert svc.store.records("edit_operation")[0]["files"][0]["status"] == "pending"
+    if human_change:
+        (driver.workspace.root / "a.py").write_text("a = 99  # human\n")
+    svc2 = services(database_url, tmp_path)
+    restored = svc2.restore_driver(run.id)
+    paid = svc2.store.get_run(run.id).cost_cents
+    if human_change:
+        with pytest.raises(EditConflict):
+            await restored._coding(svc2.store.get_run(run.id))
+        assert (restored.workspace.root / "a.py").read_text() == "a = 99  # human\n"
+        assert (restored.workspace.root / "b.py").read_text() == "b = 1\n"
+        assert svc2.store.records("edit_operation")[0]["status"] == "conflict"
+    else:
+        await restored._coding(svc2.store.get_run(run.id))
+        assert (restored.workspace.root / "b.py").read_text() == "b = 2\n"
+        assert svc2.store.get_run(run.id).status == RunStatus.REVIEWING
+        assert svc2.store.records("edit_operation")[0]["status"] == "applied"
+    assert not restored.runtime.calls and svc2.store.get_run(run.id).cost_cents == paid
 
 
 async def test_unknown_inflight_requires_explicit_decision(database_url, tmp_path):
@@ -1176,3 +1243,75 @@ async def test_external_tool_lifecycle_lock_blocks_delete_for_both_stores(store,
             finish.set()
         assert (await task).json() == {'status': 'done'}
     assert len(hub.calls) == 1
+
+
+async def test_sdk_completed_multifile_delivery_recovers_from_postgres(cfg, tmp_path, database_url, monkeypatch):
+    from agentlab.adapters.store.postgres import PostgresStore
+    from tests.unit.test_edit_journal import ProcessDied, restore
+    from tests.unit.test_harness_runtime import setup
+
+    monkeypatch.setattr('agentlab.adapters.runtime.harness.version', lambda _: 'integration-sdk')
+    driver, coder, _ = await setup(cfg, tmp_path)
+    store = PostgresStore(database_url)
+    driver.store = driver.edit_journal.store = driver.runtime.store = store
+    driver.gate = None
+
+    def write(kwargs):
+        (kwargs['source'] / 'a.py').write_text('a = 2\n')
+        (kwargs['source'] / 'b.py').write_text('b = 2\n')
+
+    coder.action = write
+    original = driver.workspace.apply_edits
+
+    def interrupted(edits, expected_hashes=None):
+        if edits[0].path == 'b.py':
+            raise ProcessDied()
+        return original(edits, expected_hashes)
+
+    run = driver.create('update two files')
+    with monkeypatch.context() as patch:
+        patch.setattr(driver.workspace, 'apply_edits', interrupted)
+        with pytest.raises(ProcessDied):
+            await driver.run(run.id)
+    # A new store/Driver must recover paid SDK output and journal state, not call Codex again.
+    driver.store = driver.edit_journal.store = driver.runtime.store = PostgresStore(database_url)
+    recovered = restore(driver, run, driver.runtime)
+    driver.runtime.workspace = recovered.workspace
+    run = await recovered.run(run.id)
+    assert run.paused_reason == 'signoff' and len(coder.calls) == 1
+    assert (recovered.workspace.root / 'a.py').read_text() == 'a = 2\n'
+    assert (recovered.workspace.root / 'b.py').read_text() == 'b = 2\n'
+    rows = recovered.store.records('harness_invocation')
+    assert {row['backend'] for row in rows} == {'codex', 'claude'}
+    assert all(row['status'] == 'completed' and row['result_ref'].startswith('blob://') for row in rows)
+    assert len([row for row in recovered.store.usage_entries() if row['role'] == 'coder']) == 1
+
+
+async def test_sdk_unknown_invocation_survives_jsonb_restore_without_replay(cfg, tmp_path, database_url, monkeypatch):
+    from agentlab.adapters.runtime.harness import HarnessRuntime
+    from agentlab.adapters.store.postgres import PostgresStore
+    from tests.unit.test_edit_journal import ProcessDied, restore
+    from tests.unit.test_harness_runtime import setup
+
+    monkeypatch.setattr('agentlab.adapters.runtime.harness.version', lambda _: 'integration-sdk')
+    driver, coder, _ = await setup(cfg, tmp_path)
+    driver.store = driver.edit_journal.store = driver.runtime.store = PostgresStore(database_url)
+    coder.action = lambda _: (_ for _ in ()).throw(ProcessDied())
+    run = driver.create('fix add')
+    with pytest.raises(ProcessDied):
+        await driver.run(run.id)
+    driver.store = PostgresStore(database_url)
+    # A new Runtime instance and a new Driver read canonicalized JSONB inputs, just like a real restart.
+    runtime = HarnessRuntime(driver.cfg, driver.runtime.raw_factory, driver.store, driver.blobs,
+                             driver.workspace, tmp_path / 'harness', coder, driver.runtime.claude)
+    recovered = restore(driver, run, runtime)
+    runtime.workspace = recovered.workspace
+    run = await recovered.run(run.id)
+    assert run.paused_reason == 'interrupted_call'
+    recovered.decide(run.id, 'approve')
+    run = await recovered.run(run.id)
+    assert run.paused_reason != 'signoff'
+    assert recovered.store.pending_approval(run.id).payload['error_kind'] == 'harness_interrupted_requires_replan'
+    assert len(coder.calls) == 1
+    rows = [r for r in recovered.store.records('harness_invocation') if r['run_id'] == run.id]
+    assert len(rows) == 1 and rows[0]['status'] == 'running'

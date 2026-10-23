@@ -141,7 +141,8 @@ async def test_p2_legacy_paid_input_cache_remains_reusable(tmp_path: Path) -> No
     inp = driver._input(run)
     paid = await driver._agent(run, "planner", inp, Plan)
     cost = run.cost_cents
-    legacy_hash = hashlib.sha256(inp.model_dump_json(exclude={"context"}).encode()).hexdigest()
+    # P2 inputs predate source revisions; reproduce that historical serialization exactly.
+    legacy_hash = hashlib.sha256(inp.model_dump_json(exclude={"context", "revision_id"}).encode()).hexdigest()
     key, inputs = next(iter(driver._agent_inputs.items()))
     driver._agent_inputs = {(*key[:3], legacy_hash): inputs}
     result_key = next(iter(driver._completed_agents))

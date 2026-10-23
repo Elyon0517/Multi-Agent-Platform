@@ -36,12 +36,14 @@ class WorkerTools:
         memory_search: Callable[[str], Awaitable[dict[str, Any]]],
         read_state: dict[str, Any] | None = None,
         evidence_state: dict[str, Any] | None = None,
+        write_edits: Callable[[list[FileEdit]], list[str]] | None = None,
     ) -> None:
         self.role, self.grants, self.workspace, self.gate = role, grants, workspace, gate
         self.memory_search = memory_search
         self.read_state = read_state if read_state is not None else {}
         self.read_state.setdefault("pending", [])
         self.evidence_state = evidence_state
+        self.write_edits = write_edits or workspace.apply_edits
 
     @property
     def specs(self) -> list[dict[str, Any]]:
@@ -268,7 +270,7 @@ class WorkerTools:
                 return sorted(await self.workspace.context_files())
             return self._read_page(args)
         if name == "workspace_write":
-            return {"paths": self.workspace.apply_edits([FileEdit(**args)])}
+            return {"paths": self.write_edits([FileEdit(**args)])}
         if name.startswith("git_"):
             return {"text": await self.workspace.inspect_git(name[4:], **args)}  # type: ignore[attr-defined]
         if name == "workspace_search":

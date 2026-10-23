@@ -170,6 +170,8 @@ class Services:
             from agentlab.demo import demo_scripts
 
             return FakeRuntime(demo_scripts())
+        if name == "sdk":
+            return self._run_runtime(name, cfg, None)
         url, key = self.gateway()
         if not url or not key:
             raise MissingGatewayConfig("set AGENTLAB_LLM_BASE_URL and AGENTLAB_LLM_API_KEY (Settings tab or .env)")
@@ -180,6 +182,14 @@ class Services:
         from agentlab.adapters.runtime.raw import RawRuntime
 
         return RawRuntime(cfg, url, key, self.anthropic_gateway(cfg))
+
+    def _run_runtime(self, name: str | None, cfg: AppConfig, workspace: GitWorkspace | None) -> AgentRuntime:
+        if (name or self.settings.runtime) != "sdk":
+            return self.runtime(name, cfg)
+        from agentlab.adapters.runtime.harness import HarnessRuntime
+
+        return HarnessRuntime(cfg, lambda: self.runtime("raw", cfg), self.store, self.blobs, workspace,
+                              self.settings.data_dir / "harness")
 
     def sandbox(self) -> Sandbox:
         if self.settings.sandbox == "docker":
@@ -194,6 +204,8 @@ class Services:
         self, workspace: Path, runtime: str | None = None, language: str | None = None, project_id: str | None = None
     ) -> Driver:
         cfg = self.cfg.model_copy(update={"frozen_prompts": {r: self.cfg.prompt(r) for r in self.cfg.agents}})
+        if (runtime or self.settings.runtime) == "sdk":
+            cfg = cfg.model_copy(update={"harness": cfg.harness.model_copy(update={"enabled": True})})
         project = self.projects.get(project_id) if project_id else None
         if project and project.settings:
             from agentlab.core.project_config import project_config
@@ -214,7 +226,8 @@ class Services:
             gate = resolve_gate([ConfigGate(demo_gate_cfg(), LocalSandbox())], ws.root, language)
         else:
             gate = resolve_gate(self.gates(), ws.root, language)
-        driver = Driver(cfg, self.store, self.blobs, self.bus, self.runtime(runtime, cfg), gate, ws, self.hooks)
+        driver = Driver(cfg, self.store, self.blobs, self.bus, self._run_runtime(runtime, cfg, ws),
+                        gate, ws, self.hooks)
         driver.recovery_options = {
             "runtime": runtime or self.settings.runtime,
             # Project checks use the host toolchain, so a restored run must not move them into Docker.
@@ -222,7 +235,7 @@ class Services:
             "gate": gate.cfg.model_dump(mode="json") if gate else None,
             "project_settings": project.settings.model_dump(mode="json") if project and project.settings else None,
         }
-        driver.runtime_factory = lambda: self.runtime(runtime, driver.cfg)
+        driver.runtime_factory = lambda: self._run_runtime(runtime, driver.cfg, ws)
         return driver
 
     def restore_driver(self, run_id: str) -> Driver:
@@ -239,20 +252,7 @@ class Services:
             workspace.restore_state(data["workspace"])
 
         def runtime_factory(config: AppConfig = cfg) -> AgentRuntime:
-            if options["runtime"] == "fake":
-                from agentlab.demo import demo_scripts
-
-                return FakeRuntime(demo_scripts())
-            url, secret = self.gateway()
-            if not url or not secret:
-                raise MissingGatewayConfig("gateway credentials required to resume")
-            if options["runtime"] == "adk":
-                from agentlab.adapters.runtime.adk import AdkRuntime
-
-                return AdkRuntime(config, url, secret)
-            from agentlab.adapters.runtime.raw import RawRuntime
-
-            return RawRuntime(config, url, secret, self.anthropic_gateway(config))
+            return self._run_runtime(options["runtime"], config, workspace)
 
         sandbox = DockerSandbox(default_image="python:3.12-slim") if options["sandbox"] == "docker" else LocalSandbox()
         if options["runtime"] == "fake":
