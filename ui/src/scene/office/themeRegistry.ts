@@ -1,122 +1,26 @@
-// Office themes define map assets, furniture anchors, palettes and cast.
-
 import type { Texture } from 'pixi.js';
-import { colors } from '@/design/tokens';
-import {
-  CAST_BY_NAME,
-  getCastFrames,
-  DEFAULT_CHARACTER,
-  type CastMember,
-  type OfficeCharacterName,
-} from './cast';
-
+import { CAST_BY_NAME, getCastFrames, DEFAULT_CHARACTER, type CastMember, type OfficeCharacterName } from './cast';
 import workspaceUrl from '@/assets/tilesets/workspace.svg?url';
 import studioMapRaw from '@/assets/maps/studio.tmj?raw';
 import atriumMapRaw from '@/assets/maps/atrium.tmj?raw';
-
 export type ThemeId = 'studio' | 'atrium';
-
 export interface Tile { x: number; y: number; }
 export type Facing = 'up' | 'down' | 'left' | 'right';
-
-/** Kinds of small idle errands around the office (incl. plant watering).
- *  'smoke' is the boss special: cigar at the open window, god only. */
-export type ErrandKind =
-  | 'water' | 'window' | 'dispenser' | 'fridge' | 'shelf' | 'bin' | 'smoke';
-
-/** One idle-errand anchor: a stand tile + facing, an `fx` tile for the ambient
- *  animation, a duration, and an optional god-only restriction. */
-export interface ErrandSpot {
-  kind: ErrandKind;
-  stand: Tile;
-  facing: Facing;
-  fx: Tile;
-  duration: number;
-  godOnly?: boolean;
-}
-
-/** One tileset atlas + its placement in the global gid space. `embedded` marks
- *  the atlas whose metadata already lives inline in the map's own `tilesets[0]`
- *  (the loader keeps the map's copy and only patches the appended atlases). */
-export interface TilesetEntry {
-  url: string;
-  embedded?: boolean;
-  firstgid?: number;
-  image?: string;
-  imagewidth?: number;
-  imageheight?: number;
-  tilewidth?: number;
-  tileheight?: number;
-  columns?: number;
-  tilecount?: number;
-}
-
-/** Desk-monitor overlay gids. The map paints an OFF monitor block; DeskScreen
- *  overlays the matching ON tiles while the desk's agent is seated. */
-export interface MonitorConfig {
-  /** gid of the OFF monitor block's top-left tile, as painted in the map. */
-  offTopLeftGid: number;
-  /** Matching ON tiles as [gid, dx, dy] relative to the block's top-left. */
-  onGids: ReadonlyArray<readonly [number, number, number]>;
-}
-
-/** The coffee economy's fixed tiles: sideboard (mug rack) → counter machine →
- *  sink → back to the sideboard. `maxCups` caps the clean-mug stock. */
-export interface CoffeeConfig {
-  trayTile: Tile;
-  trayStand: Tile;
-  machineStand: Tile;
-  sinkTile: Tile;
-  sinkStand: Tile;
-  maxCups: number;
-}
-
-/** Clickable prop anchors (tile coords). calendar → TRIGGERS, boards → TASKS,
- *  clock → CLOSING TIME. */
-export interface AnchorConfig {
-  calendar: Tile;
-  boards: Tile;
-  clock: Tile;
-}
-
-/** Theme palette. `background` is the canvas clear color; `noteColors` are the
- *  kanban note colors keyed by task status. */
-export interface PaletteConfig {
-  background: number;
-  noteColors: Record<string, number>;
-}
-
-/** Per-theme cast loader — the indirection point so a future show can swap its
- *  own roster + sprite frames. The office theme points at cast.ts's exports. */
-export interface ThemeCast {
-  byName: Record<string, CastMember>;
-  getFrames: (name: string) => Promise<Texture[][]>;
-  defaultCharacter: string;
-}
-
-/** The full contract a theme must supply. See report §A (theme contract). */
+export type ErrandKind = 'water' | 'window' | 'dispenser' | 'fridge' | 'shelf' | 'bin' | 'smoke';
+export interface ErrandSpot { kind: ErrandKind; stand: Tile; facing: Facing; fx: Tile; duration: number; godOnly?: boolean; }
+export interface TilesetEntry { url: string; embedded?: boolean; firstgid?: number; image?: string;
+  imagewidth?: number; imageheight?: number; tilewidth?: number; tileheight?: number; columns?: number; tilecount?: number; }
+export interface MonitorConfig { offTopLeftGid: number; onGids: ReadonlyArray<readonly [number, number, number]>; }
+export interface CoffeeConfig { trayTile: Tile; trayStand: Tile; machineStand: Tile; sinkTile: Tile; sinkStand: Tile; maxCups: number; }
+export interface AnchorConfig { calendar: Tile; boards: Tile; clock: Tile; }
+export interface PaletteConfig { background: number; noteColors: Record<string, number>; }
+export interface ThemeCast { byName: Record<string, CastMember>; getFrames: (name: string) => Promise<Texture[][]>; defaultCharacter: string; }
 export interface ThemeConfig {
-  id: ThemeId;
-  /** Raw Tiled JSON text; parsed + tileset-patched by themeLoader. */
-  mapRaw: string;
-  /** Ordered atlases — order matches both the texture load order and the map's
-   *  tileset array (texture[i] ↔ tilesets[i]). */
-  tilesets: TilesetEntry[];
-  /** Desk-claim order, by spawn-point name (seat 0 = god / desk-ceo). */
-  primarySeatNames: string[];
-  /** Paired café table seats, in order. */
-  cafeSeatNames: string[];
-  /** Café standing spots: [spawn-point name, kind]. */
-  cafeStands: ReadonlyArray<readonly [string, 'coffee' | 'vending']>;
-  coffee: CoffeeConfig;
-  anchors: AnchorConfig;
-  errandSpots: ErrandSpot[];
-  monitor: MonitorConfig;
-  palette: PaletteConfig;
-  cast: ThemeCast;
+  id: ThemeId; mapRaw: string; tilesets: TilesetEntry[]; primarySeatNames: string[]; cafeSeatNames: string[];
+  cafeStands: ReadonlyArray<readonly [string, 'coffee' | 'vending']>; coffee: CoffeeConfig; anchors: AnchorConfig;
+  errandSpots: ErrandSpot[]; monitor: MonitorConfig; palette: PaletteConfig; cast: ThemeCast;
 }
 
-/** Original workspace art; functional anchors match the authored maps. */
 export const STUDIO_THEME: ThemeConfig = {
   id: 'studio', mapRaw: studioMapRaw,
   tilesets: [{ url: workspaceUrl, embedded: true }],
@@ -147,7 +51,7 @@ export const STUDIO_THEME: ThemeConfig = {
   ],
   monitor: { offTopLeftGid: 9, onGids: [[11, 0, 0], [12, 1, 0], [19, 0, 1], [20, 1, 1]] },
   palette: {
-    background: colors.ink[900],
+    background: 0x1a1320,
     noteColors: { todo: 0xf2df8a, doing: 0x9ecbf0, blocked: 0xf0a3a3, done: 0xa8e0b0 },
   },
   cast: {
@@ -163,5 +67,5 @@ export const ATRIUM_THEME: ThemeConfig = {
 export const THEMES: Record<ThemeId, ThemeConfig> = { studio: STUDIO_THEME, atrium: ATRIUM_THEME };
 
 export function getTheme(id: ThemeId): ThemeConfig {
-  return THEMES[id] ?? STUDIO_THEME;
+  return Object.prototype.hasOwnProperty.call(THEMES, id) ? THEMES[id] : THEMES.studio;
 }

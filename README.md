@@ -259,8 +259,11 @@ AGENTLAB_TEST_DATABASE_URL=postgresql://agentlab:agentlab@localhost:5432/agentla
 
 # Frontend: tests, generated API types, typecheck and production build
 npm --prefix ui test
+npm --prefix ui exec -- playwright install chromium
+npm --prefix ui run test:e2e
 npm --prefix ui run check:api
 npm --prefix ui run build
+npm --prefix ui run check:distribution
 ```
 
 After changing the API, regenerate the frontend types with `npm --prefix ui run gen:api`. CI runs the backend and
@@ -323,11 +326,11 @@ Docker checks mask nested environment files, keys and credential directories. Lo
 
 ## Credits
 
-The office visualization is adapted from [munder-difflin](https://github.com/chaitanyagiri/munder-difflin) (MIT).
-Workspace tile art, maps, fictional character recipes and break-room dialogue are original to this project.
-The original artwork is available under the MIT license in `ui/src/assets/LICENSE.txt`.
-Retained renderer code also includes ISC-licensed contributions from
-[the-office](https://github.com/shahar061/the-office). Fonts are under the SIL OFL.
+The workspace visualization and UI components now use project-authored implementations.
+Workspace tile art, maps, fictional characters and dialogue are original to this project.
+The original artwork and character drawing routines have an MIT notice in `ui/src/assets/LICENSE.txt`.
+Bundled fonts remain third-party assets under the SIL OFL.
+The replacement scope and source audit are recorded in [UI replacement acceptance](docs/UI_REPLACEMENT.md).
 See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md) and
 [`ui/src/assets/ATTRIBUTION.md`](ui/src/assets/ATTRIBUTION.md) for full provenance.
-Production builds include the license texts in `THIRD_PARTY_NOTICES.txt`.
+Production builds include artwork/font permissions in `THIRD_PARTY_NOTICES.txt` and bundled package licenses in `DEPENDENCY_LICENSES.md`.

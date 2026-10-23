@@ -1,29 +1,18 @@
 import { useEffect, useState } from 'react';
-
-/** Reveal text at cps characters per second; changing seed restarts the animation. */
-export function useTypewriter(text: string, seed: unknown, cps = 90): {
-  shown: string;
-  done: boolean;
-} {
-  const [shown, setShown] = useState('');
-  const [done, setDone] = useState(false);
-
+export function useTypewriter(text: string, seed: unknown, cps = 90): { shown: string; done: boolean } {
+  const [length, setLength] = useState(0);
   useEffect(() => {
-    setShown('');
-    setDone(false);
-    if (!text) { setDone(true); return; }
-    let i = 0;
-    const intervalMs = Math.max(8, Math.floor(1000 / cps));
-    const id = window.setInterval(() => {
-      i++;
-      setShown(text.slice(0, i));
-      if (i >= text.length) {
-        window.clearInterval(id);
-        setDone(true);
-      }
-    }, intervalMs);
-    return () => window.clearInterval(id);
+    setLength(0);
+    const characters = Math.max(1, Number.isFinite(cps) ? cps : 90);
+    const began = performance.now();
+    let animation = 0;
+    const advance = () => {
+      const count = Math.min(text.length, Math.floor((performance.now() - began) * characters / 1000));
+      setLength(count);
+      if (count < text.length) animation = requestAnimationFrame(advance);
+    };
+    if (text) animation = requestAnimationFrame(advance);
+    return () => cancelAnimationFrame(animation);
   }, [text, seed, cps]);
-
-  return { shown, done };
+  return { shown: text.slice(0, length), done: length >= text.length };
 }

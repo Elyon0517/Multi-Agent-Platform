@@ -1,166 +1,36 @@
-// 16×16 pixel icons. 2 colors max. Integer paths only.
-// Add to library by extending `paths` below.
-
-import { CSSProperties } from 'react';
-
-export type IconName =
-  | 'gear' | 'plus' | 'x' | 'check' | 'arrow-right' | 'pause' | 'play'
-  | 'bell' | 'folder' | 'terminal' | 'code' | 'web' | 'mcp' | 'sparkle'
-  | 'expand' | 'minimize' | 'clock' | 'mic' | 'ledger' | 'info' | 'sidebar'
-  | 'image' | 'edit' | 'git' | 'trash';
-
-interface IconDef {
-  ink: string;     // primary color path d
-  accent?: string; // optional accent color path d
-  accentColor: string; // CSS var name
-}
-
-const paths: Record<IconName, IconDef> = {
-  // 16x16 each, designed on pixel grid
-  // Cog with four teeth (N/S/E/W) + a square hub hole. The hole is a second
-  // subpath cut out via fill-rule: evenodd (set on the <path> below).
-  gear: {
-    accentColor: 'var(--cth-ink-300)',
-    ink:   'M6 1h4v3h2v2h3v4h-3v2h-2v3h-4v-3h-2v-2h-3v-4h3v-2h2v-3zM6 6h4v4h-4z'
-  },
-  plus: {
-    accentColor: 'var(--cth-mint)',
-    ink:   'M7 2h2v5h5v2H9v5H7V9H2V7h5V2z'
-  },
-  x: {
-    accentColor: 'var(--cth-coral)',
-    ink:   'M3 3h2v2h2v2h2V5h2V3h2v2h-2v2h-2v2h2v2h2v2h-2v-2h-2V9H7v2H5v2H3v-2h2v-2h2V7H5V5H3V3z'
-  },
-  check: {
-    accentColor: 'var(--cth-mint)',
-    ink:   'M13 4h2v2h-2v2h-2v2H9v2H7v2H5v-2H3v-2H1V8h2v2h2v2h2v-2h2V8h2V6h2V4z'
-  },
-  'arrow-right': {
-    accentColor: 'var(--cth-sky)',
-    ink:   'M8 3h2v2h2v2h2v2h-2v2h-2v2H8v-2h2V9H2V7h8V5H8V3z'
-  },
-  // Break the pad outline where the pen crosses to show the overlap.
-  edit: {
-    accentColor: 'var(--cth-lilac)',
-    ink:   'M13 1h2v1h-2zM1 2h10v1h-10zM12 2h2v1h-2zM1 3h1v1h-1zM11 3h2v1h-2zM1 4h1v1h-1zM10 4h2v1h-2zM1 5h1v1h-1zM9 5h2v1h-2zM1 6h1v1h-1zM3 6h5v1h-5zM9 6h1v1h-1zM1 7h1v1h-1zM10 7h1v1h-1zM1 8h1v1h-1zM10 8h1v1h-1zM1 9h1v1h-1zM3 9h5v1h-5zM10 9h1v1h-1zM1 10h1v1h-1zM10 10h1v1h-1zM1 11h1v1h-1zM10 11h1v1h-1zM1 12h1v1h-1zM3 12h5v1h-5zM10 12h1v1h-1zM1 13h1v1h-1zM10 13h1v1h-1zM1 14h1v1h-1zM10 14h1v1h-1zM1 15h10v1h-10z'
-  },
-  pause: {
-    accentColor: 'var(--cth-lemon)',
-    ink:   'M4 3h3v10H4V3zm5 0h3v10H9V3z'
-  },
-  play: {
-    accentColor: 'var(--cth-mint)',
-    ink:   'M4 3h2v2h2v2h2v2H8v2H6v2H4V3z'
-  },
-  bell: {
-    accentColor: 'var(--cth-peach)',
-    ink:   'M7 1h2v1h1v1h1v6h1v2H3V9h1V3h1V2h1V1h1zm0 12h2v2H7v-2z'
-  },
-  folder: {
-    accentColor: 'var(--cth-lemon)',
-    ink:   'M1 3h6v1h8v9H1V3zm1 1v8h12V5H6V4H2z'
-  },
-  // Picture frame with a stepped mountain and a sun. The frame's two subpaths
-  // cut a hole via evenodd (same trick as `terminal`); the mountain rows sit
-  // inside that hole, so each adds a third crossing and fills again.
-  image: {
-    accentColor: 'var(--cth-lemon)',
-    accent: 'M4 5h2v2H4V5z',
-    ink:   'M1 2h14v12H1V2zm1 1v10h12V3H2zM8 6h2v1H8zM7 7h4v1H7zM6 8h6v1H6zM5 9h8v1H5zM4 10h9v2H4z'
-  },
-  terminal: {
-    accentColor: 'var(--cth-mint)',
-    ink:   'M1 2h14v12H1V2zm1 1v10h12V3H2zm1 2h1v1h1v1h1v1H5v1H4v1H3V9h1V8h1V7H4V6H3V5zm5 5h4v1H8v-1z'
-  },
-  git: {
-    accentColor: 'var(--cth-coral)',
-    ink:   'M5 1h3v1h-3zM4 2h1v1h-1zM8 2h1v1h-1zM4 3h1v1h-1zM8 3h1v1h-1zM5 4h3v1h-3zM6 5h1v1h-1zM6 6h1v1h-1zM9 6h3v1h-3zM6 7h1v1h-1zM8 7h1v1h-1zM12 7h1v1h-1zM6 8h3v1h-3zM12 8h1v1h-1zM6 9h1v1h-1zM9 9h3v1h-3zM6 10h1v1h-1zM5 11h3v1h-3zM4 12h1v1h-1zM8 12h1v1h-1zM4 13h1v1h-1zM8 13h1v1h-1zM5 14h3v1h-3z'
-  },
-  code: {
-    accentColor: 'var(--cth-sky)',
-    ink:   'M5 3h1v1H5v1H4v1H3v1H2v1h1v1h1v1h1v1h1v1H5v-1H4v-1H3v-1H2v-1H1V7h1V6h1V5h1V4h1V3zm5 0h1v1h1v1h1v1h1v1h1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h1v-1h1v-1h1V9h1V7h-1V6h-1V5h-1V4h-1V3z'
-  },
-  web: {
-    accentColor: 'var(--cth-lilac)',
-    ink:   'M7 1h2v1h2v1h1v1h1v2h1v2h-1v2h-1v1h-1v1H9v1H7v-1H5v-1H4v-1H3V9H2V7h1V5h1V4h1V3h2V2h0V1zm0 2v1H5v1H4v1H3v2h2V8h0V7h2V6h0V5h2V4h0V3H7zm2 1h1v1h1v1h1v2h-1v1H9V8h1V7h0V6h0V5h-1V4z'
-  },
-  mcp: {
-    accentColor: 'var(--cth-lilac)',
-    ink:   'M8 1h1v1h1v1h1v1h1v1h1v1h1v1h1v1h-1v1h-1v1h-1v1h-1v1h-1v1H8v1H7v-1H6v-1H5v-1H4v-1H3v-1H2V9H1V8h1V7h1V6h1V5h1V4h1V3h1V2h1V1zm0 2v1H7v1H6v1H5v1H4v1H3v1h1v1h1v1h1v1h1v1h1v1h1v-1h1v-1h1v-1h1v-1h1V9h1V8h-1V7h-1V6h-1V5h-1V4h-1V3h-1V2H8z'
-  },
-  sparkle: {
-    accentColor: 'var(--cth-lemon)',
-    ink:   'M8 1h1v3h3v1H9v3H8V5H5V4h3V1zm-4 8h1v2h2v1H5v2H4v-2H2v-1h2V9zm8-1h1v2h2v1h-2v2h-1v-2H10v-1h2V8z'
-  },
-  expand: {
-    accentColor: 'var(--cth-sky)',
-    ink:   'M1 1h6v2H3v4H1V1zm14 0v6h-2V3H9V1h6zM1 9h2v4h4v2H1V9zm14 0v6H9v-2h4V9h2z'
-  },
-  minimize: {
-    accentColor: 'var(--cth-sky)',
-    ink:   'M5 1h2v6H1V5h4V1zm4 0h2v4h4v2H9V1zM1 9h6v6H5v-4H1V9zm8 0h6v2h-4v4H9V9z'
-  },
-  // Wall clock at five o'clock — closing time. Ring as an evenodd cutout,
-  // hands as a second subpath (minute hand up, hour hand toward 5).
-  clock: {
-    accentColor: 'var(--cth-lemon)',
-    ink:   'M5 1h6v1h2v2h1v2h1v4h-1v2h-1v2h-2v1H5v-1H3v-2H2V8H1V6h1V4h1V2h2V1zm0 2H4v1H3v2H2v4h1v2h1v1h1v1h6v-1h1v-1h1v-2h1V6h-1V4h-1V3h-1V2H5v1zm2 1h2v4h2v1h1v1h-1v1h-1v-1H9v1H7V4z'
-  },
-  // Ruled page — the trigger-history ledger. Frame as an evenodd cutout, three
-  // written lines inside it (the last one short, like a part-filled entry).
-  ledger: {
-    accentColor: 'var(--cth-lemon)',
-    ink:   'M2 1h12v14H2V1zM3 2v12h10V2H3zM5 4h6v1H5zM5 7h6v1H5zM5 10h4v1H5z'
-  },
-  // Microphone: a solid capsule head, an open cradle, a stem, and a base.
-  mic: {
-    accentColor: 'var(--cth-coral)',
-    ink:   'M6 2h4v7H6V2z M4 9h1v2H4z M11 9h1v2h-1z M4 11h8v1H4z M7 12h2v2H7z M5 14h6v1H5z'
-  },
-  // Evenodd cuts the information glyph out of the disc.
-  info: {
-    accentColor: 'var(--cth-sky)',
-    ink:   'M5 1h6v1h2v1h1v2h1v6h-1v2h-1v1h-2v1H5v-1H3v-1H2v-2H1V5h1V3h1V2h2V1z M7 4h2v2H7z M7 7h2v5H7z'
-  },
-  // Evenodd fills the sidebar column inside the hollow panel frame.
-  sidebar: {
-    accentColor: 'var(--cth-ink-300)',
-    ink:   'M1 3h14v10H1z M2 4h12v8H2z M2 4h4v8H2z'
-  },
-  // Handle, lid, then a hollow can whose two inner slats fill back in under evenodd.
-  trash: {
-    accentColor: 'var(--cth-coral)',
-    ink:   'M6 1h4v2H6z M2 3h12v2H2z M3 5h10v10H3z M4 5h8v9H4z M6 7h1v5H6z M9 7h1v5H9z'
-  }
+import type { CSSProperties, ReactNode } from 'react';
+export type IconName = 'gear' | 'plus' | 'x' | 'check' | 'arrow-right' | 'pause' | 'play' | 'bell' | 'folder' |
+  'terminal' | 'code' | 'web' | 'mcp' | 'sparkle' | 'expand' | 'minimize' | 'clock' | 'mic' | 'ledger' | 'info' |
+  'sidebar' | 'image' | 'edit' | 'git' | 'trash';
+export interface IconProps { name: IconName; size?: number; style?: CSSProperties; }
+// All glyphs are constructed here from primitive strokes on a 16-pixel grid.
+const lines: Partial<Record<IconName, string>> = {
+  plus: 'M8 2V14M2 8H14', x: 'M3 3L13 13M13 3L3 13', check: 'M2 8L6 12L14 3',
+  'arrow-right': 'M2 8H14L9 3M14 8L9 13', pause: 'M5 3V13M11 3V13', play: 'M4 2L14 8L4 14Z',
+  code: 'M5 3L1 8L5 13M11 3L15 8L11 13', terminal: 'M2 2H14V14H2ZM4 5L7 8L4 11M9 11H12',
+  folder: 'M1 4H6L8 6H15V13H1ZM1 4V2H6L8 4H14V6',
+  ledger: 'M3 1H13V15H3ZM5 5H11M5 8H11M5 11H9',
+  sidebar: 'M1 3H15V13H1ZM6 3V13M3 6H4M3 9H4',
+  expand: 'M1 6V1H6M10 1H15V6M15 10V15H10M6 15H1V10',
+  minimize: 'M6 1V6H1M10 1V6H15M15 10H10V15M1 10H6V15',
+  edit: 'M3 11L11 3L14 6L6 14H3ZM10 4L13 7M2 2H7M2 2V14H14V10',
+  image: 'M1 2H15V14H1ZM2 12L6 8L9 11L12 7L15 10M4 5H6',
+  trash: 'M2 4H14M5 4V2H11V4M4 6L5 14H11L12 6M7 6V12M9 6V12',
+  mic: 'M6 2H10V9H6ZM3 7V9L5 12H11L13 9V7M8 12V15M5 15H11',
+  sparkle: 'M8 1L10 6L15 8L10 10L8 15L6 10L1 8L6 6Z',
+  mcp: 'M4 4H12V12H4ZM6 1V4M10 1V4M6 12V15M10 12V15M1 6H4M1 10H4M12 6H15M12 10H15',
+  git: 'M5 4V12M5 8H8L11 5V4', bell: 'M3 12H13L11 9V5L9 3H7L5 5V9ZM7 14H9',
 };
-
-export interface IconProps {
-  name: IconName;
-  size?: number; // integer scale: 1 = 16px, 2 = 32px, ...
-  style?: CSSProperties;
+function geometry(name: IconName): ReactNode {
+  if (name === 'gear') return <><path d="M5 2H11L14 5V11L11 14H5L2 11V5ZM8 1V3M8 13V15M1 8H3M13 8H15" /><circle cx="8" cy="8" r="2" /></>;
+  if (name === 'clock') return <><circle cx="8" cy="8" r="6" /><path d="M8 4V8L11 10" /></>;
+  if (name === 'info') return <><circle cx="8" cy="8" r="6" /><path d="M8 7V12M8 4V5" /></>;
+  if (name === 'web') return <><circle cx="8" cy="8" r="6" /><ellipse cx="8" cy="8" rx="3" ry="6" /><path d="M2 6H14M2 10H14" /></>;
+  if (name === 'git') return <><path d={lines.git} /><circle cx="5" cy="3" r="2" /><circle cx="5" cy="13" r="2" /><circle cx="11" cy="3" r="2" /></>;
+  return <path d={lines[name]} />;
 }
-
 export function Icon({ name, size = 1, style }: IconProps) {
-  const def = paths[name];
-  const dim = 16 * size;
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width={dim}
-      height={dim}
-      shapeRendering="crispEdges"
-      style={{ display: 'inline-block', ...style }}
-      aria-hidden
-    >
-      {def.accent && <path d={def.accent} fill={def.accentColor} fillRule="evenodd" />}
-      {/* currentColor, not a hardcoded `--cth-ink-900`. `body` already sets that
-          same token as its color, so this is a no-op for every icon sitting on a
-          normal surface — but on an INVERTED surface it is the difference between
-          an icon and a blank space. A primary PixelButton fills itself with
-          `--cth-ink-900` and an icon painted the same token vanished into it (the
-          arrow on Send, in both themes). Inheriting means an icon is always the
-          colour of the text it sits beside, which is what every call site meant. */}
-      <path d={def.ink} fill="currentColor" fillRule="evenodd" />
-    </svg>
-  );
+  return <svg aria-hidden="true" viewBox="0 0 16 16" width={16 * size} height={16 * size}
+    style={{ display: 'inline-block', ...style }} fill="none" stroke="currentColor" strokeWidth="1.5"
+    strokeLinejoin="miter" shapeRendering="crispEdges">{geometry(name)}</svg>;
 }

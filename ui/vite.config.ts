@@ -18,6 +18,7 @@ export default defineConfig({
       '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)),
     },
   },
+  build: { license: { fileName: 'DEPENDENCY_LICENSES.md' } },
   server: {
     port: 5173,
     proxy: { '/api': { target: process.env.AGENTLAB_API_TARGET ?? 'http://127.0.0.1:8765', rewrite: (p) => p.replace(/^\/api/, '') } },

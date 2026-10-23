@@ -1,66 +1,41 @@
-// BFS pathfinding on a tile walkability grid.
-// Ported verbatim from shahar061/the-office (office/engine/pathfinding.ts).
+export interface Walkable { width: number; height: number; isWalkable(x: number, y: number): boolean; }
+interface Point { x: number; y: number; }
 
-export interface Walkable {
-  width: number;
-  height: number;
-  isWalkable(x: number, y: number): boolean;
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-const DIRECTIONS: Point[] = [
-  { x: 0, y: -1 },
-  { x: 0, y: 1 },
-  { x: -1, y: 0 },
-  { x: 1, y: 0 },
-];
-
-export function findPath(map: Walkable, start: Point, goal: Point): Point[] | null {
-  if (start.x === goal.x && start.y === goal.y) return [];
-  if (!map.isWalkable(goal.x, goal.y)) return null;
-
-  const key = (p: Point) => `${p.x},${p.y}`;
-  const visited = new Set<string>();
-  const parent = new Map<string, Point>();
-  const queue: Point[] = [start];
-  visited.add(key(start));
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-
-    for (const dir of DIRECTIONS) {
-      const next: Point = { x: current.x + dir.x, y: current.y + dir.y };
-      const nextKey = key(next);
-
-      if (visited.has(nextKey) || !map.isWalkable(next.x, next.y)) continue;
-
-      visited.add(nextKey);
-      parent.set(nextKey, current);
-
-      if (next.x === goal.x && next.y === goal.y) {
-        return reconstructPath(parent, start, goal);
-      }
-
-      queue.push(next);
+// A* uses integer cell indices; returned steps exclude the starting cell.
+export function findPath(grid: Walkable, from: Point, to: Point): Point[] | null {
+  const inside = (p: Point) => Number.isInteger(p.x) && Number.isInteger(p.y) &&
+    p.x >= 0 && p.y >= 0 && p.x < grid.width && p.y < grid.height;
+  if (!inside(from) || !inside(to)) return null;
+  if (from.x === to.x && from.y === to.y) return [];
+  if (!grid.isWalkable(to.x, to.y)) return null;
+  const id = ({ x, y }: Point) => y * grid.width + x;
+  const point = (n: number): Point => ({ x: n % grid.width, y: Math.floor(n / grid.width) });
+  const estimate = (n: number) => {
+    const p = point(n); return Math.abs(p.x - to.x) + Math.abs(p.y - to.y);
+  };
+  const origin = id(from), destination = id(to);
+  const costs = new Map([[origin, 0]]), previous = new Map<number, number>();
+  const frontier = new Set([origin]);
+  while (frontier.size) {
+    let chosen = -1, best = Infinity;
+    for (const n of frontier) {
+      const rank = costs.get(n)! + estimate(n);
+      if (rank < best) { chosen = n; best = rank; }
+    }
+    if (chosen === destination) {
+      const result: Point[] = [];
+      for (let n = chosen; n !== origin; n = previous.get(n)!) result.push(point(n));
+      return result.reverse();
+    }
+    frontier.delete(chosen);
+    const p = point(chosen);
+    for (const q of [{ x: p.x + 1, y: p.y }, { x: p.x, y: p.y + 1 },
+      { x: p.x - 1, y: p.y }, { x: p.x, y: p.y - 1 }]) {
+      if (!inside(q) || !grid.isWalkable(q.x, q.y)) continue;
+      const next = id(q), distance = costs.get(chosen)! + 1;
+      if (distance >= (costs.get(next) ?? Infinity)) continue;
+      costs.set(next, distance); previous.set(next, chosen); frontier.add(next);
     }
   }
-
   return null;
-}
-
-function reconstructPath(parent: Map<string, Point>, start: Point, goal: Point): Point[] {
-  const path: Point[] = [];
-  let current = goal;
-  const key = (p: Point) => `${p.x},${p.y}`;
-
-  while (!(current.x === start.x && current.y === start.y)) {
-    path.unshift(current);
-    current = parent.get(key(current))!;
-  }
-
-  return path;
 }

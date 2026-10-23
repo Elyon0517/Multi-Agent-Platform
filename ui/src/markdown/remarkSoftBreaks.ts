@@ -1,30 +1,17 @@
-/** Preserve message newlines in card previews; leave code nodes unchanged. */
-
-interface MdNode {
-  type: string;
-  value?: string;
-  children?: MdNode[];
-}
-
-function walk(node: MdNode): void {
-  const children = node.children;
-  if (!children) return;
-  const out: MdNode[] = [];
-  for (const child of children) {
-    if (child.type === 'text' && typeof child.value === 'string' && child.value.includes('\n')) {
-      const parts = child.value.split('\n');
-      for (let i = 0; i < parts.length; i++) {
-        if (i > 0) out.push({ type: 'break' });
-        if (parts[i]) out.push({ type: 'text', value: parts[i] });
-      }
-      continue;
-    }
-    walk(child);
-    out.push(child);
-  }
-  node.children = out;
-}
-
+interface Node { type: string; value?: string; children?: Node[]; }
 export function remarkSoftBreaks() {
-  return (tree: unknown): void => { walk(tree as MdNode); };
+  return (root: unknown): void => {
+    const pending = [root as Node];
+    while (pending.length) {
+      const parent = pending.pop()!;
+      if (!parent.children || parent.type === 'code' || parent.type === 'inlineCode') continue;
+      parent.children = parent.children.flatMap(child => {
+        pending.push(child);
+        if (child.type !== 'text' || !child.value?.includes('\n')) return [child];
+        return child.value.split('\n').flatMap((value, index): Node[] => [
+          ...(index ? [{ type: 'break' }] : []), ...(value ? [{ type: 'text', value }] : []),
+        ]);
+      });
+    }
+  };
 }
