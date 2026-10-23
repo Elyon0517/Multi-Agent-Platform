@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
@@ -154,7 +153,14 @@ class PolicyCfg(Strict):
     dangerous_ops_require_approval: list[str]
 
 
+class HarnessCfg(Strict):
+    enabled: bool = False
+    codex_model: str | None = None
+    claude_model: str | None = None
+
+
 class AppConfig(Strict):
+    harness: HarnessCfg = HarnessCfg()
     frozen_prompts: dict[str, str] = {}
     root: Path
     models: ModelsCfg
@@ -183,9 +189,10 @@ class AppConfig(Strict):
                 raise ConfigError(f"agents/{role}: prompt file {agent.prompt} not found")
         return self
 
-    @cached_property
+    @property
     def reviewer_roles(self) -> list[str]:
-        return sorted(r for r, a in self.agents.items() if a.kind == "reviewer")
+        return (["correctness-reviewer"] if self.harness.enabled else
+                sorted(r for r, a in self.agents.items() if a.kind == "reviewer"))
 
     def prompt(self, role: str) -> str:
         return (
@@ -221,6 +228,7 @@ def load_config(root: Path) -> AppConfig:
         return AppConfig.model_validate(
             {
                 "root": root,
+                "harness": _read(root / "harness.yaml") if (root / "harness.yaml").is_file() else {},
                 "models": _read(root / "models.yaml"),
                 "model_policy": _read(root / "model_policy.yaml"),
                 "retry": _read(root / "retry.yaml"),

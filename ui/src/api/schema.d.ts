@@ -905,6 +905,8 @@ export interface components {
         ApprovalStatus: "pending" | "approved" | "rejected" | "aborted";
         /** Artifact */
         Artifact: {
+            /** Revision Id */
+            revision_id: string | null;
             /** Id */
             id: string;
             /** Run Id */
@@ -1128,6 +1130,8 @@ export interface components {
         GateMode: "fast" | "full";
         /** GateResult */
         GateResult: {
+            /** Revision Id */
+            revision_id: string | null;
             /** Language */
             language: string;
             mode: components["schemas"]["GateMode"];
@@ -1174,6 +1178,8 @@ export interface components {
         };
         /** Iteration */
         Iteration: {
+            /** Revision Id */
+            revision_id: string | null;
             /** Id */
             id: string;
             /** Run Id */
@@ -1899,6 +1905,8 @@ export interface components {
         };
         /** Verdict */
         Verdict: {
+            /** Revision Id */
+            revision_id: string | null;
             /** Reviewer Id */
             reviewer_id: string;
             /**

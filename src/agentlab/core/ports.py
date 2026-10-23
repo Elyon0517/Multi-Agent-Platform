@@ -35,7 +35,17 @@ class WorkspaceRootRequired(ValueError):
     pass
 
 
+class EditConflict(PermissionError):
+    kind = "edit_conflict"
+
+    def __init__(self, operation_id: str, paths: list[str]) -> None:
+        super().__init__("recorded file edits conflict with current content")
+        self.operation_id, self.paths = operation_id, paths
+
+
 def execution_error_reason(exc: Exception) -> str:
+    if isinstance(exc, EditConflict):
+        return exc.kind
     if isinstance(exc, WorkspaceRootRequired):
         return "workspace_root_required"
     if isinstance(exc, WorkspaceUnreadable):
@@ -112,9 +122,21 @@ class Workspace(Protocol):
 
     async def context_files(self) -> dict[str, str]: ...
 
-    def apply_edits(self, edits: list[FileEdit]) -> list[str]: ...
+    def validate_edits(self, edits: list[FileEdit]) -> list[FileEdit]: ...
+
+    def edit_baseline(self) -> dict[str, str]: ...
+
+    def file_hash(self, path: str) -> str | None: ...
+
+    def remember_edits(self, paths: list[str]) -> None: ...
+
+    def apply_edits(
+        self, edits: list[FileEdit], expected_hashes: dict[str, str | None] | None = None,
+    ) -> list[str]: ...
 
     async def diff(self) -> str: ...
+
+    def review_snapshot(self) -> tuple[str, str]: ...
 
 
 class GateAdapter(Protocol):

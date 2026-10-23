@@ -1651,6 +1651,14 @@
       "title": "A model call was interrupted",
       "body": "The process stopped while a model call was in flight; the gateway may have billed it. Approve to retry it (it may be billed again). Abort to stop."
     },
+    "edit_conflict": {
+      "title": "File content conflicts with the recorded write",
+      "body": "Current files match neither their recorded originals nor intended results. Approve only rechecks and resumes safe pending writes; unresolved conflicts still pause. Reject with feedback to preserve current files and let the coder replan, or Abort to stop."
+    },
+    "workspace_changed": {
+      "title": "Source changed; fresh review required",
+      "body": "Previous checks and reviews are stale. Approve to preserve current files and rerun checks and all reviewers. Reject with feedback to ask the coder for changes, or Abort to stop."
+    },
     "workspace_escape": {
       "title": "Tried to write outside the project",
       "body": "The coder tried to change a file outside the workspace or a protected file. Nothing was written. Approve to let the coder try again within the project. Abort to stop."

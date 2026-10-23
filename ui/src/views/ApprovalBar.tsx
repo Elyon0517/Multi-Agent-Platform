@@ -7,7 +7,8 @@ import { api, type Approval, type RunDetail } from '@/api/client';
 
 // Pause reasons with a plain-language explanation in i18n (approvalReason.*); anything else uses `unknown`.
 const EXPLAINED = new Set(['signoff', 'no_changes', 'oscillation_detected', 'reviewer_conflict', 'inconsistent_verdict', 'budget_exceeded',
-  'max_iter_exceeded', 'interrupted_call', 'workspace_escape', 'dispatch_invalid', 'execution_error']);
+  'max_iter_exceeded', 'interrupted_call', 'workspace_escape', 'workspace_changed', 'edit_conflict',
+  'dispatch_invalid', 'execution_error']);
 // Reasons where the reviewers' open findings explain what is stuck.
 const SHOW_FINDINGS = new Set(['oscillation_detected', 'reviewer_conflict', 'inconsistent_verdict', 'max_iter_exceeded']);
 
@@ -41,6 +42,8 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
   const key = EXPLAINED.has(approval.reason) ? approval.reason : 'unknown';
   const errorKind = typeof approval.payload.error_kind === 'string' ? approval.payload.error_kind : null;
   const blockedReason = typeof approval.payload.blocked_reason === 'string' ? approval.payload.blocked_reason : '';
+  const conflictPaths = approval.reason === 'edit_conflict' && Array.isArray(approval.payload.paths)
+    ? approval.payload.paths.filter((path): path is string => typeof path === 'string') : [];
   const lastRound = detail?.iterations.at(-1);
   const findings = SHOW_FINDINGS.has(approval.reason)
     ? (lastRound?.verdicts ?? []).flatMap((v) => v.findings.filter((f) => f.severity === 'blocking' || f.severity === 'major')
@@ -66,6 +69,7 @@ export function ApprovalBar({ runId, approval, detail, onDecided }: {
         onAction={onAction}
       />
       <Status error={error} />
+      {conflictPaths.length > 0 && <ul>{conflictPaths.map((path) => <li key={path}><code>{path}</code></li>)}</ul>}
       {approval.reason !== 'signoff' && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <Field id="resume-max-iter" label={t('lab.resumeMaxIter')}>

@@ -11,8 +11,8 @@ import tempfile
 from pathlib import Path
 
 from agentlab.adapters.sandbox.local import run_argv, scrubbed_env
-from agentlab.core.ports import WorkspaceRootRequired, WorkspaceUnreadable
-from agentlab.core.schemas import FileEdit
+from agentlab.core.ports import EditConflict, WorkspaceRootRequired, WorkspaceUnreadable
+from agentlab.core.schemas import FileEdit, new_id
 
 
 class WorkspaceEscape(PermissionError):
@@ -70,7 +70,7 @@ class GitWorkspace:
     def _sensitive(rel: str) -> bool:
         parts = Path(rel.casefold()).parts
         return any(
-            part.startswith(".env")
+            part.startswith((".env", ".agentlab-write-"))
             or part
             in {
                 ".git",
@@ -90,12 +90,14 @@ class GitWorkspace:
     def close(self) -> None:
         self._snapshot_dir.cleanup()
 
-    def integrate_back(self) -> None:
+    def integrate_back(self, expected_revision: str | None = None) -> None:
         """Apply an isolated run's changes to the user's repository; raises WorktreeConflict."""
         if self.isolation:
             from agentlab.adapters.worktree import integrate
 
-            integrate(self.isolation)
+            integrate(self.isolation, validate_revision=(
+                lambda: self.review_snapshot()[0] == expected_revision
+            ) if expected_revision else None)
 
     def release(self) -> None:
         """Remove an isolated run's worktree and branch once the run has ended."""
@@ -297,7 +299,7 @@ class GitWorkspace:
     def read(self, path: str) -> str:
         return self._resolve(path).read_text()
 
-    def apply_edits(self, edits: list[FileEdit]) -> list[str]:
+    def validate_edits(self, edits: list[FileEdit]) -> list[FileEdit]:
         if any(len(edit.content.encode()) > 100_000 for edit in edits):
             raise ValueError("edit exceeds reviewable file size")
         if any(self._secret_text(edit.content) for edit in edits):
@@ -320,11 +322,67 @@ class GitWorkspace:
                     (parent / "HEAD").is_file() and (parent / "objects").is_dir() and (parent / "refs").is_dir()
                 ):
                     raise WorkspaceEscape("nested repository requires its own project")
-        for path, edit in targets:
+        normalized = [e.model_copy(update={"path": p.relative_to(self.root).as_posix()}) for p, e in targets]
+        if len({e.path for e in normalized}) != len(normalized):
+            raise ValueError("duplicate edit target")
+        return normalized
+
+    def file_hash(self, path: str) -> str | None:
+        target = self._resolve(path)
+        if target.relative_to(self.root).as_posix() != path:
+            raise WorkspaceEscape("recorded write target changed")
+        try:
+            return hashlib.sha256(target.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            return None
+        except IsADirectoryError:
+            return "not-a-file"
+
+    def edit_baseline(self) -> dict[str, str]:
+        paths = self._git_bytes("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        result = {}
+        for rel in sorted(set(os.fsdecode(paths).split("\0")) | self._edited_paths):
+            if not rel or self._sensitive(rel) or (self.root / rel).is_symlink():
+                continue
+            try:
+                digest = self.file_hash(rel)
+            except WorkspaceEscape:
+                continue
+            if digest is not None and digest != "not-a-file":
+                result[rel] = digest
+        return result
+
+    def remember_edits(self, paths: list[str]) -> None:
+        self._edited_paths.update(paths)
+
+    def apply_edits(
+        self, edits: list[FileEdit], expected_hashes: dict[str, str | None] | None = None,
+    ) -> list[str]:
+        edits = self.validate_edits(edits)
+        if expected_hashes is not None:
+            conflicts = [e.path for e in edits if e.path not in expected_hashes
+                         or self.file_hash(e.path) != expected_hashes[e.path]]
+            if conflicts:
+                raise EditConflict("file_precondition", conflicts)
+        for edit in edits:
+            path = self._resolve(edit.path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(edit.content)
-        self._edited_paths.update(e.path for _, e in targets)
-        return [e.path for _, e in targets]
+            temporary = path.parent / (".agentlab-write-" + new_id())
+            try:
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(edit.content.encode())
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if path.exists():
+                    temporary.chmod(path.stat().st_mode & 0o777)
+                if expected_hashes is not None and self.file_hash(edit.path) != expected_hashes[edit.path]:
+                    raise EditConflict("file_precondition", [edit.path])
+                os.replace(temporary, path)
+                self._edited_paths.add(edit.path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return [e.path for e in edits]
 
     async def _git(self, *args: str) -> str:
         res = await run_argv(["git", "-C", str(self.root), *args], None, 60, scrubbed_env())
@@ -520,7 +578,18 @@ class GitWorkspace:
             )
 
     def _diff(self) -> str:
+        return self.review_snapshot()[1]
+
+    def _revision_id(self, current: str, metadata: dict[str, tuple[str, str]]) -> str:
+        identity = repr((
+            self._baseline_tree, sorted(self._baseline_meta.items()), current, sorted(metadata.items()),
+        )).encode()
+        return hashlib.sha256(identity).hexdigest()
+
+    def review_snapshot(self) -> tuple[str, str]:
+        """Bind the review diff and complete source identity to the same captured tree."""
         current, metadata = self._snapshot()
+        revision_id = self._revision_id(current, metadata)
         baseline = self._baseline_tree or self._git_bytes("mktree", data=b"").decode().strip()
         changed = os.fsdecode(self._git_bytes("diff", "--name-only", "-z", "--no-renames", baseline, current)).split(
             "\0"
@@ -574,7 +643,7 @@ class GitWorkspace:
                 if new_kind == "text" and new_oid != "absent":
                     text = self._git_bytes("cat-file", "blob", new_oid).decode()
                     parts.append("Current file contents (baseline body omitted):\n" + text + "\n")
-        return "".join(parts)
+        return revision_id, "".join(parts)
 
     async def diff(self) -> str:
         return await asyncio.to_thread(self._diff)
