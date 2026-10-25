@@ -378,3 +378,12 @@ The replacement scope and source audit are recorded in [UI replacement acceptanc
 See [`ui/THIRD_PARTY_NOTICES.md`](ui/THIRD_PARTY_NOTICES.md) and
 [`ui/src/assets/ATTRIBUTION.md`](ui/src/assets/ATTRIBUTION.md) for full provenance.
 Production builds include artwork/font permissions in `THIRD_PARTY_NOTICES.txt` and bundled package licenses in `DEPENDENCY_LICENSES.md`.
+
+## Source, copyright and attribution
+
+Original project: [Elyon0517/Multi-Agent-Platform](https://github.com/Elyon0517/Multi-Agent-Platform), maintained by
+[Elyon0517](https://github.com/Elyon0517). Project code is available under the [MIT License](LICENSE), subject to file-specific and third-party notices. Redistributions must preserve the applicable copyright and permission notices.
+
+For articles, demos and derivatives, please credit the original project and link here.
+That link is a courtesy request, not an extra restriction on an existing open-source license.
+See [copyright and third-party boundaries](COPYRIGHT.md) and [citation metadata](CITATION.cff).
