@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you discuss or build on this project, please cite its original repository."
+type: software
+title: "Multi-Agent-Platform"
+authors:
+  - name: "Elyon0517"
+repository-code: "https://github.com/Elyon0517/Multi-Agent-Platform"
+url: "https://github.com/Elyon0517/Multi-Agent-Platform"
