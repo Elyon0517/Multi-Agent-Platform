@@ -8,7 +8,7 @@ export function GateDiagnostics({ reports = [] }: { reports?: GateResult[] }) {
   return <section aria-label={t('lab.gateDiagnostics')} style={{ marginTop: 12 }}>
     <h3>{t('lab.gateDiagnostics')}</h3>
     {reports.map((report, round) => <div key={round}>
-      <strong>{round + 1}. {report.language} · {report.mode} · {report.passed ? t('lab.gatePassed') : t('lab.gateFailed')}</strong>
+      <strong>{round + 1}. {report.language} · {report.mode} · {report.passed ? t('lab.gatePassed') : t('lab.gateFailed', { step: report.failed_at ?? '?' })}</strong>
       {report.steps.map((step, index) => <div key={index}>
         <p>{step.name} · {step.duration_ms}ms · exit {step.exit_code}</p>
         {step.diagnostics.length > 0 && <table style={{ width: '100%', textAlign: 'left', fontSize: 11 }}>

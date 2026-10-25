@@ -30,6 +30,8 @@ describe('objective check evidence', () => {
       diagnostics: [{ file: 'module.py', line: 12, col: 3, code: 'F821', message: 'Undefined variable' }],
     }] };
     const html = render(<GateDiagnostics reports={[report]} />);
+    expect(html).toContain('gate failed at lint');
+    expect(html).not.toContain('{{step}}');
     expect(html).toContain('module.py:12:3');
     expect(html).toContain('F821');
     expect(html).toContain('Undefined variable');
