@@ -11,7 +11,8 @@
     "gen:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false",
     "check:api": "uv run --project .. python ../scripts/export_openapi.py openapi.json && openapi-typescript openapi.json -o src/api/schema.d.ts --default-non-nullable false --check",
     "test:e2e": "playwright test",
-    "check:distribution": "node ../scripts/check_ui_distribution.mjs"
+    "check:distribution": "node ../scripts/check_ui_distribution.mjs",
+    "test:showcase": "AGENTLAB_SHOWCASE_E2E=1 playwright test --config playwright.showcase.config.ts"
   },
   "dependencies": {
     "i18next": "^26.3.6",
