@@ -14,11 +14,11 @@ preserved as required by their applicable licenses.
 
 ## Applicable permissions
 
-This attribution notice does not grant a new software license. Check any applicable
-file-specific notices and existing permissions before reusing material. In the absence
-of a reuse license, do not assume permission to copy, modify or redistribute project-original
-material. GitHub users retain the viewing and forking rights provided by GitHub terms.
-Third-party and separately licensed material keeps its own permissions.
+Project code and associated documentation are distributed under the [MIT License](LICENSE),
+except where a file or third-party component states otherwise. Preserve the copyright
+and permission notice when redistributing copies or substantial portions of the Software.
+MIT permits commercial use, modification and redistribution; this notice adds no
+noncommercial, mandatory-link or other restrictions to that license.
 
 ## Existing artwork and font permissions
 

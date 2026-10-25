@@ -3,6 +3,7 @@ name = "agentlab"
 version = "0.1.0"
 description = "Local multi-agent convergence loop: Planner, Coder, objective Gate, multi-model review panel, Arbiter, human signoff."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.8",
