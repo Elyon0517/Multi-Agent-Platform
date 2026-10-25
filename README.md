@@ -29,6 +29,50 @@ flowchart LR
   Human --> Summarizer[Summarizer → memory]
 ```
 
+## See the team converge
+
+![Live office and review evidence from a real offline run](docs/screenshots/office-review.png)
+
+**Give the team a broken function. Watch it test, revise, review, and deliver.**
+The walkthrough starts with an incorrect `add()` implementation. A real pytest Gate catches
+it, the coder fixes it, an architecture reviewer requests a docstring, and the next review
+round approves the final diff.
+
+<details>
+<summary>See the completed run and Gate history</summary>
+
+![Completed run with the failed Gate, passing checks, and reviewer results](docs/screenshots/completed-run.png)
+
+</details>
+
+These are screenshots of the real API and console. Model replies are scripted; pytest,
+file edits, revision checks and event streaming execute locally. Displayed usage and costs
+come from scripted replies and configured rates; no paid model call is made. This demo
+uses an explicit workspace and completes in place after checks. Isolated delivery workflows
+can require human signoff; the browser test does not claim to verify those workflows.
+
+### Try the same walkthrough without keys
+
+```bash
+uv sync
+uv run python scripts/showcase.py --only S2 --speed 2
+# In a second terminal:
+cd ui
+npm ci
+npm run dev
+# Open http://localhost:5173/?follow=1
+```
+
+To run the API-backed browser check and regenerate the screenshots:
+
+```bash
+cd ui
+npx playwright install chromium
+npm run test:showcase
+```
+
+[Capture details and verification scope](docs/SHOWCASE.md).
+
 ## What it does
 
 - **One entry point.** Every message goes to Root, which decides whether to answer (read-only file, git, memory
