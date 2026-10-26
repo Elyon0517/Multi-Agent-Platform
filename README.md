@@ -1,18 +1,38 @@
-# Multi-Agent Platform
+<h1 align="center">Multi-Agent Platform</h1>
 
-**English** · [简体中文](README.zh-CN.md)
+<p align="center">
+  <strong>One conversation. A reviewed team. Your final say.</strong>
+</p>
 
-**One conversation. A reviewed team. Your final say.**
+<p align="center">
+  Local multi-agent coding with a live pixel office.<br>
+  Plan, code, check and review changes in your repository.
+</p>
 
-Chat with a Root agent about your local repository. Questions get answered directly; coding work goes to a
-Planner → Coder → Gate → Review → human signoff loop, visualized as a pixel office.
-Use the raw runtime for a review panel, or opt into Codex SDK Coding → Claude Agent SDK Review.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/Node.js-22.12%2B-339933?logo=nodedotjs&amp;logoColor=white" alt="Node.js 22.12+">
+  <img src="https://img.shields.io/badge/status-Alpha-orange" alt="Alpha">
+</p>
 
-Python 3.12+ · Node 22.12+ · Alpha
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-Find this useful? Give it a star ⭐
+<p align="center">
+  <a href="#see-the-team-converge">Demo</a> ·
+  <a href="#setup">Setup</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#testing">Testing</a> ·
+  <a href="#contributing">Contributing</a><br>
+  <a href="#native-sdk-workflow-route-b">SDK workflow</a> ·
+  <a href="docs/DISCOVERY.md">Design doc</a> ·
+  <a href="docs/ACCEPTANCE.md">Acceptance checklist</a>
+</p>
 
-[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [SDK workflow](#native-sdk-workflow-route-b) · [Testing](#testing) · [Contributing](#contributing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
+---
 
 > **Let’s build this together.** This project is still in Alpha: features, workflows and documentation are
 > evolving, and there are rough edges. Contributions of all sizes are welcome, including bug reports, tests,
