@@ -490,6 +490,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
             driver = svc.restore_driver(run_id)
             drivers[run_id] = driver
             return await spawn(driver, run_id)
+        except asyncio.CancelledError as exc:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            raise HTTPException(409, "run execution was cancelled") from exc
         except Exception as exc:
             raise HTTPException(409, f"resume failed: {type(exc).__name__}") from exc
 

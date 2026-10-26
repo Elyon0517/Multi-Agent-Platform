@@ -48,8 +48,9 @@ async def test_resumed_run_can_be_cancelled_and_duplicate_resume_keeps_original_
             assert response.status_code == 200, response.text
             assert response.json()["status"] == "CANCELLED"
             assert stopped.is_set()
-            with pytest.raises(asyncio.CancelledError):
-                await request
+            resumed = await request
+            assert resumed.status_code == 409
+            assert resumed.json()["detail"] == "run execution was cancelled"
             assert svc.store.get_run(run.id).status == RunStatus.CANCELLED
         finally:
             request.cancel()
