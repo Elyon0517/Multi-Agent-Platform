@@ -1,6 +1,6 @@
-<div align="center">
-
 # Multi-Agent Platform
+
+**English** · [简体中文](README.zh-CN.md)
 
 **One conversation. A reviewed team. Your final say.**
 
@@ -14,31 +14,17 @@ Find this useful? Give it a star ⭐
 
 [Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [SDK workflow](#native-sdk-workflow-route-b) · [Testing](#testing) · [Contributing](#contributing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
 
-</div>
-
 > **Let’s build this together.** This project is still in Alpha: features, workflows and documentation are
 > evolving, and there are rough edges. Contributions of all sizes are welcome, including bug reports, tests,
 > documentation, design ideas and code. See [Contributing](#contributing) to get started.
->
-> **欢迎一起共创！** 项目目前还在早期阶段，功能、交互和文档都还不够完善，欢迎大家一起探索、反馈问题、
-> 改进体验。无论是修复一个小 bug、补充测试或文档，还是提出新想法，都非常欢迎；参与方式见下方贡献指南。
-
-```mermaid
-flowchart LR
-  You((You)) <--> Root[Root conversation]
-  Root -- answer / clarify --> You
-  Root -- task --> Planner --> Coder --> Gate{Gate<br/>optional}
-  Gate -- fail --> Coder
-  Gate --> Review[Raw review panel<br/>or single Claude SDK reviewer]
-  Review --> Arbiter
-  Arbiter -- changes requested --> Coder
-  Arbiter -- signoff --> Human{{Human signoff}}
-  Human --> Summarizer[Summarizer → memory]
-```
 
 ## See the team converge
 
-![Live office and review evidence from a real offline run](docs/screenshots/office-review.png)
+<a href="docs/screenshots/office-review.png">
+  <img src="docs/screenshots/office-review.png" alt="Pixel office with agents reviewing a real offline run" width="960">
+</a>
+
+*Review in progress. Select the screenshot to view it at full resolution.*
 
 **Give the team a broken function. Watch it test, revise, review, and deliver.**
 The walkthrough starts with an incorrect `add()` implementation. A real pytest Gate catches
@@ -48,7 +34,9 @@ round approves the final diff.
 <details>
 <summary>See the completed run and Gate history</summary>
 
-![Completed run with the failed Gate, passing checks, and reviewer results](docs/screenshots/completed-run.png)
+<a href="docs/screenshots/completed-run.png">
+  <img src="docs/screenshots/completed-run.png" alt="Completed run showing failed and passing Gate checks and reviewer results" width="960">
+</a>
 
 </details>
 
@@ -98,6 +86,24 @@ npm run test:showcase
 - **Observable.** A live pixel office, run timelines, Gate diagnostics and a per-agent token Monitor.
 
 ## Architecture
+
+```mermaid
+flowchart TD
+  You[You] <--> Root[Root conversation]
+  Root --> Planner --> Coder
+  Coder --> Gate{Checks, if configured}
+  Gate -- Fail --> Coder
+  Gate -- Pass or skip --> Review[Reviewers]
+  Review --> Arbiter{Arbiter}
+  Arbiter -- Changes requested --> Coder
+  Arbiter -- Worktree delivery --> Human[Human signoff]
+  Arbiter -- Current checkout --> Done[Done]
+  Human --> Done
+  Done --> Memory[Summarizer and memory]
+```
+
+Root can answer questions directly. Coding tasks follow the loop above. The raw runtime uses a review
+panel; the optional SDK workflow uses a single Claude reviewer.
 
 | Layer | Responsibility | Where |
 |---|---|---|
@@ -355,7 +361,8 @@ AGENTLAB_LIVE_SDK=1 AGENTLAB_TEST_DATABASE_URL=<disposable-postgres-dsn> \
 Provide the raw gateway and native SDK authentication described above. These tests use disposable repositories
 and a disposable database, exercise review-driven repair and signoff, and interrupt processes to verify recovery.
 
-The latest full backend regression run passed **444 tests**, with **3 opt-in live tests skipped**.
+The local backend regression for the recovery fixes passed **415 tests**, with **40 environment-dependent
+tests skipped** (PostgreSQL and live model tests were not enabled). See [the review record](docs/CODE_REVIEW_2026-10-25.md).
 The earlier real SDK acceptance run passed both native SDK scenarios; it predates the final isolation review fixes.
 Those fixes have offline regression coverage for immutable copies, prepared-copy tampering, exported byte hashes,
 legacy reviewer replay protection and CRLF preservation. See [the SDK acceptance record](docs/SDK_HANDOFF_ACCEPTANCE.md)
@@ -386,7 +393,7 @@ You can use English or Chinese in Issues and PRs.
 
 ### Report a bug or suggest an idea
 
-Open an [Issue](https://github.com/Elyon0517/multi-agent-platform/issues/new) with the behavior you expected, what actually happened, steps to reproduce,
+Open an [Issue](https://github.com/Elyon0517/Multi-Agent-Platform/issues/new) with the behavior you expected, what actually happened, steps to reproduce,
 and relevant OS/runtime versions. Include a minimal example or redacted logs/screenshots when useful.
 Please remove API keys, `.env` contents, private repository code and personal data before sharing.
 For ideas, describe the problem and how the proposed change would help.
@@ -396,9 +403,9 @@ For ideas, describe the problem and how the proposed change would help.
 1. Fork this repository on GitHub and clone your fork locally. Add the original repository as `upstream`:
 
    ```bash
-   git clone https://github.com/<your-username>/multi-agent-platform.git
-   cd multi-agent-platform
-   git remote add upstream https://github.com/Elyon0517/multi-agent-platform.git
+   git clone https://github.com/<your-username>/Multi-Agent-Platform.git
+   cd Multi-Agent-Platform
+   git remote add upstream https://github.com/Elyon0517/Multi-Agent-Platform.git
    git fetch upstream
    git switch -c contribute/describe-your-change upstream/main
    ```
@@ -420,15 +427,15 @@ For ideas, describe the problem and how the proposed change would help.
    git push -u origin contribute/describe-your-change
    ```
 
-6. On GitHub, select **Compare & pull request** (or [**Pull requests → New pull request**](https://github.com/Elyon0517/multi-agent-platform/compare)). Choose this
+6. On GitHub, select **Compare & pull request** (or [**Pull requests → New pull request**](https://github.com/Elyon0517/Multi-Agent-Platform/compare)). Choose this
    repository’s `main` as the base and your fork/branch as the head. Use a clear title and explain the problem,
    the resulting behavior and how you tested it. Link related Issues (for example, `Fixes #123`) and include
    screenshots for UI changes. Open a **Draft PR** if you would like early feedback.
 7. Respond to review comments and push follow-up commits to the same branch; the PR updates automatically.
    Wait for the repository checks and maintainer review before merging.
 
-还不确定从哪里开始？可以先从文档、复现问题或补充测试入手，也欢迎开 Issue 讨论。提交 PR 时请说明
-“解决了什么问题、做了哪些改动、如何验证”，涉及界面变化时附上截图；尚未完成的想法可以先提交 Draft PR。
+Not sure where to start? Try improving documentation, reproducing a reported issue or adding a regression
+test. Open an Issue to discuss an idea, or a Draft PR to get feedback on work in progress.
 
 ## Credits
 
