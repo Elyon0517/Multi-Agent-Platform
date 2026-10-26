@@ -12,9 +12,16 @@ Python 3.12+ · Node 22.12+ · Alpha
 
 Find this useful? Give it a star ⭐
 
-[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [SDK workflow](#native-sdk-workflow-route-b) · [Testing](#testing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
+[Architecture](#architecture) · [Setup](#setup) · [Usage](#usage) · [SDK workflow](#native-sdk-workflow-route-b) · [Testing](#testing) · [Contributing](#contributing) · [Design doc](docs/DISCOVERY.md) · [Acceptance checklist](docs/ACCEPTANCE.md)
 
 </div>
+
+> **Let’s build this together.** This project is still in Alpha: features, workflows and documentation are
+> evolving, and there are rough edges. Contributions of all sizes are welcome, including bug reports, tests,
+> documentation, design ideas and code. See [Contributing](#contributing) to get started.
+>
+> **欢迎一起共创！** 项目目前还在早期阶段，功能、交互和文档都还不够完善，欢迎大家一起探索、反馈问题、
+> 改进体验。无论是修复一个小 bug、补充测试或文档，还是提出新想法，都非常欢迎；参与方式见下方贡献指南。
 
 ```mermaid
 flowchart LR
@@ -81,8 +88,9 @@ npm run test:showcase
   no blocking or major findings, or the loop escalates to you.
 - **Deterministic control.** Revision checks, retries, convergence, oscillation detection, routing and approvals are
   plain Python, never delegated to a model.
-- **Human signoff.** Coding deliveries require your approval. The signoff card shows the goal and acceptance criteria,
-  automated check results (or "no automated tests were run") and any remaining findings.
+- **Delivery review.** Worktree deliveries require your approval before integration. Current-checkout runs
+  finish automatically after the configured checks and review. The signoff report shows the goal and acceptance
+  criteria, automated check results (or "no automated tests were run") and any remaining findings.
 - **Memory that learns.** Global, project and per-agent memory; a summarizer turns your feedback and review
   findings into versioned lessons. Upload documents (PDF / Markdown / text) for retrieval-augmented answers.
 - **Local first.** Your repository stays on your machine. Embeddings and reranking run on local CPU models by
@@ -105,7 +113,8 @@ npm run test:showcase
 
 **Run states.** `PLANNING → CODING → GATING → REVIEWING → ARBITRATING → WAITING_HUMAN → DONE`. Projects without a
 matching Gate skip `GATING`. Failures, conflicts and oscillation pause in `WAITING_HUMAN`.
-Coding deliveries complete after signoff; read-only reports can complete without a code approval.
+Worktree coding deliveries complete after human signoff; current-checkout deliveries approve signoff automatically.
+Read-only reports can complete without a code approval.
 
 Code diffs, Gate results, reviewer results and signoff approvals carry the same source revision.
 If source files change during checks, review or an approval pause, the run pauses with `workspace_changed`;
@@ -214,7 +223,8 @@ container. Projects can also configure check commands. Projects without a matchi
 2. **Talk to Root** in the project conversation. Ask questions ("what is uncommitted on this branch?") or request
    work ("fix calc.add so the tests pass"). Say "answer only" or "go ahead and change it" to steer.
 3. **Watch** the office, the run timeline and Gate diagnostics; progress and approvals also appear in the chat.
-4. **Decide** on the signoff card: approve, reject with feedback (the team iterates), or abort.
+4. **Decide** when a run pauses: approve, reject with feedback (the team iterates), or abort. Worktree
+   deliveries pause for signoff; current-checkout deliveries complete automatically after checks and review.
 5. **Memory** tab: upload documents globally or per project, test retrieval and rebuild vectors.
    **Monitor** shows cumulative tokens and estimated cost per agent across projects.
 6. **⚙ Agent configuration** (console header) edits the current project's dispatch mode, models and
@@ -367,6 +377,58 @@ Workspace images in project conversations and task Markdown previews load from t
 PNG, JPEG, GIF, WebP, BMP, ICO, AVIF and SVG are supported up to 10 MiB. Symlink paths and credential files are not previewed.
 Interrupted external tool calls remain unresolved until their external result is checked; confirming or closing a record never runs the tool again.
 Docker checks mask nested environment files, keys and credential directories. LocalSandbox runs directly on the host and does not provide this filesystem isolation.
+
+## Contributing
+
+First-time contributors are welcome. Small fixes and documentation improvements can go straight to a PR;
+for larger features or architecture changes, please open an Issue first so we can discuss the scope.
+You can use English or Chinese in Issues and PRs.
+
+### Report a bug or suggest an idea
+
+Open an [Issue](https://github.com/Elyon0517/multi-agent-platform/issues/new) with the behavior you expected, what actually happened, steps to reproduce,
+and relevant OS/runtime versions. Include a minimal example or redacted logs/screenshots when useful.
+Please remove API keys, `.env` contents, private repository code and personal data before sharing.
+For ideas, describe the problem and how the proposed change would help.
+
+### Open a pull request
+
+1. Fork this repository on GitHub and clone your fork locally. Add the original repository as `upstream`:
+
+   ```bash
+   git clone https://github.com/<your-username>/multi-agent-platform.git
+   cd multi-agent-platform
+   git remote add upstream https://github.com/Elyon0517/multi-agent-platform.git
+   git fetch upstream
+   git switch -c contribute/describe-your-change upstream/main
+   ```
+
+   Replace `<your-username>` with your GitHub username. If you already have write access, you can use
+   a branch in the original repository instead of a fork.
+2. Follow [Setup](#setup), install development dependencies with `uv sync`, and run `npm --prefix ui ci`
+   if you are working on the console. The offline demo is a useful starting point without model credentials.
+3. Keep the PR focused on one change. Add a regression test for behavior fixes, update relevant documentation,
+   and follow the existing code style. If the API changes, regenerate frontend types as described in [Testing](#testing).
+4. Run the relevant checks in [Testing](#testing). Backend changes should pass pytest, Ruff and mypy;
+   frontend changes should pass tests, API type checks and the production build. Explain any skipped checks
+   and their reason. Live model tests are opt-in and may incur costs; they are not needed for every contribution.
+5. Commit and push your branch:
+
+   ```bash
+   git add <changed-files>
+   git commit -m "Describe the change"
+   git push -u origin contribute/describe-your-change
+   ```
+
+6. On GitHub, select **Compare & pull request** (or [**Pull requests → New pull request**](https://github.com/Elyon0517/multi-agent-platform/compare)). Choose this
+   repository’s `main` as the base and your fork/branch as the head. Use a clear title and explain the problem,
+   the resulting behavior and how you tested it. Link related Issues (for example, `Fixes #123`) and include
+   screenshots for UI changes. Open a **Draft PR** if you would like early feedback.
+7. Respond to review comments and push follow-up commits to the same branch; the PR updates automatically.
+   Wait for the repository checks and maintainer review before merging.
+
+还不确定从哪里开始？可以先从文档、复现问题或补充测试入手，也欢迎开 Issue 讨论。提交 PR 时请说明
+“解决了什么问题、做了哪些改动、如何验证”，涉及界面变化时附上截图；尚未完成的想法可以先提交 Draft PR。
 
 ## Credits
 

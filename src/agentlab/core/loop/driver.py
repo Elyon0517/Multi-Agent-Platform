@@ -238,7 +238,11 @@ class Driver:
         """Explicitly reopen a read-only report without losing its history or raising limits."""
         if not feedback.strip():
             raise ValueError("revision feedback is required")
-        with self.store.lock_run(run_id), self._atomic():
+        with (
+            self.store.lock_run(run_id),
+            self.store.lock_run("workspace:" + str(self.workspace.root)),
+            self._atomic(),
+        ):
             self._reload_checkpoint(run_id)
             run = self.store.get_run(run_id)
             if run.status != S.DONE or not self.store.artifacts(run_id, "report"):
@@ -248,6 +252,7 @@ class Driver:
             revisions = self.recovery_options.get("report_revisions", 0)
             if revisions >= run.max_iter:
                 raise ValueError("report revision limit reached")
+            self._check_workspace_available()
             # Validate all source access before committing any revision state.
             for path in {r.claim_path for r in contract.requirements} | set(contract.source_paths):
                 self.workspace.source_text(path)
