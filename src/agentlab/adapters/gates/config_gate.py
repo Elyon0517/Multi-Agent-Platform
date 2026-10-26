@@ -77,7 +77,10 @@ class ConfigGate:
 
     async def run(self, workspace: Path, mode: GateMode) -> GateResult:
         steps: list[GateStepResult] = []
-        for step in (s for s in self.cfg.steps if mode in s.modes):
+        selected = [step for step in self.cfg.steps if mode in step.modes]
+        if not selected:
+            raise ValueError(f"gate {self.language} has no checks configured for {mode.value}")
+        for step in selected:
             res = await self._sandbox.exec(step.argv, workspace, step.timeout_s, image=self.cfg.image)
             text = f"{res.stdout}\n{res.stderr}"
             log_ref = self._store_log(text) if self._store_log and len(text) > LOG_TAIL_CHARS else None
