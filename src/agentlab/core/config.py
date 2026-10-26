@@ -136,14 +136,14 @@ class GateStepCfg(Strict):
     name: str
     argv: list[str] = Field(min_length=1)
     timeout_s: int = Field(gt=0)
-    modes: list[GateMode]
+    modes: list[GateMode] = Field(min_length=1)
 
 
 class GateCfg(Strict):
     language: str
     image: str
     markers: list[str]
-    steps: list[GateStepCfg]
+    steps: list[GateStepCfg] = Field(min_length=1)
 
 
 class PolicyCfg(Strict):

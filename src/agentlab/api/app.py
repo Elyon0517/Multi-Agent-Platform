@@ -151,7 +151,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
             drivers.pop(identifier, None)
         return {"deleted": True}
 
-    def spawn(driver: Driver, run_id: str) -> None:
+    def spawn(driver: Driver, run_id: str) -> asyncio.Task[Run]:
         task = asyncio.create_task(driver.run(run_id))
         tasks.add(task)
         run_tasks[run_id] = task
@@ -164,6 +164,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
                 log.error("background run %s failed: %s", run_id, type(error).__name__)
 
         task.add_done_callback(finished)
+        return task
 
     def get_run(run_id: str) -> Run:
         try:
@@ -484,9 +485,16 @@ def create_app(svc: Services | None = None) -> FastAPI:
     async def resume(run_id: str) -> Run:
         get_run(run_id)
         try:
+            if (task := run_tasks.get(run_id)) is not None and not task.done():
+                raise RunBusy(run_id)
             driver = svc.restore_driver(run_id)
             drivers[run_id] = driver
-            return await driver.run(run_id)
+            return await spawn(driver, run_id)
+        except asyncio.CancelledError as exc:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            raise HTTPException(409, "run execution was cancelled") from exc
         except Exception as exc:
             raise HTTPException(409, f"resume failed: {type(exc).__name__}") from exc
 
