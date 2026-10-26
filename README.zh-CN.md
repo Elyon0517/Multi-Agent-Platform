@@ -1,17 +1,38 @@
-# Multi-Agent Platform
+<h1 align="center">Multi-Agent Platform</h1>
 
-[English](README.md) · **简体中文**
+<p align="center">
+  <strong>一个对话入口，一支经过评审的团队，最终由你决定。</strong>
+</p>
 
-**一个对话入口，一支经过评审的团队，最终由你决定。**
+<p align="center">
+  在本地仓库中协作开发，用像素办公室展示团队进度。<br>
+  从规划、编码到检查与评审，串起完整的开发流程。
+</p>
 
-与 Root 智能体讨论本地仓库：问题可以直接回答，开发任务则交给规划、编码、自动检查和评审流程，
-并在像素办公室中展示进度。可使用原始 API 运行时的多模型评审，也可选择 Codex SDK 编码、Claude Agent SDK 评审。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/Node.js-22.12%2B-339933?logo=nodedotjs&amp;logoColor=white" alt="Node.js 22.12+">
+  <img src="https://img.shields.io/badge/status-Alpha-orange" alt="Alpha">
+</p>
 
-Python 3.12+ · Node 22.12+ · Alpha 早期版本
+<p align="center">
+  <a href="README.md">English</a> · <strong>简体中文</strong>
+</p>
 
-如果这个项目对你有帮助，欢迎点一个 Star ⭐
+<p align="center">
+  <a href="#看团队如何完成任务">演示</a> ·
+  <a href="#安装">安装</a> ·
+  <a href="#使用">使用</a> ·
+  <a href="#架构">架构</a> ·
+  <a href="#测试">测试</a> ·
+  <a href="#参与贡献">参与贡献</a><br>
+  <a href="#原生-sdk-工作流">SDK 工作流</a> ·
+  <a href="docs/DISCOVERY.md">设计文档</a> ·
+  <a href="docs/ACCEPTANCE.md">验收清单</a>
+</p>
 
-[架构](#架构) · [安装](#安装) · [使用](#使用) · [SDK 工作流](#原生-sdk-工作流) · [测试](#测试) · [参与贡献](#参与贡献) · [设计文档](docs/DISCOVERY.md) · [验收清单](docs/ACCEPTANCE.md)
+---
 
 > **欢迎一起共创！** 项目目前仍处于 Alpha 阶段，功能、交互和文档都还在完善。
 > 无论是反馈问题、修复缺陷、补充测试和文档，还是提出设计想法，都非常欢迎。
