@@ -123,7 +123,7 @@ Root 可以直接回答问题；编码任务进入上述循环。原始 API 运�
 | Root 会话 | 意图路由、只读工具、流式回复 | `src/agentlab/core/session/` |
 | 循环驱动 | 状态机、收敛、振荡检测、仲裁与检查点 | `src/agentlab/core/loop/` |
 | 模型调用 | 角色与模型别名路由、重试、回退、结构化输出修复 | `src/agentlab/core/llm/`、`config/model_policy.yaml` |
-| 运行时 | 原始 API、可选的原生 SDK、离线模拟 | `src/agentlab/adapters/runtime/` |
+| 运行时 | 原始 API、可选的 Google ADK、可选的原生 SDK、离线模拟 | `src/agentlab/adapters/runtime/` |
 | 自动检查与沙箱 | 可选的客观检查，内置 Python 检查，支持 Docker 或本地执行 | `src/agentlab/adapters/gates/`、`docker/` |
 | 存储 | PostgreSQL 按项目隔离 schema、内容寻址文件、Git 快照 | `src/agentlab/adapters/store/`、`.agentlab/` |
 | 记忆 | BM25 与向量混合检索、重排、总结和版本记录 | `src/agentlab/core/memory/` |
@@ -301,6 +301,24 @@ Claude 使用另一个绑定源码版本的只读副本。仅允许读取、匹�
 参考：[Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)、[Claude Agent SDK for Python](https://code.claude.com/docs/en/agent-sdk/python)。
 真实 SDK 交接、进程中断恢复和 JSONB 身份回归的验证见 [SDK 验收记录](docs/SDK_HANDOFF_ACCEPTANCE.md)。
 
+## Google ADK 运行时
+
+可以用 [Google ADK](https://google.github.io/adk-docs/) 代替自研循环来执行智能体。确定性的循环驱动仍然决定
+谁在何时运行、任务如何收敛；ADK 只负责把每个智能体运行完成。
+
+```bash
+uv sync --extra adk
+uv run --extra adk agentlab run 'Fix the failing test' --workspace /absolute/path/to/repo --runtime adk
+# 启动 API 与界面所需的服务：
+AGENTLAB_RUNTIME=adk uv run --extra adk agentlab serve
+```
+
+每个角色以 ADK `LlmAgent` 运行，三人评审团在一次 ADK `Workflow` 扇出中并行执行，每位评审者使用独立分支。
+模型调用沿用原始运行时的网关、凭据、模型别名、回退、重试、预算与用量记账，工具沿用相同的授权与审批。
+网关收到的请求与原始运行时一致，只是 ADK 会在系统提示词末尾追加一行身份说明。
+未安装 `adk` 依赖时，`--runtime adk` 会报错并提示安装命令，不会回退到原始运行时。
+设计说明见 [`docs/ADK_RUNTIME.md`](docs/ADK_RUNTIME.md)。
+
 ## 测试
 
 ```bash
@@ -368,7 +386,7 @@ AGENTLAB_LIVE_SDK=1 AGENTLAB_TEST_DATABASE_URL=<disposable-postgres-dsn> \
 - 内置自动检查覆盖 Python，其他项目需要自行配置检查命令。
 - 向量排序在 Python 中完成，pgvector SQL 索引仍在规划中。
 - 项目 schema 用于数据分离、导出和删除；访问控制依赖应用层过滤。
-- ADK 运行时与 LiteLLM 虚拟密钥尚未实现。
+- LiteLLM 虚拟密钥尚未实现。
 
 路线图见[设计文档](docs/DISCOVERY.md)第 16 节。
 

@@ -124,4 +124,8 @@ class AgentLabLlm(BaseLlm):
                 )))
             if completion.provider_content:
                 self.state.provider_content[completion.tool_calls[0]["id"]] = completion.provider_content
-        yield LlmResponse(content=types.Content(role="model", parts=parts), turn_complete=True)
+        # Token counts feed ADK telemetry only; AgentLab's own accounting was done by metered_call.
+        tokens = types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=completion.tokens_in, candidates_token_count=completion.tokens_out,
+            total_token_count=completion.tokens_in + completion.tokens_out)
+        yield LlmResponse(content=types.Content(role="model", parts=parts), usage_metadata=tokens, turn_complete=True)

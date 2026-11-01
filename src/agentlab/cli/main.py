@@ -302,7 +302,7 @@ def show(run_id: str) -> None:
 @app.command("eval")
 def evaluate_baseline(
     manifest: Annotated[Path, typer.Option()] = Path("evals/baseline.json"),
-    runtime: Annotated[str, typer.Option(help="fake | raw")] = "fake",
+    runtime: Annotated[str, typer.Option(help="fake | raw | adk")] = "fake",
     output: Annotated[Path | None, typer.Option()] = None,
     task_timeout: Annotated[
         float, typer.Option(min=0.001, help="Total seconds allowed per task, including Gate")

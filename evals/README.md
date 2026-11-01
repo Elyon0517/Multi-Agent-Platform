@@ -15,7 +15,8 @@ Scorecards contain checks (`name`, `passed`, `severity`, `gate`, `source_type`, 
 and the DISCOVERY P8 summary fields. Hard failures yield exit code 1; soft failures
 only increment warnings. JSON output is suitable for CI and comparisons.
 
-`--runtime raw` exercises the configured gateway and prompts. This performs paid model
+`--runtime raw` exercises the configured gateway and prompts; `--runtime adk` runs the same agents through
+Google ADK (requires `uv sync --extra adk`; comparison in `docs/ADK_RUNTIME.md` §9). This performs paid model
 calls and changes only disposable fixture copies. Both eval and smoke create workspaces
 under `~/.agentlab-workspaces`, outside the application Git checkout and visible to
 Colima. Raw eval uses the Docker sandbox; fake eval uses the local sandbox. Fake mode validates orchestration,

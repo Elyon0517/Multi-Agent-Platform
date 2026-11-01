@@ -1,6 +1,6 @@
 # ADK Runtime 设计方案（Route C）
 
-> 状态：P1–P3 已实现；P4（文档与 eval 对比）待做。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
+> 状态：P1–P4 已实现。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
 
 ## 1. 目标与边界
 
@@ -183,7 +183,7 @@ Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和
 | 单元 | `run_parallel`：整个面板只有一次 ADK invocation；一个 reviewer 重试耗尽、一个需要 repair 时，`ParallelFailure` 的原因与已完成结果、每个 reviewer 收到的请求都与 raw 一致 |
 | 契约 | `tests/unit/test_adk_runtime.py`：同一组 gateway 回复分别喂给 raw 与 ADK，比较 gateway 收到的每次请求、工具执行、usage、attempt 与最终 `AgentResult` |
 | 端到端 | `tests/unit/test_acceptance_cross_provider.py` 的 Driver 场景按 `raw` / `adk` 参数化：跨厂商交接、Claude 故障回退 GPT、缺少凭证暂停 |
-| 离线 eval | `evals/baseline.json` 分别用 `--runtime raw` 与 `--runtime adk` 跑，对比成功率与成本 |
+| 真实 eval | `evals/baseline.json` 分别用 `--runtime raw` 与 `--runtime adk` 跑，对比成功率与成本（结果见 §9） |
 | live（可选） | `tests/live/` 增加一条 ADK 真实网关冒烟测试，默认跳过 |
 
 未安装 `google-adk` 时，选择 `adk` 必须给出明确错误（沿用现有 `AdkUnavailable`），不能静默回退到 raw。
@@ -194,3 +194,18 @@ Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和
 2. **P2 单角色**：`AgentLabLlm` + `agents.py` + `tools.py` + `output.py`，`run_agent` 跑通 planner / coder / summarizer / root。
 3. **P3 评审团**：`run_parallel` 改用 ADK `Workflow` 扇出（`ParallelAgent` 已 deprecated），补齐部分失败语义和契约测试。
 4. **P4 文档与 eval**：README 中英文增加 runtime 说明，跑 raw vs adk 对比 eval，更新 DISCOVERY.md。
+
+## 9. raw vs adk 对比（2026-11-01）
+
+同一网关、同一配置，`uv run agentlab eval --runtime raw|adk`（Docker 沙箱，真实模型调用）各跑一次：
+
+| | raw | adk |
+|---|---|---|
+| 通过 | 18 / 18 | 18 / 18 |
+| 10 个修复任务总成本 | 192.0¢ | 209.1¢ |
+| 单任务成本范围 | 7.7–24.8¢ | 8.6–29.7¢ |
+
+两条路线都全部通过（10 个修复任务、5 个 Root 对话、3 个记忆用例），且都停在人工签核、保留原测试、三人评审齐全。
+成本差约 9%，但单任务在两条路线间来回波动最多约 2 倍（如 `py-fix-absolute` 7.7¢ vs 18.6¢、`py-fix-minimum` 21.7¢ vs 8.6¢），
+单次运行不足以区分；能确定的结构性差异只有 ADK 在 system prompt 末尾追加的一行身份说明。
+

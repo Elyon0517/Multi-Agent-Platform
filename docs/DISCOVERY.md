@@ -661,7 +661,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | P1 | S0 Walking Skeleton（接真实 LLM + Docker 沙箱） | **已完成** | 网关已配置，Python 固定任务验证通过 |
 | P2 | S1 持久化 + 断点续跑 | 已完成 | PostgreSQL / Alembic / CLI 恢复 / kill -9 验证 |
 | P2.5 | Root 会话层：回答 / 澄清 / 任务分流（v1.6，§2.5） | 已完成 | 工具循环、逐条消息、SSE、共享 run service、进度 / 审批 / 总结；fake 与真实网关验收 |
-| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；外部 MCP（GitHub、Fetch）已接入（v1.10，§16.6）；ADK 尚未完成 |
+| P3 | S2 评审团真实化 + HIL 完整 | 部分 | 并行 / 仲裁逻辑、ASK ME 回答流已完成；Raw 工具白名单已强制执行；外部 MCP（GitHub、Fetch）已接入（v1.10，§16.6）；ADK 运行时已接入（`--runtime adk`，ADR-037） |
 | P4 | S5a 可视化 v0 | **完成** | Office Floor、Monitor、Gate 诊断表与 FastAPI 生成 TS 类型均已接线 |
 | P5 | ~~S3 多语言 Gate~~ → Gate 可选（v1.9，ADR-029） | 完成 | 取消 TS / Java / C++ 镜像；改为无 Gate 时跳过 GATING，终审标明未经过自动测试 |
 | P6 | S4 Memory + Project 化 | **部分（提前）** | 三层记忆版本与项目设置已落 Postgres；项目私有文档、embedding model/version/dimensions 元数据、关键词/混合选择和 YAML 配置导入导出已接线；summarizer 与删除项目已完成（v1.8，§9.1）；本地 embedding / rerank 已完成（v1.9，§7.4）；pgvector 索引与完整记忆导入导出未做 |
@@ -746,7 +746,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 | 删除项目 | DELETE API + 控制台确认按钮；清除项目 schema、路由、缓存与快照，独占 blobs 删除、共享引用保留；未结束 run 拒绝删除 | 已完成 |
 | 工具白名单 `tool_grants` | 已强制执行：Coder 读写 / Gate，其余角色只读 / 记忆 | P3 |
 | 危险操作卡点 `dangerous_ops_require_approval` | 工作区越界写已走审批；（v1.10）MCP 写操作（建 PR、评论等）须在对话中批准后才执行（§16.6）；agent 本身仍不能执行 shell / git 写命令 | P3 |
-| `AdkRuntime` | 仅占位，调用即 NotImplementedError | P3 |
+| `AdkRuntime` | 已实现（`--runtime adk`，可选依赖 `adk`）：角色为 `LlmAgent`，评审团为一次 `Workflow` 扇出；模型调用、重试、预算与记账与 raw 共用，见 [ADK_RUNTIME.md](ADK_RUNTIME.md) | 已完成 |
 | Gate 镜像 | Python 镜像与 Docker Gate 已实测；其余语言不再建镜像，无 Gate 时跳过（v1.9，ADR-029） | P5 |
 | Gate 诊断表、成本看板 | file:line / code / message / 日志尾部与 Monitor 已接线 | 已完成 |
 | `step.prompt_ref / response_ref` | prompt / response 内容寻址并落库；逐 attempt 可追溯 | 已完成 |
@@ -805,7 +805,7 @@ FastAPI 导出 OpenAPI → `openapi-typescript` 生成 TS 类型，前后端 sch
 - [ ] supervisor 接入：仅在 policy 允许处做调度 / override 决策，决策写 `routing_reason`
 - [x] Raw function calling 工具层 + `tool_grants` 强制；Coder 读写 / Gate，其他角色只读 / 记忆；越界写仍走 approval。外部 MCP 接入见 §16.6（v1.10）
 - [ ] LiteLLM Proxy + per-project virtual key
-- [ ] `AdkRuntime`（ParallelAgent + before_model_callback 熔断）
+- [x] `AdkRuntime`（2026-11-01，ADR-037）：评审团改用 `Workflow` 扇出（ADK 2.11 已弃用 `ParallelAgent`）；熔断沿用 raw 的预算预留（`metered_call`），不另设 callback
 - 演示：一个带安全隐患的改动，三方结果并排展示
 
 #### P4 · S5a 可视化 v0 收尾（0.5–1 天）
@@ -1116,6 +1116,7 @@ workspace 子目录边界已在 P2 修复：`ensure_repo` 使用 `git rev-parse 
 | ADR-034 | 接入 MCP（Model Context Protocol）工具服务器：GitHub 与 Fetch，配置在 `config/mcp.yaml`；只读工具自动允许、写操作在对话中批准后执行；Root 与 planner 可用，planner 仅只读 | 2026-10-10 | 用户要求像 Codex / Claude Code 一样具备 GitHub 与网页访问，并在需要时请求权限；用户选择「只读自动允许，写操作才问」和「Root + planner」 |
 | ADR-035 | 空交付立即暂停并显示 coder 的原因；任务可随时停止（对话中发送按钮变为停止）；coder 获得只读 GitHub / Fetch；项目可配置检查命令作为 Gate，在 worktree 中用本机工具链运行并链接 `node_modules`；reviewer 不得仅因缺少检查输出而阻止 | 2026-10-11 | 真实任务 6 轮空 diff、约 417 美分；用户要求「适当开放权限，让多 agent 能真正帮我开发」，并要求像 Claude / Codex 一样提供停止按钮 |
 | ADR-036 | 默认分支模式：agent 直接编辑用户仓库（在 main / master 上先切到 `agentlab/<run-id>`），worktree 隔离改为项目可选；仅执行中的任务占用仓库；待用户决定的事项（审批、退回、预算、外部工具请求）统一显示在对话底部、输入框上方，移除 Ask Me 标签和 Office 下方的审批栏；删除有任务的对话时可先停止任务 | 2026-10-11 | 用户希望像 Codex / Claude 一样在 IDE 中实时看到改动，而不是等终审后才应用；审批藏在 Ask Me 与可视化区域里不易发现 |
+| ADR-037 | ADK 运行时（Route C）：Driver 不变，ADK 只执行 agent；模型调用、重试、预算、记账与工具授权复用 raw 的共享原语，网关请求与 raw 一致；评审团用 `Workflow` 扇出，失败隔离后仍交回已完成的评审 | 2026-11-01 | 用户希望在自研 multi-agent 之外增加 Google ADK 分工且架构清晰；ADK 2.11 弃用 `ParallelAgent`，且其失败即全部中止 |
 
 
 ### 可靠性复核补充（2026-10-09）

@@ -122,7 +122,7 @@ flowchart TD
   Done --> Memory[Summarizer and memory]
 ```
 
-Root can answer questions directly. Coding tasks follow the loop above. The raw runtime uses a review
+Root can answer questions directly. Coding tasks follow the loop above. The raw and ADK runtimes use a review
 panel; the optional SDK workflow uses a single Claude reviewer.
 
 | Layer | Responsibility | Where |
@@ -132,7 +132,7 @@ panel; the optional SDK workflow uses a single Claude reviewer.
 | Root session | Intent routing (answer / clarify / task), read-only tools, streamed replies | `src/agentlab/core/session/` |
 | Loop driver | State machine, convergence, oscillation, arbiter, budget guard, checkpoints | `src/agentlab/core/loop/` |
 | Model access | Role → alias → model routing, retry and fallback, structured output repair | `src/agentlab/core/llm/`, `config/model_policy.yaml` |
-| Runtimes | Raw gateways, optional Codex SDK Coding → Claude Agent SDK Review, offline fake | `src/agentlab/adapters/runtime/` |
+| Runtimes | Raw gateways, optional Google ADK, optional Codex SDK Coding → Claude Agent SDK Review, offline fake | `src/agentlab/adapters/runtime/` |
 | Gate and sandbox | Optional objective checks (built-in Python gate), Docker or local sandbox | `src/agentlab/adapters/gates/`, `docker/` |
 | Storage | PostgreSQL with one schema per project, content-addressed blobs, Git snapshots | `src/agentlab/adapters/store/`, `.agentlab/` |
 | Memory | Hybrid retrieval (BM25 + vectors + rerank), summarizer, versioned items | `src/agentlab/core/memory/` |
@@ -326,6 +326,26 @@ Native SDK references: [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk) and
 
 Real SDK handoff, process-interruption recovery, and the JSONB identity regression are documented in [the SDK acceptance record](docs/SDK_HANDOFF_ACCEPTANCE.md).
 
+## Google ADK runtime (Route C)
+
+[Google ADK](https://google.github.io/adk-docs/) can execute the agents instead of the hand-written loop.
+The deterministic Loop Driver still decides who runs, when, and how a run converges; ADK only runs each
+agent to completion.
+
+```sh
+uv sync --extra adk
+uv run --extra adk agentlab run 'Fix the failing test' --workspace /absolute/path/to/repo --runtime adk
+# API/UI process:
+AGENTLAB_RUNTIME=adk uv run --extra adk agentlab serve
+```
+
+Every role runs as an ADK `LlmAgent`, and the three-reviewer panel runs as one ADK `Workflow` fan-out with
+each reviewer in its own branch. Model calls go through the same gateway, credentials, aliases, fallback,
+retry, budget and usage accounting as the raw runtime, and tools keep the same grants and approvals. The
+gateway receives the same requests as raw, except that ADK appends one identity line to the system prompt.
+Without the `adk` extra, `--runtime adk` fails with an install hint instead of falling back to raw. Design:
+[`docs/ADK_RUNTIME.md`](docs/ADK_RUNTIME.md).
+
 ## Testing
 
 ```bash
@@ -396,7 +416,7 @@ See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full checklist and expect
 - The built-in Gate covers Python; other projects need configured check commands.
 - Vector ranking runs in Python; pgvector SQL indexes are planned.
 - Project schemas separate data for export and deletion; access control is application-level filtering.
-- The ADK runtime and LiteLLM virtual keys are not implemented yet.
+- LiteLLM virtual keys are not implemented yet.
 
 See the roadmap in [`docs/DISCOVERY.md`](docs/DISCOVERY.md) §16.
 
