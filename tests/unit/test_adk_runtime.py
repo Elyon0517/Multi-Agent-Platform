@@ -135,3 +135,57 @@ def test_services_build_adk_on_the_raw_gateway(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setitem(__import__("sys").modules, "agentlab.adapters.runtime.adk", None)
     with pytest.raises(AdkUnavailable):
         svc.runtime("adk")
+
+
+async def test_review_panel_is_one_adk_invocation_with_raw_partial_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import agentlab.adapters.runtime.anthropic as anthropic_runtime
+    import agentlab.adapters.runtime.raw as raw_runtime
+    from agentlab.adapters.runtime.raw import RawRuntime
+    from agentlab.core.llm.retry import ParallelFailure, RetriesExhausted
+    from agentlab.core.schemas import Verdict
+
+    cfg = _quick(_svc(tmp_path).cfg, retries=0)
+    reviewers = ["correctness-reviewer", "arch-reviewer", "test-style-reviewer"]
+    traffic: dict[str, list[dict[str, Any]]] = {}
+
+    async def chat(**kwargs: Any) -> Completion:
+        role = json.loads(kwargs["messages"][0]["content"])["goal"]
+        traffic.setdefault(role, []).append({k: v for k, v in kwargs.items() if k != "system"})
+        if role == "arch-reviewer":
+            raise Retryable("server_error_5xx")
+        if role == "test-style-reviewer" and len(traffic[role]) == 1:
+            return Completion("oops", 4, 2)
+        return Completion(json.dumps({"reviewer_id": role, "verdict": "APPROVE", "findings": [], "summary": "ok"}),
+                          4, 2)
+
+    monkeypatch.setattr(raw_runtime, "OpenAICompatChat", lambda *a, **k: chat)
+    monkeypatch.setattr(anthropic_runtime, "AnthropicChat", lambda *a, **k: chat)
+    raw = RawRuntime(cfg, "http://gpt.test/v1", "k", ("http://claude.test/v1", "k"))
+    invocations = 0
+    invoke = AdkCaller._invoke
+
+    async def counted(self: AdkCaller, root: Any) -> None:
+        nonlocal invocations
+        invocations += 1
+        await invoke(self, root)
+
+    monkeypatch.setattr(AdkCaller, "_invoke", counted)
+    seen = {}
+    for name, runtime in (("raw", raw), ("adk", AdkRuntime(cfg, raw.chat))):
+        traffic.clear()
+        run = Run(id="run-1", goal="g", workspace="/tmp", budget_unlimited=True)
+        inputs = {r: AgentInput(run_id=run.id, iteration=0, goal=r) for r in reviewers}
+        with pytest.raises(ParallelFailure) as failure:
+            await runtime.run_parallel(inputs, Verdict, RunContext(run, lambda _: None))
+        seen[name] = (failure.value, {r: list(calls) for r, calls in traffic.items()})
+
+    (raw_failure, raw_traffic), (adk_failure, adk_traffic) = seen["raw"], seen["adk"]
+    assert invocations == 1  # the whole panel ran as one ADK Workflow invocation
+    assert isinstance(adk_failure.cause, RetriesExhausted) and type(adk_failure.cause) is type(raw_failure.cause)
+    assert [(r.role, r.output, r.alias, r.attempts, r.retry_reasons) for r in adk_failure.results] == [
+        (r.role, r.output, r.alias, r.attempts, r.retry_reasons) for r in raw_failure.results]
+    assert [r.role for r in adk_failure.results] == ["correctness-reviewer", "test-style-reviewer"]
+    # Each reviewer saw only its own input, repair and history: branch isolation matches raw's separate calls.
+    assert adk_traffic == raw_traffic

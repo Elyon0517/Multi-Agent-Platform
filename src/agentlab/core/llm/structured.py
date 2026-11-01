@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -15,7 +15,7 @@ from agentlab.core.ports import RunContext
 from agentlab.core.routing import Override, Route, Router
 from agentlab.core.schemas import AgentInput, AgentResult, Usage
 
-__all__ = ["ChatFn", "Completion", "StructuredCaller", "render_user_message"]
+__all__ = ["CallPlan", "ChatFn", "Completion", "StructuredCaller", "render_user_message"]
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -24,11 +24,48 @@ def render_user_message(inp: AgentInput) -> str:
     return inp.model_dump_json(exclude_none=True, exclude_defaults=True, indent=1)
 
 
+@dataclass(frozen=True)
+class CallPlan:
+    route: Route
+    ctx: RunContext
+    log: AttemptLog
+    usage: Usage
+    recorded: bool
+    started: float
+
+
 class StructuredCaller:
     def __init__(self, cfg: AppConfig, chat: ChatFn) -> None:
         self._cfg = cfg
         self._router = Router(cfg)
         self._chat = chat
+
+    def begin(self, role: str, ctx: RunContext, override: Override | None = None) -> CallPlan:
+        """Resolve tools, route and accounting for one role call; runtimes then try `plan.route.chain` in order."""
+        if ctx.tool_factory:
+            specs, execute = ctx.tool_factory(role)
+            ctx = replace(ctx, tool_specs=specs, execute_tool=execute)
+        accumulator = UsageAccumulator(ctx.record_usage)
+        return CallPlan(self._router.resolve(role, override), replace(ctx, record_usage=accumulator),
+                        AttemptLog(), accumulator.total, ctx.record_usage is not None, time.monotonic())
+
+    def finish(self, plan: CallPlan, role: str, alias: str, output: T, output_type: type[T]) -> AgentResult[T]:
+        route = plan.route
+        result = AgentResult[output_type](  # type: ignore[valid-type]
+            role=role,
+            output=output,
+            alias=alias,
+            model=self._router.model_of(alias),
+            usage=plan.usage,
+            latency_ms=int((time.monotonic() - plan.started) * 1000),
+            attempts=plan.log.count,
+            retry_reasons=plan.log.reasons,
+            routing_reason=route.reason if alias == route.alias else f"fallback_from_{route.alias}",
+            usage_recorded=plan.recorded,
+        )
+        if plan.ctx.on_result:
+            plan.ctx.on_result(result)
+        return result
 
     async def call(
         self,
@@ -38,35 +75,12 @@ class StructuredCaller:
         ctx: RunContext,
         override: Override | None = None,
     ) -> AgentResult[T]:
-        if ctx.tool_factory:
-            specs, execute = ctx.tool_factory(role)
-            ctx = replace(ctx, tool_specs=specs, execute_tool=execute)
-        route = self._router.resolve(role, override)
-        recorded = ctx.record_usage is not None
-        accumulator = UsageAccumulator(ctx.record_usage)
-        total_usage = accumulator.total
-        ctx = replace(ctx, record_usage=accumulator)
-        log = AttemptLog()
-        started = time.monotonic()
+        plan = self.begin(role, ctx, override)
         last: Exception | None = None
-        for alias in route.chain:
+        for alias in plan.route.chain:
             try:
-                output, _ = await self._call_alias(route, alias, role, inp, output_type, ctx, log)
-                result = AgentResult[output_type](  # type: ignore[valid-type]
-                    role=role,
-                    output=output,
-                    alias=alias,
-                    model=self._router.model_of(alias),
-                    usage=total_usage,
-                    latency_ms=int((time.monotonic() - started) * 1000),
-                    attempts=log.count,
-                    retry_reasons=log.reasons,
-                    routing_reason=route.reason if alias == route.alias else f"fallback_from_{route.alias}",
-                    usage_recorded=recorded,
-                )
-                if ctx.on_result:
-                    ctx.on_result(result)
-                return result
+                output, _ = await self._call_alias(plan.route, alias, role, inp, output_type, plan.ctx, plan.log)
+                return self.finish(plan, role, alias, output, output_type)
             except RetriesExhausted as e:
                 last = e
         assert last is not None

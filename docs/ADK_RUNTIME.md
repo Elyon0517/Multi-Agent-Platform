@@ -1,6 +1,6 @@
 # ADK Runtime 设计方案（Route C）
 
-> 状态：P1、P2 已实现；P3（`ParallelAgent` 评审团）待实现。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
+> 状态：P1–P3 已实现；P4（文档与 eval 对比）待做。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
 
 ## 1. 目标与边界
 
@@ -12,7 +12,7 @@
 |---|---|
 | 自研 Loop Driver（不改） | 状态机、收敛 / 震荡判定、Arbiter、Gate、人工审批、checkpoint 与断点续跑、revision 绑定 |
 | 自研 core（复用） | 角色 → alias 路由与 fallback、重试分类、预算预留 / 熔断、usage 记账、attempt 记录、工具授权与审批 |
-| ADK（新增） | 单个角色的 agent 执行（模型调用 + 工具循环）、评审团并行（`ParallelAgent`）、生命周期 callbacks |
+| ADK（新增） | 单个角色的 agent 执行（模型调用 + 工具循环）、评审团并行（`Workflow` 扇出）、生命周期 callbacks |
 
 **不做**：不用 ADK 的 `SequentialAgent` / `LoopAgent` 替代 Driver 的主流程。主流程交给 ADK 会出现两套状态机，ADK 的 session 状态也没有 Driver 那样的 checkpoint、revision 绑定和 `WAITING_HUMAN` 语义，断点续跑和审批会失效。DISCOVERY.md §十一已经把这一点列为风险。
 
@@ -23,7 +23,7 @@ flowchart TD
   CLI[CLI / API / Root session] --> Boot[bootstrap.Services.runtime]
   Boot -->|raw| Raw[RawRuntime<br>StructuredCaller + OpenAI/Anthropic]
   Boot -->|sdk| Harness[HarnessRuntime<br>Codex SDK coder + Claude SDK reviewer]
-  Boot -->|adk| Adk[AdkRuntime<br>ADK LlmAgent / ParallelAgent]
+  Boot -->|adk| Adk[AdkRuntime<br>ADK LlmAgent / Workflow]
   Boot -->|fake| Fake[FakeRuntime]
   Driver[Loop Driver] -->|AgentRuntime 协议| Boot
 ```
@@ -55,21 +55,23 @@ adk/__init__.py ──▶ agents.py, model.py, tools.py
 ### 4.1 `AdkRuntime`（`__init__.py`）
 
 ```python
+class RoleAgent(BaseAgent):
+    # 一个角色在 ADK invocation 中的执行单元：
+    # caller.begin() → 对 alias 链逐个 caller.attempt()（RetriesExhausted 换下一个）→ caller.finish()
+    # 结果或异常写入共享 outcomes，不向上抛
+
 class AdkCaller(StructuredCaller):
-    # 继承：工具授权解析、Router alias 链、RetriesExhausted 换 alias、AgentResult 组装、ctx.on_result
-    # 只重写 _call_alias：在一个 alias 上构建 LlmAgent → Runner.run_async，
-    # 取最终文本校验 output_type，失败则在同一 session 追加 repair 消息
+    # 继承 begin / finish：工具授权解析、Router alias 链、usage 累计、AgentResult 组装、ctx.on_result
+    # call()   ：Runner(RoleAgent)                         —— 单角色
+    # panel()  ：Runner(Workflow(START → (RoleAgent, ...)))  —— 评审团，一次 invocation
+    # attempt()：一个 alias 一个 branch：写入该角色的输入事件 → LlmAgent.run_async → 校验，失败在同一 branch 追加 repair
 
 class AdkRuntime:
-    def __init__(self, cfg: AppConfig, chat: ChatFn) -> None: ...
-
-    async def run_agent(self, role, inp, output_type, ctx) -> AgentResult[T]:
-        return await self._caller.call(role, inp, output_type, ctx)
-
-    async def run_parallel(self, inputs, output_type, ctx) -> list[AgentResult[T]]:
-        # 用 ParallelAgent(sub_agents=[每个 reviewer 一个 LlmAgent]) 跑评审团
-        # 部分失败时抛 ParallelFailure(cause, 已完成的 results)，保持 Driver 的部分结果复用
+    async def run_agent(self, role, inp, output_type, ctx):     return await self._caller.call(...)
+    async def run_parallel(self, inputs, output_type, ctx):     # panel()；部分失败抛 ParallelFailure(首个错误, 已完成结果)
 ```
+
+`StructuredCaller.call` 拆成 `begin` / `finish` 两步，raw 与 ADK 共用；raw 的 `call` 行为不变。
 
 - 构造参数与 `RawRuntime` 对齐：bootstrap 把同一个 `chat`（OpenAI 兼容 + 可选 Anthropic）传进来，ADK 路线和 raw 路线共用 gateway 凭证与 `models.yaml`，不需要新的模型配置。
 - 每次调用用一个临时的 `InMemorySessionService` session。ADK session 只是一次调用内的草稿纸，持久状态仍然只在 `Store` 里。
@@ -137,18 +139,22 @@ class GrantedTool(BaseTool):      # 每个 tool spec 一个实例
 
 ```mermaid
 flowchart LR
-  D[Driver: REVIEWING] -->|run_parallel| P[ParallelAgent: review_panel]
-  P --> C[LlmAgent: correctness_reviewer]
-  P --> A[LlmAgent: arch_reviewer]
-  P --> T[LlmAgent: test_style_reviewer]
-  C & A & T -->|output_key → session.state| R[AdkRuntime 收集 Verdict]
+  D[Driver: REVIEWING] -->|run_parallel| W[Workflow: review_panel<br>START 扇出]
+  W --> C[RoleAgent: correctness_reviewer]
+  W --> A[RoleAgent: arch_reviewer]
+  W --> T[RoleAgent: test_style_reviewer]
+  C --> C1[LlmAgent @ branch …correctness_reviewer.strong]
+  A --> A1[LlmAgent @ branch …arch_reviewer.strong-alt]
+  T --> T1[LlmAgent @ branch …test_style_reviewer.cheap]
+  C & A & T -->|outcomes: AgentResult 或异常| R[AdkRuntime]
   R -->|list of AgentResult / ParallelFailure| D
 ```
 
-- 每个 reviewer 设置 `output_key=<role>`，`AdkRuntime` 从 session state 读取各自输出并分别校验。
-- 每个 reviewer 使用自己的 alias（`model_policy.yaml` 中三个 reviewer 本来就分配了不同模型），体现「异构评审」。
-- 单个 reviewer 失败不能连带取消其他 reviewer：每个子 agent 外包一层错误捕获（把异常写入 state 而不是向上抛），最后统一组装 `ParallelFailure(first_error, completed_results)`。这样 Driver 现有的「部分 reviewer 结果复用」逻辑不用改。
-- alias fallback 在 reviewer 层面按角色独立进行：失败的 reviewer 用下一个 alias 单独重跑，不重跑已成功的 reviewer。
+- **用 `Workflow` 而不是 `ParallelAgent`**：ADK 2.11 已把 `ParallelAgent` 标为 deprecated（将被移除），推荐 `Workflow`。`edges=[("START", (reviewer, ...))]` 即并行扇出，语义相同。
+- **历史隔离靠 branch**：每个 reviewer、每次 alias 尝试各占一个 branch，角色输入作为该 branch 的 user 事件写入。reviewer 之间、fallback 前后的历史互不可见，与 raw 路线各自独立调用的请求逐字节一致。
+- **启动消息**：ADK 启动 invocation 必须有一条 `new_message`，它没有 branch，对所有 agent 可见。这里用固定占位文本 `agentlab:start`，并由每个 LlmAgent 的 `before_model_callback` 在构造请求前剔除。
+- **错误隔离**：ADK 中任一节点抛错会终止整个面板，而 Driver 需要复用已完成的 reviewer。`RoleAgent` 捕获异常写入共享 `outcomes`，最后统一组装 `ParallelFailure(first_error, completed_results)`，Driver 的部分结果复用逻辑不变。`outcomes` 字段类型为 `Any`，因为 ADK 会复制 workflow 节点，类型化的 dict 会被 pydantic 复制成新对象。
+- 每个 reviewer 使用自己的 alias（`model_policy.yaml` 中三个 reviewer 本来就分配了不同模型），fallback 按角色独立进行，不重跑已成功的 reviewer。
 
 ## 5. 接入点改动
 
@@ -174,7 +180,7 @@ Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和
 |---|---|
 | 单元 | 用假的 `chat` 驱动 `AgentLabLlm`：重试分类、预算预留与释放、usage 记账、attempt 记录与 raw 路线逐字段一致 |
 | 单元 | `tools.py`：工具调用经过 `execute`，`record_tool` 的 started/completed 事件齐全；未授权工具不可见 |
-| 单元 | `run_parallel`：一个 reviewer 失败时其余结果保留，抛出 `ParallelFailure` |
+| 单元 | `run_parallel`：整个面板只有一次 ADK invocation；一个 reviewer 重试耗尽、一个需要 repair 时，`ParallelFailure` 的原因与已完成结果、每个 reviewer 收到的请求都与 raw 一致 |
 | 契约 | `tests/unit/test_adk_runtime.py`：同一组 gateway 回复分别喂给 raw 与 ADK，比较 gateway 收到的每次请求、工具执行、usage、attempt 与最终 `AgentResult` |
 | 端到端 | `tests/unit/test_acceptance_cross_provider.py` 的 Driver 场景按 `raw` / `adk` 参数化：跨厂商交接、Claude 故障回退 GPT、缺少凭证暂停 |
 | 离线 eval | `evals/baseline.json` 分别用 `--runtime raw` 与 `--runtime adk` 跑，对比成功率与成本 |
@@ -186,5 +192,5 @@ Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和
 
 1. **P1 抽公共调用**：从 `StructuredCaller` 抽出 `metered_call`，raw 路线全部测试保持通过。
 2. **P2 单角色**：`AgentLabLlm` + `agents.py` + `tools.py` + `output.py`，`run_agent` 跑通 planner / coder / summarizer / root。
-3. **P3 评审团**：`run_parallel` 改用 `ParallelAgent`，补齐部分失败语义和契约测试。
+3. **P3 评审团**：`run_parallel` 改用 ADK `Workflow` 扇出（`ParallelAgent` 已 deprecated），补齐部分失败语义和契约测试。
 4. **P4 文档与 eval**：README 中英文增加 runtime 说明，跑 raw vs adk 对比 eval，更新 DISCOVERY.md。
