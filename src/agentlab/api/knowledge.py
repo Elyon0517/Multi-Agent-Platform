@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from agentlab.bootstrap import MissingGatewayConfig, Services
+from agentlab.bootstrap import AdkUnavailable, MissingGatewayConfig, Services
 from agentlab.core.budget import BudgetExceeded
 from agentlab.core.config import AliasCfg
 from agentlab.core.conversation import Conversation
@@ -20,7 +20,7 @@ from agentlab.core.ports import RunBusy
 from agentlab.core.project import Project, ProjectPhase, StepStatus
 from agentlab.core.project_config import Binding, ProjectSettings, project_config, validate_settings
 from agentlab.core.schemas import Strict
-from agentlab.secrets import EDITABLE, SettingView
+from agentlab.secrets import EDITABLE, RuntimeChoice, SettingView
 from agentlab.services import DocumentSummary
 
 
@@ -60,6 +60,10 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 class SettingsBody(BaseModel):
     values: dict[str, str]
+
+
+class RuntimeBody(Strict):
+    runtime: Literal["raw", "adk"]
 
 
 class NoteBody(BaseModel):
@@ -196,6 +200,17 @@ def build_router(svc: Services) -> APIRouter:
         svc.knowledge.memory.verified = False
         svc.knowledge.memory.last_error = None
         return svc.setting_views()
+
+    @r.get("/settings/runtime", response_model=RuntimeChoice)
+    def get_runtime() -> RuntimeChoice:
+        return svc.runtime_choice()
+
+    @r.put("/settings/runtime", response_model=RuntimeChoice)
+    def put_runtime(body: RuntimeBody) -> RuntimeChoice:
+        try:
+            return svc.set_runtime(body.runtime)
+        except AdkUnavailable as e:
+            raise HTTPException(400, str(e)) from e
 
     @r.get("/knowledge", response_model=list[DocumentSummary])
     def list_docs(project_id: str | None = None) -> list[dict[str, Any]]:

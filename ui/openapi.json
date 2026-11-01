@@ -355,6 +355,60 @@
         }
       }
     },
+    "/settings/runtime": {
+      "get": {
+        "summary": "Get Runtime",
+        "operationId": "get_runtime_settings_runtime_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeChoice"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Put Runtime",
+        "operationId": "put_runtime_settings_runtime_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeChoice"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/knowledge": {
       "get": {
         "summary": "List Docs",
@@ -4698,6 +4752,42 @@
           "CANCELLED"
         ],
         "title": "RunStatus"
+      },
+      "RuntimeBody": {
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "adk"
+            ],
+            "title": "Runtime"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "runtime"
+        ],
+        "title": "RuntimeBody"
+      },
+      "RuntimeChoice": {
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "title": "Runtime"
+          },
+          "adk_installed": {
+            "type": "boolean",
+            "title": "Adk Installed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime",
+          "adk_installed"
+        ],
+        "title": "RuntimeChoice"
       },
       "SearchBody": {
         "properties": {

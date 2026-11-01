@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -20,7 +21,7 @@ from agentlab.core.config import AppConfig, GateCfg, GateStepCfg, load_config
 from agentlab.core.loop.driver import Driver
 from agentlab.core.memory.store import InMemoryMemoryStore, PersistentMemoryStore
 from agentlab.core.ports import AgentRuntime, Sandbox, Store
-from agentlab.secrets import EnvFile, SettingView, views
+from agentlab.secrets import RUNTIME_KEY, EnvFile, RuntimeChoice, SettingView, views
 from agentlab.services import KnowledgeService, MemoryHooks, ProjectService
 from agentlab.settings import Settings
 
@@ -166,6 +167,17 @@ class Services:
                 "AGENTLAB_ANTHROPIC_API_KEY": self.anthropic_gateway()[1],
             }
         )
+
+    def runtime_choice(self) -> RuntimeChoice:
+        return RuntimeChoice(runtime=self.settings.runtime, adk_installed=find_spec("google.adk") is not None)
+
+    def set_runtime(self, name: str) -> RuntimeChoice:
+        """Default runtime for new runs and Root turns; saved to .env so it survives a restart."""
+        if name == "adk" and not self.runtime_choice().adk_installed:
+            raise AdkUnavailable("install with: uv sync --extra adk")
+        self.env.update({RUNTIME_KEY: name}, editable=(RUNTIME_KEY,))
+        self.settings.runtime = name
+        return self.runtime_choice()
 
     def runtime(self, name: str | None = None, cfg: AppConfig | None = None) -> AgentRuntime:
         cfg = cfg or self.cfg

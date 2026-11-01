@@ -14,6 +14,7 @@ export type Artifact = components['schemas']['Artifact'];
 export type RunDetail = components['schemas']['RunDetail'];
 export type RosterEntry = components['schemas']['RosterEntry'];
 export type SettingView = components['schemas']['SettingView'];
+export type RuntimeChoice = components['schemas']['RuntimeChoice'];
 export type MemoryScope = components['schemas']['NoteBody']['scope'];
 export type MemoryItem = components['schemas']['MemoryItem'];
 export type MemoryHit = components['schemas']['Hit'];
@@ -163,6 +164,8 @@ export const api = {
     json<components['schemas']['ArtifactContent']>(`/artifacts/${runId}/${artifactId}`),
   settings: () => json<SettingView[]>('/settings'),
   saveSettings: (values: Record<string, string>) => post<SettingView[]>('/settings', { values }, 'PUT'),
+  runtimeChoice: () => json<RuntimeChoice>('/settings/runtime'),
+  saveRuntime: (runtime: 'raw' | 'adk') => post<RuntimeChoice>('/settings/runtime', { runtime }, 'PUT'),
   documents: (projectId?: string) => json<DocumentSummary[]>(`/knowledge${projectId ? '?project_id=' + encodeURIComponent(projectId) : ''}`),
   uploadDocument: (file: File, projectId?: string) => {
     const form = new FormData();

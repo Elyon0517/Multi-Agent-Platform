@@ -109,6 +109,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/runtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Runtime */
+        get: operations["get_runtime_settings_runtime_get"];
+        /** Put Runtime */
+        put: operations["put_runtime_settings_runtime_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge": {
         parameters: {
             query?: never;
@@ -1686,6 +1704,21 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "PLANNING" | "CODING" | "GATING" | "REVIEWING" | "ARBITRATING" | "WAITING_HUMAN" | "DONE" | "CANCELLED";
+        /** RuntimeBody */
+        RuntimeBody: {
+            /**
+             * Runtime
+             * @enum {string}
+             */
+            runtime: "raw" | "adk";
+        };
+        /** RuntimeChoice */
+        RuntimeChoice: {
+            /** Runtime */
+            runtime: string;
+            /** Adk Installed */
+            adk_installed: boolean;
+        };
         /** SearchBody */
         SearchBody: {
             /** Query */
@@ -2196,6 +2229,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_runtime_settings_runtime_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeChoice"];
+                };
+            };
+        };
+    };
+    put_runtime_settings_runtime_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeChoice"];
                 };
             };
             /** @description Validation Error */

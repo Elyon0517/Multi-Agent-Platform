@@ -8,7 +8,13 @@ from pydantic import BaseModel
 SECRET_KEYS = ("AGENTLAB_LLM_API_KEY", "AGENTLAB_EMBEDDING_API_KEY", "AGENTLAB_ANTHROPIC_API_KEY")
 PLAIN_KEYS = ("AGENTLAB_LLM_BASE_URL", "AGENTLAB_EMBEDDING_BASE_URL", "AGENTLAB_ANTHROPIC_BASE_URL")
 EDITABLE = (*SECRET_KEYS, *PLAIN_KEYS)
+RUNTIME_KEY = "AGENTLAB_RUNTIME"  # written only through the runtime setting, never the free-form list
 _LINE = re.compile(r"^\s*([A-Z0-9_]+)\s*=\s*(.*)$")
+
+
+class RuntimeChoice(BaseModel):
+    runtime: str
+    adk_installed: bool
 
 
 class SettingView(BaseModel):
@@ -37,8 +43,8 @@ class EnvFile:
                 out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
         return out
 
-    def update(self, values: dict[str, str]) -> None:
-        unknown = set(values) - set(EDITABLE)
+    def update(self, values: dict[str, str], editable: tuple[str, ...] = EDITABLE) -> None:
+        unknown = set(values) - set(editable)
         if unknown:
             raise KeyError(f"not editable: {sorted(unknown)}")
         if any("\n" in v or "\r" in v for v in values.values()):

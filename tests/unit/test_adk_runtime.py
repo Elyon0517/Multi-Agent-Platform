@@ -23,6 +23,7 @@ from agentlab.core.llm.structured import Completion, StructuredCaller
 from agentlab.core.llm.tools import tool_spec
 from agentlab.core.ports import RunContext
 from agentlab.core.schemas import AgentInput, Plan, Run, Usage
+from agentlab.settings import Settings
 from tests.unit.test_memory_project import _svc
 
 SPECS = [tool_spec("file_list", "List files", {})]
@@ -189,3 +190,27 @@ async def test_review_panel_is_one_adk_invocation_with_raw_partial_results(
     assert [r.role for r in adk_failure.results] == ["correctness-reviewer", "test-style-reviewer"]
     # Each reviewer saw only its own input, repair and history: branch isolation matches raw's separate calls.
     assert adk_traffic == raw_traffic
+
+
+def test_settings_toggle_makes_adk_the_default_for_new_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    import agentlab.bootstrap as bootstrap
+    from agentlab.api.app import create_app
+
+    svc = _svc(tmp_path)
+    monkeypatch.setattr(svc, "gateway", lambda: ("http://gpt.test/v1", "k"))
+    with TestClient(create_app(svc)) as c:
+        assert c.get("/settings/runtime").json() == {"runtime": "fake", "adk_installed": True}
+        assert c.put("/settings/runtime", json={"runtime": "adk"}).json()["runtime"] == "adk"
+        assert isinstance(svc.runtime(), AdkRuntime)
+        assert Settings(_env_file=tmp_path / ".env").runtime == "adk"  # type: ignore[call-arg]  # survives a restart
+        assert c.put("/settings/runtime", json={"runtime": "sdk"}).status_code == 422
+        assert c.put("/settings", json={"values": {"AGENTLAB_RUNTIME": "fake"}}).status_code == 422
+        assert c.put("/settings/runtime", json={"runtime": "raw"}).json()["runtime"] == "raw"
+        assert not isinstance(svc.runtime(), AdkRuntime)
+
+        monkeypatch.setattr(bootstrap, "find_spec", lambda name: None)
+        refused = c.put("/settings/runtime", json={"runtime": "adk"})
+        assert refused.status_code == 400 and "uv sync --extra adk" in refused.text
+        assert c.get("/settings/runtime").json() == {"runtime": "raw", "adk_installed": False}
