@@ -2,34 +2,23 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from agentlab.core.budget import BudgetExceeded, estimate_cents
+from agentlab.core.budget import BudgetExceeded
 from agentlab.core.config import AppConfig
-from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted, call_with_retry
-from agentlab.core.monitor import UsageAccumulator, commit_usage
+from agentlab.core.llm.attempt import ChatFn, Completion, metered_call
+from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted
+from agentlab.core.monitor import UsageAccumulator
 from agentlab.core.ports import RunContext
 from agentlab.core.routing import Override, Route, Router
 from agentlab.core.schemas import AgentInput, AgentResult, Usage
 
+__all__ = ["ChatFn", "Completion", "StructuredCaller", "render_user_message"]
+
 T = TypeVar("T", bound=BaseModel)
-
-
-@dataclass(frozen=True)
-class Completion:
-    text: str
-    tokens_in: int
-    tokens_out: int
-    tool_calls: list[dict[str, Any]] | None = None
-    provider_content: list[dict[str, Any]] | None = None
-    usage_present: bool = True
-
-
-ChatFn = Callable[..., Awaitable[Completion]]
 
 
 def render_user_message(inp: AgentInput) -> str:
@@ -94,7 +83,6 @@ class StructuredCaller:
         ctx: RunContext,
         log: AttemptLog,
     ) -> tuple[T, Usage]:
-        alias_cfg = self._cfg.models.aliases[alias]
         system = self._cfg.prompt(role)
         messages: list[dict[str, Any]] = [{"role": "user", "content": render_user_message(inp)}]
         usage = Usage()
@@ -102,134 +90,15 @@ class StructuredCaller:
         repairs = 0
         while repairs <= self._cfg.retry.structured_output_repair.max_repairs:
             available_tools = ctx.tool_specs
-            prompt_chars = (
-                len(system.encode())
-                + len(json.dumps(schema).encode())
-                + len(json.dumps(available_tools or []).encode())
-                + len(json.dumps(messages, ensure_ascii=False).encode())
-                + 256
+            completion, charged = await metered_call(
+                self._chat, self._cfg, ctx, log,
+                role=role, alias=alias, system=system, messages=messages, schema=schema,
+                temperature=route.temperature,
             )
-            estimate = estimate_cents(alias_cfg, prompt_chars)
-
-            def check_attempt(estimate: float = estimate) -> None:
-                if ctx.reserve_budget:
-                    ctx.reserve_budget(estimate)
-                else:
-                    ctx.check_budget(estimate)
-
-            current_attempt: dict[str, str | None] = {"id": None}
-
-            def timed_out(current_attempt: dict[str, str | None] = current_attempt) -> None:
-                attempt_id = current_attempt["id"]
-                if attempt_id and ctx.attempt_finished:
-                    ctx.attempt_finished(attempt_id, {"status": "failed", "error_kind": "read_timeout"})
-
-            async def attempt(
-                estimate: float = estimate,
-                messages: tuple[dict[str, Any], ...] = tuple(messages),
-                available_tools: list[dict[str, Any]] | None = available_tools,
-                current_attempt: dict[str, str | None] = current_attempt,
-            ) -> Completion:
-                nonlocal usage
-                attempt_id = (
-                    ctx.attempt_started(
-                        {
-                            "role": role,
-                            "alias": alias,
-                            "model": alias_cfg.model,
-                            "prompt": {
-                                "system": system,
-                                "messages": list(messages),
-                                "schema": schema,
-                                "tools": available_tools or [],
-                                "temperature": route.temperature,
-                                "max_output_tokens": alias_cfg.max_output_tokens,
-                                "output_token_parameter": alias_cfg.output_token_parameter,
-                            },
-                        }
-                    )
-                    if ctx.attempt_started
-                    else None
-                )
-                current_attempt["id"] = attempt_id
-                try:
-                    completion = await self._chat(
-                        model=alias_cfg.model,
-                        system=system,
-                        messages=list(messages),
-                        temperature=route.temperature,
-                        schema=schema,
-                        max_output_tokens=alias_cfg.max_output_tokens,
-                        output_token_parameter=alias_cfg.output_token_parameter,
-                        **({"provider": alias_cfg.provider} if alias_cfg.provider != "openai" else {}),
-                        **({"tools": available_tools} if available_tools else {}),
-                        **({"on_delta": ctx.on_delta} if ctx.on_delta else {}),
-                    )
-                    charged = Usage(
-                        tokens_in=completion.tokens_in,
-                        tokens_out=completion.tokens_out,
-                        cost_cents=alias_cfg.cost_cents(completion.tokens_in, completion.tokens_out),
-                    )
-                except LlmError as exc:
-                    charged = Usage(
-                        tokens_in=exc.tokens_in,
-                        tokens_out=exc.tokens_out,
-                        cost_cents=alias_cfg.cost_cents(exc.tokens_in, exc.tokens_out),
-                    )
-                    paid = charged.for_call(
-                        role,
-                        alias,
-                        alias_cfg.model,
-                        attempt_id,
-                        exc.usage_present or bool(exc.tokens_in or exc.tokens_out),
-                    )
-
-                    error_kind = exc.kind
-
-                    def failed() -> None:
-                        if attempt_id and ctx.attempt_finished:
-                            ctx.attempt_finished(
-                                attempt_id,
-                                {
-                                    "status": "failed",
-                                    "error_kind": error_kind,
-                                    "usage": charged.model_dump(mode="json"),
-                                },
-                            )
-
-                    commit_usage(ctx, paid, failed)
-                    raise
-                except BaseException:
-                    commit_usage(ctx, Usage().for_call(role, alias, alias_cfg.model, attempt_id, False))
-                    raise
-                finally:
-                    if ctx.release_budget:
-                        ctx.release_budget(estimate)
-                usage = Usage(
-                    tokens_in=usage.tokens_in + charged.tokens_in,
-                    tokens_out=usage.tokens_out + charged.tokens_out,
-                    cost_cents=usage.cost_cents + charged.cost_cents,
-                )
-
-                def completed() -> None:
-                    if attempt_id and ctx.attempt_finished:
-                        ctx.attempt_finished(
-                            attempt_id,
-                            {
-                                "status": "completed",
-                                "response": completion.text,
-                                "tool_calls": completion.tool_calls,
-                                "usage": charged.model_dump(mode="json"),
-                            },
-                        )
-
-                commit_usage(
-                    ctx, charged.for_call(role, alias, alias_cfg.model, attempt_id, completion.usage_present), completed
-                )
-                return completion
-
-            completion = await call_with_retry(
-                attempt, self._cfg.retry.llm_call, log, check_attempt, on_timeout=timed_out,
+            usage = Usage(
+                tokens_in=usage.tokens_in + charged.tokens_in,
+                tokens_out=usage.tokens_out + charged.tokens_out,
+                cost_cents=usage.cost_cents + charged.cost_cents,
             )
             if completion.tool_calls:
                 if not available_tools:
