@@ -29,6 +29,10 @@ class MissingGatewayConfig(RuntimeError):
     pass
 
 
+class AdkUnavailable(MissingGatewayConfig):
+    pass
+
+
 def gateway_creds(env: EnvFile, settings: Settings) -> tuple[str | None, str | None]:
     values = env.read()
     return (
@@ -175,13 +179,17 @@ class Services:
         url, key = self.gateway()
         if not url or not key:
             raise MissingGatewayConfig("set AGENTLAB_LLM_BASE_URL and AGENTLAB_LLM_API_KEY (Settings tab or .env)")
-        if name == "adk":
-            from agentlab.adapters.runtime.adk import AdkRuntime
-
-            return AdkRuntime(cfg, url, key)
         from agentlab.adapters.runtime.raw import RawRuntime
 
-        return RawRuntime(cfg, url, key, self.anthropic_gateway(cfg))
+        raw = RawRuntime(cfg, url, key, self.anthropic_gateway(cfg))
+        if name == "adk":
+            try:
+                from agentlab.adapters.runtime.adk import AdkRuntime
+            except ImportError as e:  # Missing ADK is an explicit error, never a raw fallback.
+                raise AdkUnavailable("install with: uv sync --extra adk") from e
+            # Same gateway chat as raw: one set of credentials, aliases and provider adapters.
+            return AdkRuntime(cfg, raw.chat)
+        return raw
 
     def _run_runtime(self, name: str | None, cfg: AppConfig, workspace: GitWorkspace | None) -> AgentRuntime:
         if (name or self.settings.runtime) != "sdk":

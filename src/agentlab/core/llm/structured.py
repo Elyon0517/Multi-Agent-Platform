@@ -7,9 +7,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from agentlab.core.budget import BudgetExceeded
 from agentlab.core.config import AppConfig
-from agentlab.core.llm.attempt import ChatFn, Completion, metered_call
+from agentlab.core.llm.attempt import ChatFn, Completion, invoke_tool, metered_call
 from agentlab.core.llm.retry import AttemptLog, LlmError, RetriesExhausted
 from agentlab.core.monitor import UsageAccumulator
 from agentlab.core.ports import RunContext
@@ -114,40 +113,11 @@ class StructuredCaller:
                     }
                 )
                 for tool in completion.tool_calls:
-                    ctx.check_budget(0)
                     function = tool["function"]
-                    entry: dict[str, Any] = {
-                        "id": tool["id"],
-                        "name": function["name"],
-                        "arguments": function["arguments"],
-                        "role": role,
-                    }
-                    if ctx.record_tool:
-                        ctx.record_tool({**entry, "status": "started"})
-                    value: Any
-                    try:
-                        args = json.loads(function["arguments"])
-                        if not isinstance(args, dict):
-                            raise ValueError("arguments must be an object")
-                        value = await ctx.execute_tool(function["name"], args)
-                    except BudgetExceeded:
-                        raise
-                    except Exception as exc:
-                        if isinstance(exc, PermissionError) and role != "root":
-                            if ctx.record_tool:
-                                ctx.record_tool({**entry, "status": "failed", "error": type(exc).__name__})
-                            raise
-                        value = {"error": getattr(exc, "kind", type(exc).__name__)}
-                    result_text = json.dumps(value, ensure_ascii=False)
-                    if len(result_text.encode("utf-8")) > 16384:
-                        value = {
-                            "truncated": True,
-                            "preview": result_text.encode("utf-8")[:7000].decode("utf-8", errors="ignore"),
-                        }
-                        result_text = json.dumps(value, ensure_ascii=False)
-                    if ctx.record_tool:
-                        ctx.record_tool({**entry, "status": "completed", "result": value})
-                    messages.append({"role": "tool", "tool_call_id": tool["id"], "content": result_text})
+                    value = await invoke_tool(ctx, role, tool["id"], function["name"], function["arguments"])
+                    messages.append(
+                        {"role": "tool", "tool_call_id": tool["id"], "content": json.dumps(value, ensure_ascii=False)}
+                    )
                 continue
             try:
                 return output_type.model_validate_json(completion.text), usage

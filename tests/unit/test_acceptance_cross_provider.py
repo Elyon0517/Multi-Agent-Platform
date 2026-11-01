@@ -2,6 +2,7 @@
 
 Both provider clients are replaced by recording fakes, so these tests run offline while still
 exercising the real routing (models.yaml provider → RawRuntime dispatch → StructuredCaller → Driver).
+Each Driver scenario also runs on the ADK runtime, which shares the raw gateway chat.
 """
 
 from __future__ import annotations
@@ -75,9 +76,21 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     return rec
 
 
-async def run_task(cfg: AppConfig, tmp_path: Path, anthropic_creds: tuple[str | None, str | None]) -> Any:
+@pytest.fixture(params=["raw", "adk"])
+def runtime(request: pytest.FixtureRequest) -> str:
+    if request.param == "adk":
+        pytest.importorskip("google.adk")
+    return str(request.param)
+
+
+async def run_task(cfg: AppConfig, tmp_path: Path, anthropic_creds: tuple[str | None, str | None],
+                   runtime: str = "raw") -> Any:
     driver = await make_driver(cfg, tmp_path)
     driver.runtime = RawRuntime(cfg, "http://gpt.test/v1", "k1", anthropic_creds)
+    if runtime == "adk":
+        from agentlab.adapters.runtime.adk import AdkRuntime
+
+        driver.runtime = AdkRuntime(cfg, driver.runtime.chat)
     run = await driver.run(driver.create("make test_add pass").id)
     return driver, run
 
@@ -87,10 +100,10 @@ def models_by_role(driver: Any, run_id: str) -> dict[str, str]:
 
 
 async def test_claude_builds_and_gpt_reviews_the_claude_diff(
-    cfg: AppConfig, tmp_path: Path, recorder: Recorder
+    cfg: AppConfig, tmp_path: Path, recorder: Recorder, runtime: str
 ) -> None:
     mixed = mixed_config(cfg)
-    driver, run = await run_task(mixed, tmp_path, ("http://claude.test/v1/", "k2"))
+    driver, run = await run_task(mixed, tmp_path, ("http://claude.test/v1/", "k2"), runtime)
 
     assert (run.status, run.paused_reason) == (RunStatus.WAITING_HUMAN, "signoff")
     assert models_by_role(driver, run.id) == {
@@ -109,19 +122,23 @@ async def test_claude_builds_and_gpt_reviews_the_claude_diff(
     assert CODE_MARK in (driver.workspace.root / "calc.py").read_text()
 
 
-async def test_claude_outage_falls_back_to_gpt_root(cfg: AppConfig, tmp_path: Path, recorder: Recorder) -> None:
+async def test_claude_outage_falls_back_to_gpt_root(
+    cfg: AppConfig, tmp_path: Path, recorder: Recorder, runtime: str
+) -> None:
     recorder.fail_titles = {"Plan"}
-    driver, run = await run_task(mixed_config(cfg), tmp_path, ("http://claude.test/v1/", "k2"))
+    driver, run = await run_task(mixed_config(cfg), tmp_path, ("http://claude.test/v1/", "k2"), runtime)
 
     planner = next(s for s in driver.store.steps(run.id) if s.role == "planner")
     assert planner.model == GPT and planner.routing_reason.startswith("fallback_from_")
     assert run.paused_reason == "signoff"
 
 
-async def test_missing_claude_key_pauses_instead_of_hanging(cfg: AppConfig, tmp_path: Path, recorder: Recorder) -> None:
+async def test_missing_claude_key_pauses_instead_of_hanging(
+    cfg: AppConfig, tmp_path: Path, recorder: Recorder, runtime: str
+) -> None:
     data = mixed_config(cfg).model_dump(mode="json")
     data["model_policy"]["roles"]["planner"]["fallback"] = []  # no GPT rescue: surface the config error
-    driver, run = await run_task(AppConfig.model_validate(data), tmp_path, (None, None))
+    driver, run = await run_task(AppConfig.model_validate(data), tmp_path, (None, None), runtime)
 
     assert (run.status, run.paused_reason) == (RunStatus.WAITING_HUMAN, "execution_error")
     assert driver.store.pending_approval(run.id).payload["error_kind"] == "provider_credentials_missing"

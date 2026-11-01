@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 harness = ["openai-codex==0.163.0", "claude-agent-sdk==0.2.173"]
-adk = ["google-adk>=1.0"]
+adk = ["google-adk==2.11.0"]
 postgres = [] # compatibility: PostgreSQL is now a core capability
 
 [dependency-groups]

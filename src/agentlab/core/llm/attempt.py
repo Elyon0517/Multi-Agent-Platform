@@ -1,6 +1,7 @@
-"""One metered model call: budget reservation, retries, attempt records and usage accounting.
+"""Per-call primitives shared by every runtime that talks to the gateway.
 
-Shared by every runtime that talks to the gateway, so retry and billing semantics stay identical.
+`metered_call` is one model call with budget reservation, retries, attempt records and usage accounting;
+`invoke_tool` is one recorded tool call. Sharing them keeps retry, billing and tool semantics identical.
 """
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from agentlab.core.budget import estimate_cents
+from agentlab.core.budget import BudgetExceeded, estimate_cents
 from agentlab.core.config import AppConfig
 from agentlab.core.llm.retry import AttemptLog, LlmError, call_with_retry
 from agentlab.core.monitor import commit_usage
@@ -169,3 +170,35 @@ async def metered_call(
 
     completion = await call_with_retry(attempt, cfg.retry.llm_call, log, check_attempt, on_timeout=timed_out)
     return completion, usage
+
+
+TOOL_RESULT_LIMIT = 16384
+
+
+async def invoke_tool(ctx: RunContext, role: str, call_id: str, name: str, arguments: str) -> Any:
+    """Run one model-requested tool; returns the JSON-safe value to send back to the model."""
+    assert ctx.execute_tool is not None
+    ctx.check_budget(0)
+    entry: dict[str, Any] = {"id": call_id, "name": name, "arguments": arguments, "role": role}
+    if ctx.record_tool:
+        ctx.record_tool({**entry, "status": "started"})
+    value: Any
+    try:
+        args = json.loads(arguments)
+        if not isinstance(args, dict):
+            raise ValueError("arguments must be an object")
+        value = await ctx.execute_tool(name, args)
+    except BudgetExceeded:
+        raise
+    except Exception as exc:
+        if isinstance(exc, PermissionError) and role != "root":
+            if ctx.record_tool:
+                ctx.record_tool({**entry, "status": "failed", "error": type(exc).__name__})
+            raise
+        value = {"error": getattr(exc, "kind", type(exc).__name__)}
+    result_text = json.dumps(value, ensure_ascii=False)
+    if len(result_text.encode("utf-8")) > TOOL_RESULT_LIMIT:
+        value = {"truncated": True, "preview": result_text.encode("utf-8")[:7000].decode("utf-8", errors="ignore")}
+    if ctx.record_tool:
+        ctx.record_tool({**entry, "status": "completed", "result": value})
+    return value

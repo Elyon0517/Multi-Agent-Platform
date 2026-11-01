@@ -1,6 +1,6 @@
 # ADK Runtime 设计方案（Route C）
 
-> 状态：设计稿，未实现。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
+> 状态：P1、P2 已实现；P3（`ParallelAgent` 评审团）待实现。对应 DISCOVERY.md §二 / ADR-001 中「Google ADK 作为 Agent 执行层」以及 §16 中 `AdkRuntime` 占位项。
 
 ## 1. 目标与边界
 
@@ -36,17 +36,16 @@ flowchart TD
 
 ```
 src/agentlab/adapters/runtime/adk/
-├── __init__.py     # AdkRuntime：实现 AgentRuntime 协议，唯一对外入口
-├── agents.py       # 角色 → LlmAgent 的构建（prompt、工具、输出 schema）
+├── __init__.py     # AdkRuntime / AdkCaller：实现 AgentRuntime 协议，唯一对外入口；最终输出校验与 repair
+├── agents.py       # 角色 → LlmAgent 的构建（prompt、工具）
 ├── model.py        # AgentLabLlm(BaseLlm)：把 ADK 的模型调用接到现有 gateway + 重试 + 记账
-├── tools.py        # 把 ctx.tool_factory(role) 的工具适配为 ADK BaseTool
-└── output.py       # 最终输出 → output_type 校验与 repair
+└── tools.py        # 把 ctx.tool_factory(role) 的工具适配为 ADK BaseTool
 ```
 
 依赖方向（只允许向下）：
 
 ```
-adk/__init__.py ──▶ agents.py ──▶ model.py, tools.py, output.py
+adk/__init__.py ──▶ agents.py, model.py, tools.py
         │                              │
         └──────────────▶ agentlab.core（routing / retry / budget / monitor / schemas）
 ```
@@ -56,15 +55,16 @@ adk/__init__.py ──▶ agents.py ──▶ model.py, tools.py, output.py
 ### 4.1 `AdkRuntime`（`__init__.py`）
 
 ```python
+class AdkCaller(StructuredCaller):
+    # 继承：工具授权解析、Router alias 链、RetriesExhausted 换 alias、AgentResult 组装、ctx.on_result
+    # 只重写 _call_alias：在一个 alias 上构建 LlmAgent → Runner.run_async，
+    # 取最终文本校验 output_type，失败则在同一 session 追加 repair 消息
+
 class AdkRuntime:
     def __init__(self, cfg: AppConfig, chat: ChatFn) -> None: ...
 
     async def run_agent(self, role, inp, output_type, ctx) -> AgentResult[T]:
-        # 1. Router.resolve(role) 得到 alias 链（与 StructuredCaller 相同）
-        # 2. 对链上每个 alias：build_agent(role, alias, ...) → Runner.run_async
-        #    alias 的 RetriesExhausted → 换下一个 alias，与 raw 路线语义一致
-        # 3. 从最终事件取文本 → output.parse(output_type)，必要时 repair
-        # 4. 组装 AgentResult（alias / model / usage / attempts / routing_reason），回调 ctx.on_result
+        return await self._caller.call(role, inp, output_type, ctx)
 
     async def run_parallel(self, inputs, output_type, ctx) -> list[AgentResult[T]]:
         # 用 ParallelAgent(sub_agents=[每个 reviewer 一个 LlmAgent]) 跑评审团
@@ -81,10 +81,9 @@ class AdkRuntime:
 | ADK 字段 | 来源 |
 |---|---|
 | `name` | 角色名（`coder`、`arch-reviewer` …，`-` 替换为 `_`） |
-| `instruction` | `cfg.prompt(role)`（已被 Driver 冻结到 `frozen_prompts`）+ 输出 schema 说明 |
+| `instruction` | `cfg.prompt(role)`（已被 Driver 冻结到 `frozen_prompts`），以 instruction provider 传入，绕开 ADK 的 `{state}` 模板替换（prompt 里有 JSON 花括号）。ADK 会在末尾追加一行 `You are an agent. Your internal name is "<role>".` |
 | `model` | `AgentLabLlm(alias)` |
 | `tools` | `tools.adapt(ctx.tool_factory(role))`，授权仍由 `config/agents/*.yaml` 的 `tool_grants` 决定 |
-| `generate_content_config` | `temperature` 来自 `model_policy.yaml`，`max_output_tokens` 来自 alias |
 | 用户消息 | `render_user_message(inp)`，与 raw 路线完全相同 |
 
 reviewer 的 `kind: reviewer` 决定它们进入 `run_parallel`；这一点由 Driver 决定，`agents.py` 不做判断。
@@ -107,7 +106,11 @@ ADK LlmAgent ──▶ AgentLabLlm.generate_content_async(llm_request)
 - 重试、预算熔断、usage 记账、attempt 记录都是确定性逻辑，现在已在 `core/llm/` 里稳定运行，并且 Monitor、断点恢复都依赖这些记录。用 `LiteLlm` 意味着在 ADK callback 里重写一遍，而 callback 无法表达「这次调用失败后重试」。
 - 包一层 `BaseLlm` 后，raw 和 adk 两条路线的计费与失败语义一致，Monitor 和 eval 结果可以直接对比。
 
-需要把 `StructuredCaller._call_alias` 中「单次模型调用 + 重试 + 记账」这一段抽成一个公共函数（例如 `core/llm/attempt.py::metered_call`），raw 路线与 `AgentLabLlm` 共同调用。这是本方案对 core 唯一的改动，属于纯重构，raw 路线行为不变。
+`temperature`、`max_output_tokens` 和输出 schema 由 `AgentLabLlm` 按 route / alias 直接传给 gateway，与 raw 路线一致；工具列表取 `ctx.tool_specs`（与注册给 ADK 的工具是同一组）。
+
+ADK 的 `types.Content` 装不下两样东西：模型原始的工具参数文本（参数不是合法 JSON 时 raw 路线会把原文交给工具执行器报错），以及 Anthropic 带签名的 thinking 块（工具调用轮必须原样回放）。它们按工具调用 id 存在单次调用的 `CallState` 里，回放时再还原。
+
+`core/llm/attempt.py` 提供两个共享原语：`metered_call`（单次模型调用 + 重试 + 预算 + 记账）和 `invoke_tool`（单次工具调用 + 记录 + 错误映射 + 结果截断）。raw 路线的 `StructuredCaller` 与 ADK 路线共同调用它们，这是本方案对 core 的全部改动，属于纯重构，raw 路线行为不变。
 
 ### 4.4 工具适配（`tools.py`）
 
@@ -123,12 +126,12 @@ class GrantedTool(BaseTool):      # 每个 tool spec 一个实例
 ```
 
 - 工具的授权、危险操作审批、`workspace_write` 的编辑日志都在现有 `execute` 里，适配层只做格式转换，不另做权限判断。
+- ADK 的 function response 必须是对象；非对象结果包在私有键 `_agentlab_value` 下，`AgentLabLlm` 回放前解包，模型看到的内容与 raw 路线逐字节一致。
 - 外部 MCP 工具已经由 Driver 的 `hooks.external_tools` 合并进 `tool_factory`，所以第一版不使用 ADK 的 `MCPToolset`，避免同一个 MCP server 出现两条接入路径。
 
-### 4.5 结构化输出（`output.py`）
+### 4.5 结构化输出
 
-- 没有工具的角色（如 summarizer、arbiter）：设置 `output_schema=output_type`，ADK 原生约束输出。
-- 有工具的角色（coder、reviewer、root）：ADK 中 `output_schema` 与工具同时使用受模型支持程度限制，因此只在 instruction 中给出 schema，最终文本由 `output_type.model_validate_json` 校验；失败时在同一 session 追加一轮 repair 消息，次数复用 `retry.structured_output_repair.max_repairs`。
+不使用 ADK 的 `output_schema`。schema 与 raw 路线一样经 gateway 的 `schema` 参数下发（JSON 模式 + system 中的 schema 说明），`AgentLabLlm` 声明 `output_schema_and_tools=False`。最终文本由 `output_type.model_validate_json` 校验；失败时在同一 session 追加一轮 repair 消息，次数复用 `retry.structured_output_repair.max_repairs`。这样有工具和无工具的角色走同一条路径。
 
 ### 4.6 评审团并行（ADK 的 multi-agent 分工）
 
@@ -152,9 +155,10 @@ flowchart LR
 | 文件 | 改动 |
 |---|---|
 | `adapters/runtime/adk.py` | 删除，替换为 `adapters/runtime/adk/` 包 |
-| `core/llm/structured.py` | 抽出 `metered_call`（单次调用 + 重试 + 预算 + 记账），行为不变 |
-| `bootstrap.py::runtime` | `adk` 分支改为 `AdkRuntime(cfg, raw.chat)`，与 raw 共用 chat |
-| `pyproject.toml` | `adk = ["google-adk==<锁定版本>"]`，与 harness extra 一样锁定精确版本 |
+| `core/llm/structured.py` | 改为调用 `core/llm/attempt.py` 的 `metered_call` / `invoke_tool`，行为不变 |
+| `bootstrap.py::runtime` | `adk` 分支改为 `AdkRuntime(cfg, raw.chat)`，与 raw 共用 chat；未安装 ADK 时抛 `AdkUnavailable`（`MissingGatewayConfig` 子类，API 返回 400） |
+| `pyproject.toml` | `adk = ["google-adk==2.11.0"]`，与 harness extra 一样锁定精确版本 |
+| `.github/workflows/checks.yml` | Python 任务 `uv sync --frozen --extra adk`，ADK 测试在 CI 中实际运行 |
 | `docs/DISCOVERY.md` | 实现完成后更新 §16 状态表与 ADR |
 
 Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和 summarizer 也通过 `svc.runtime()` 取 runtime，因此选择 `adk` 时它们同样走 ADK，无需额外分支。
@@ -171,7 +175,8 @@ Driver、Arbiter、Gate、Store、API、UI 都不需要改动。Root session 和
 | 单元 | 用假的 `chat` 驱动 `AgentLabLlm`：重试分类、预算预留与释放、usage 记账、attempt 记录与 raw 路线逐字段一致 |
 | 单元 | `tools.py`：工具调用经过 `execute`，`record_tool` 的 started/completed 事件齐全；未授权工具不可见 |
 | 单元 | `run_parallel`：一个 reviewer 失败时其余结果保留，抛出 `ParallelFailure` |
-| 契约 | 同一组 fake 回复下，`raw` 与 `adk` 两个 runtime 跑完 `tests/unit/test_driver.py` 的核心场景，最终 Run 状态、Verdict、usage 合计一致 |
+| 契约 | `tests/unit/test_adk_runtime.py`：同一组 gateway 回复分别喂给 raw 与 ADK，比较 gateway 收到的每次请求、工具执行、usage、attempt 与最终 `AgentResult` |
+| 端到端 | `tests/unit/test_acceptance_cross_provider.py` 的 Driver 场景按 `raw` / `adk` 参数化：跨厂商交接、Claude 故障回退 GPT、缺少凭证暂停 |
 | 离线 eval | `evals/baseline.json` 分别用 `--runtime raw` 与 `--runtime adk` 跑，对比成功率与成本 |
 | live（可选） | `tests/live/` 增加一条 ADK 真实网关冒烟测试，默认跳过 |
 
