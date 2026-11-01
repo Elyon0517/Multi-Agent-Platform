@@ -27,6 +27,7 @@
   <a href="#架构">架构</a> ·
   <a href="#测试">测试</a> ·
   <a href="#参与贡献">参与贡献</a><br>
+  <a href="#google-adk-运行时">Google ADK 模式</a> ·
   <a href="#原生-sdk-工作流">SDK 工作流</a> ·
   <a href="docs/DISCOVERY.md">设计文档</a> ·
   <a href="docs/ACCEPTANCE.md">验收清单</a>
@@ -37,6 +38,11 @@
 > **欢迎一起共创！** 项目目前仍处于 Alpha 阶段，功能、交互和文档都还在完善。
 > 无论是反馈问题、修复缺陷、补充测试和文档，还是提出设计想法，都非常欢迎。
 > 参与方式见[贡献指南](#参与贡献)。
+
+> **新增：Google ADK 模式。** 智能体现在可以改用 [Google ADK](https://google.github.io/adk-docs/) 运行，
+> 循环驱动、模型、预算与审批保持不变。先运行 `uv sync --extra adk` 安装，
+> 再在 **设置 → 智能体运行时** 勾选 **使用 Google ADK 运行智能体**，或在命令行传入 `--runtime adk`。
+> 详见 [Google ADK 运行时](#google-adk-运行时)。
 
 ## 看团队如何完成任务
 
@@ -95,6 +101,7 @@ npm run test:showcase
 - **可积累的记忆。** 支持全局、项目和智能体级记忆。总结智能体将反馈和评审发现转为带版本的经验；可上传 PDF、Markdown 或文本用于检索。
 - **本地优先。** 仓库保留在本机，默认使用本地 CPU 模型完成向量嵌入和重排；语言模型调用会发送至配置的模型服务。
 - **过程可观察。** 像素办公室、运行时间线、检查诊断，以及按智能体统计用量的监控面板。
+- **可选运行方式。** 默认使用内置运行时，也可在设置中一键切换为 Google ADK；编排、评审与记账保持不变。
 
 ## 架构
 
@@ -308,8 +315,17 @@ Claude 使用另一个绑定源码版本的只读副本。仅允许读取、匹�
 
 ```bash
 uv sync --extra adk
+uv run --extra adk agentlab serve   # 保留 --extra adk，服务才能加载 ADK
+```
+
+在控制台打开 **设置 → 智能体运行时**，勾选 **使用 Google ADK 运行智能体**。选择会保存到 `.env`
+（`AGENTLAB_RUNTIME`），重启后仍然生效，对新任务和 Root 回复生效；已在运行的任务保持启动时的运行时。
+取消勾选即可回到内置运行时。未安装 ADK 时，复选框不可用，并显示安装命令。
+
+也可以在命令行中按任务或按进程指定：
+
+```bash
 uv run --extra adk agentlab run 'Fix the failing test' --workspace /absolute/path/to/repo --runtime adk
-# 启动 API 与界面所需的服务：
 AGENTLAB_RUNTIME=adk uv run --extra adk agentlab serve
 ```
 

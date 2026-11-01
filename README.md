@@ -27,6 +27,7 @@
   <a href="#architecture">Architecture</a> ·
   <a href="#testing">Testing</a> ·
   <a href="#contributing">Contributing</a><br>
+  <a href="#google-adk-runtime-route-c">Google ADK mode</a> ·
   <a href="#native-sdk-workflow-route-b">SDK workflow</a> ·
   <a href="docs/DISCOVERY.md">Design doc</a> ·
   <a href="docs/ACCEPTANCE.md">Acceptance checklist</a>
@@ -37,6 +38,11 @@
 > **Let’s build this together.** This project is still in Alpha: features, workflows and documentation are
 > evolving, and there are rough edges. Contributions of all sizes are welcome, including bug reports, tests,
 > documentation, design ideas and code. See [Contributing](#contributing) to get started.
+
+> **New: Google ADK mode.** Agents can now run on [Google ADK](https://google.github.io/adk-docs/) instead of
+> the built-in loop, with the same Driver, models, budget and approvals. Install it with `uv sync --extra adk`,
+> then tick **Settings → Agent runtime → Use Google ADK** or pass `--runtime adk`.
+> See [Google ADK runtime](#google-adk-runtime-route-c).
 
 ## See the team converge
 
@@ -104,6 +110,8 @@ npm run test:showcase
 - **Local first.** Your repository stays on your machine. Embeddings and reranking run on local CPU models by
   default; only LLM calls leave the machine.
 - **Observable.** A live pixel office, run timelines, Gate diagnostics and a per-agent token Monitor.
+- **Choose how agents run.** The built-in runtime by default, or Google ADK with one switch in Settings;
+  orchestration, review and accounting stay the same.
 
 ## Architecture
 
@@ -334,8 +342,18 @@ agent to completion.
 
 ```sh
 uv sync --extra adk
+uv run --extra adk agentlab serve   # keep --extra adk so the server can load ADK
+```
+
+In the console, open **Settings → Agent runtime** and tick **Use Google ADK to run agents**. The choice is
+saved to `.env` (`AGENTLAB_RUNTIME`), survives restarts and applies to new runs and Root replies; runs already
+in progress keep the runtime they started with. Untick it to return to the built-in runtime. If ADK is not
+installed, the checkbox is disabled and shows the install command.
+
+From the terminal, choose it per run or per process instead:
+
+```sh
 uv run --extra adk agentlab run 'Fix the failing test' --workspace /absolute/path/to/repo --runtime adk
-# API/UI process:
 AGENTLAB_RUNTIME=adk uv run --extra adk agentlab serve
 ```
 
